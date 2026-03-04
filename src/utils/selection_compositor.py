@@ -1,106 +1,80 @@
-"""
-selection_compositor.py
-
-Composites a text-selection highlight onto a rendered PDF page image using
-real alpha blending.  Produces a tk.PhotoImage ready to display on a Canvas.
-
-The function is intentionally standalone — it has no dependencies on any
-GUI or tool class so it can be unit-tested independently.
-
-Usage
------
-    from src.gui.utils.selection_compositor import composite_selection
-
-    tk_image = composite_selection(
-        ppm_bytes   = page.render_to_ppm(scale=scale),
-        rects       = [(x0, y0, x1, y1), ...],   # PDF-space points
-        scale       = scale_factor,
-        color       = (74, 144, 217),              # RGB 0-255, default blue
-        alpha       = 0.35,                        # 0.0 transparent – 1.0 opaque
-    )
-    canvas.create_image(ox, oy, anchor=NW, image=tk_image)
-"""
+# src/utils/selection_compositor.py
 
 from __future__ import annotations
 
 import io
 import tkinter as tk
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 
-# Default selection blue — matches _HL_FILL in select_tool but as RGB ints
+# Default selection blue
 _DEFAULT_COLOR = (74, 144, 217)
 _DEFAULT_ALPHA = 0.35
 
 
 def composite_selection(
     ppm_bytes: bytes,
-    rects: list[tuple[float, float, float, float]],
-    scale: float,
+    rects: list[tuple[float, float, float, float]] = None,
+    scale: float = 1.0,
     color: tuple[int, int, int] = _DEFAULT_COLOR,
     alpha: float = _DEFAULT_ALPHA,
+    layers: list[dict] = None,
 ) -> tk.PhotoImage:
     """
-    Blend a list of semi-transparent highlight rectangles onto a page image.
+    Blend semi-transparent highlight rectangles onto a page image.
+    Uses a 'Multiply' blend mode so dark text remains crisp and readable.
 
-    Parameters
-    ----------
-    ppm_bytes : bytes
-        Raw PPM output from PDFPage.render_to_ppm().
-    rects : list of (x0, y0, x1, y1)
-        Selection rectangles in PDF user-space points (not scaled).
-    scale : float
-        The scale factor used to render ppm_bytes (same as ctx.scale).
-        Used to convert PDF points → image pixels.
-    color : (R, G, B) ints 0-255
-        Highlight colour.  Defaults to a pleasant selection blue.
-    alpha : float 0.0-1.0
-        Opacity of the highlight layer.  0.35 looks natural.
-
-    Returns
-    -------
-    tk.PhotoImage
-        A new PhotoImage with the highlight baked in, ready for the canvas.
+    `layers` format: [{"rects": [...], "color": (R, G, B), "alpha": 0.5}, ...]
     """
-    # Decode PPM → RGBA so we can composite
+    # Decode PPM → RGBA
     base = Image.open(io.BytesIO(ppm_bytes)).convert("RGBA")
 
-    if not rects:
-        # No selection — skip compositing entirely
+    if not rects and not layers:
         return _pil_to_photoimage(base)
 
-    # Build a transparent overlay the same size as the page image
-    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    draw    = ImageDraw.Draw(overlay)
+    all_layers = layers or []
+    if rects:
+        all_layers.insert(0, {"rects": rects, "color": color, "alpha": alpha})
 
-    fill_a = int(alpha * 255)
-    fill   = (*color, fill_a)          # RGBA
+    result = base
+    
+    for layer in all_layers:
+        layer_alpha = layer.get("alpha", _DEFAULT_ALPHA)
+        layer_color = layer.get("color", _DEFAULT_COLOR)
+        layer_rects = layer.get("rects", [])
+        
+        if not layer_rects:
+            continue
 
-    for x0, y0, x1, y1 in rects:
-        # Convert PDF points to image pixels
-        px0 = int(x0 * scale)
-        py0 = int(y0 * scale)
-        px1 = int(x1 * scale)
-        py1 = int(y1 * scale)
+        # Create a pure white canvas for the multiply effect
+        mult_layer = Image.new("RGB", base.size, (255, 255, 255))
+        draw = ImageDraw.Draw(mult_layer)
+        
+        for x0, y0, x1, y1 in layer_rects:
+            px0 = int(x0 * scale)
+            py0 = int(y0 * scale)
+            px1 = int(x1 * scale)
+            py1 = int(y1 * scale)
 
-        # Guard against degenerate rects
-        if px1 <= px0:
-            px1 = px0 + 1
-        if py1 <= py0:
-            py1 = py0 + 1
+            # Guard against degenerate rects
+            if px1 <= px0: px1 = px0 + 1
+            if py1 <= py0: py1 = py0 + 1
 
-        draw.rectangle([px0, py0, px1, py1], fill=fill)
+            draw.rectangle([px0, py0, px1, py1], fill=layer_color)
 
-    # Alpha-composite the overlay onto the base image
-    composited = Image.alpha_composite(base, overlay)
+        # Multiply the color layer with the current image
+        # White areas become the layer_color, black areas remain black
+        multiplied = ImageChops.multiply(result.convert("RGB"), mult_layer).convert("RGBA")
+        
+        # Blend the multiplied version over the original based on the alpha value
+        # This acts as an "opacity" slider for the multiply effect
+        result = Image.blend(result, multiplied, layer_alpha)
 
-    return _pil_to_photoimage(composited)
+    return _pil_to_photoimage(result)
 
 
 def ppm_to_photoimage(ppm_bytes: bytes) -> tk.PhotoImage:
     """
     Convert raw PPM bytes directly to a tk.PhotoImage (no highlighting).
-    Drop-in replacement for ``tk.PhotoImage(data=ppm_bytes)`` that avoids
-    Tkinter's slow built-in PPM decoder on large pages.
     """
     return tk.PhotoImage(data=ppm_bytes)
 

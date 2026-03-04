@@ -100,14 +100,14 @@ class RedactTool(BaseTool):
 
     def activate(self):
         self.ctx.canvas.config(cursor="crosshair")
-        # Re-draw overlays for the current page when re-activating
-        if self._all_hits:
-            self._redraw_page_overlays()
 
     def deactivate(self):
         self._cancel_drag()
         self._cancel_draw_confirm()
-        self._clear_page_overlays()
+        # Wipe highlights from the screen if leaving the tool
+        if self._all_hits and hasattr(self.ctx, "invalidate_cache"):
+            self.ctx.invalidate_cache(self.ctx.current_page)
+            self.ctx.render()
 
     # ── draw-mode events ──────────────────────────────────────────────────────
 
@@ -231,13 +231,9 @@ class RedactTool(BaseTool):
     # ── multi-page search public API ──────────────────────────────────────────
 
     def search_all_pages(self, query: str, case_sensitive: bool = False) -> int:
-        """
-        Search every page for *query*.  Populates self._all_hits and sets the
-        current hit to the first hit on or after the currently visible page.
-
-        Returns total number of hits across all pages.
-        """
-        self._clear_page_overlays()
+        if self._all_hits and hasattr(self.ctx, "invalidate_cache"):
+            self.ctx.invalidate_cache(self.ctx.current_page)
+            
         self._all_hits    = []
         self._cur_hit_idx = -1
 
@@ -257,7 +253,6 @@ class RedactTool(BaseTool):
             self._notify_hit_changed()
             return 0
 
-        # Start from the first hit on the current page, or the first hit overall
         current_page = self.ctx.current_page
         start_idx    = 0
         for i, (pg, _) in enumerate(self._all_hits):
@@ -270,29 +265,24 @@ class RedactTool(BaseTool):
         return len(self._all_hits)
 
     def navigate_next(self):
-        """Advance to the next hit (wraps around)."""
         if not self._all_hits:
             return
         self._cur_hit_idx = (self._cur_hit_idx + 1) % len(self._all_hits)
         self._go_to_current_hit(jump_page=True)
 
     def navigate_prev(self):
-        """Go back to the previous hit (wraps around)."""
         if not self._all_hits:
             return
         self._cur_hit_idx = (self._cur_hit_idx - 1) % len(self._all_hits)
         self._go_to_current_hit(jump_page=True)
 
     def redact_current_hit(self) -> bool:
-        """Redact only the currently focused hit."""
         if self._cur_hit_idx < 0 or not self._all_hits:
             return False
+            
         page_idx, rect = self._all_hits[self._cur_hit_idx]
-        # Remove from hit list before redacting so overlays stay consistent
         self._all_hits.pop(self._cur_hit_idx)
         self._cur_hit_idx = min(self._cur_hit_idx, len(self._all_hits) - 1)
-
-        self._clear_page_overlays()
 
         cmd = RedactCommand(
             self._service, self.ctx.doc,
@@ -302,7 +292,7 @@ class RedactTool(BaseTool):
         )
         try:
             cmd.execute()
-            self.ctx.push_history(cmd)
+            self.ctx.push_history(cmd) # This handles cache invalidation internally
         except Exception as ex:
             cmd.cleanup()
             messagebox.showerror("Redaction Error", str(ex))
@@ -311,7 +301,6 @@ class RedactTool(BaseTool):
         self.ctx.flash_status("✓ Match redacted")
         self.ctx.render()
 
-        # Re-draw remaining overlays
         if self._all_hits:
             self._go_to_current_hit(jump_page=True)
         else:
@@ -319,18 +308,15 @@ class RedactTool(BaseTool):
         return True
 
     def redact_all_hits(self) -> bool:
-        """Redact every hit across all pages in a single undoable step per page."""
         if not self._all_hits:
             return False
 
-        # Group hits by page so we use one BulkRedactCommand per page
         from collections import defaultdict
         by_page: dict[int, list] = defaultdict(list)
         for page_idx, rect in self._all_hits:
             by_page[page_idx].append(rect)
 
         total = len(self._all_hits)
-        self._clear_page_overlays()
         self._all_hits    = []
         self._cur_hit_idx = -1
 
@@ -358,11 +344,25 @@ class RedactTool(BaseTool):
         return True
 
     def cancel_search(self):
-        """Clear all search state without redacting."""
-        self._clear_page_overlays()
         self._all_hits    = []
         self._cur_hit_idx = -1
+        if hasattr(self.ctx, "invalidate_cache"):
+            self.ctx.invalidate_cache(self.ctx.current_page)
+        self.ctx.render()
         self._notify_hit_changed()
+
+    def get_highlight_rects_for_page(self, page_idx: int) -> tuple[list, list]:
+        """Returns (active_hit_rects, inactive_hit_rects) for the image compositor."""
+        active = []
+        inactive = []
+        for hit_idx, (p_idx, rect) in enumerate(self._all_hits):
+            if p_idx != page_idx:
+                continue
+            if hit_idx == self._cur_hit_idx:
+                active.append(rect)
+            else:
+                inactive.append(rect)
+        return active, inactive
 
     @property
     def has_search_hits(self) -> bool:
@@ -385,73 +385,24 @@ class RedactTool(BaseTool):
     # ── internals ─────────────────────────────────────────────────────────────
 
     def _go_to_current_hit(self, jump_page: bool = False):
-        """
-        Navigate to the page of the current hit (if needed), redraw overlays,
-        and scroll the canvas so the current hit is visible.
-        """
         if self._cur_hit_idx < 0 or not self._all_hits:
             self._notify_hit_changed()
             return
 
         cur_page, cur_rect = self._all_hits[self._cur_hit_idx]
 
-        # Jump to the hit's page if we're not already there
+        # Invalidate the cache for the target page so the new highlight bakes in
+        if hasattr(self.ctx, "invalidate_cache"):
+            self.ctx.invalidate_cache(cur_page)
+
         if jump_page and cur_page != self.ctx.current_page:
             if self._on_navigate_page:
                 self._on_navigate_page(cur_page)
-            # _redraw_page_overlays will be called after the page renders via
-            # activate(); we still call it here as a fallback.
+        else:
+            self.ctx.render()
 
-        self._redraw_page_overlays()
         self._scroll_to_rect(cur_rect)
         self._notify_hit_changed()
-
-    def _redraw_page_overlays(self):
-        """
-        Draw purple overlays for all hits on the current page, and a yellow
-        overlay for the current (focused) hit if it's on this page.
-        """
-        self._clear_page_overlays()
-        if not self._all_hits:
-            return
-
-        current_page = self.ctx.current_page
-        ox = self.ctx.page_offset_x
-        oy = self.ctx.page_offset_y
-        s  = self.ctx.scale
-        c  = self.ctx.canvas
-
-        for i, (page_idx, (x0, y0, x1, y1)) in enumerate(self._all_hits):
-            if page_idx != current_page:
-                continue
-
-            is_current = (i == self._cur_hit_idx)
-            outline  = _CUR_OUTLINE  if is_current else _HIT_OUTLINE
-            fill     = _CUR_FILL     if is_current else _HIT_FILL
-            stipple  = _CUR_STIPPLE  if is_current else _HIT_STIPPLE
-            tag      = "redact_cur"  if is_current else "redact_hit"
-
-            cx0 = ox + x0 * s
-            cy0 = oy + y0 * s
-            cx1 = ox + x1 * s
-            cy1 = oy + y1 * s
-            iid = c.create_rectangle(
-                cx0, cy0, cx1, cy1,
-                outline=outline, width=2,
-                fill=fill, stipple=stipple,
-                tags=("redact_overlay", tag),
-            )
-            self._hit_overlay_ids.append(iid)
-
-    def _clear_page_overlays(self):
-        c = self.ctx.canvas
-        for iid in self._hit_overlay_ids:
-            try:
-                c.delete(iid)
-            except Exception:
-                pass
-        self._hit_overlay_ids = []
-        c.delete("redact_overlay")
 
     def _scroll_to_rect(self, rect: tuple):
         """Scroll the canvas so *rect* (PDF-space) is roughly centred."""

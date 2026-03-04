@@ -1,36 +1,10 @@
-"""
-SelectTextTool — click-drag text selection with character-level precision.
-
-Architecture
-------------
-This tool owns ONLY selection state — it never draws canvas items.
-The highlight is rendered by compositing a semi-transparent blue rectangle
-directly into the PIL page image before it becomes a tk.PhotoImage.
-This gives a perfectly smooth, anti-aliased highlight identical to a browser
-or native PDF viewer.
-
-The rendering pipeline calls ``get_highlight_rects_for_page(page_idx)`` to
-retrieve the current selection as a list of PDF-space (x0,y0,x1,y1) rects
-(one per line), then blends them onto the image with PIL before display.
-
-Whenever the selection changes the tool calls ``ctx.render()`` so the window
-re-runs its normal render path — the compositing happens automatically.
-
-Interaction model
------------------
-• Mouse-down  : anchor the selection start at the nearest character.
-• Mouse-drag  : extend selection live; re-renders on every motion event.
-• Mouse-up    : finalise; auto-copies to clipboard if text was selected.
-• Click empty : clears selection.
-• Ctrl+C      : explicit copy.
-• on_motion() : ibeam cursor over text, arrow elsewhere.
-"""
+# src/gui/tools/select_tool.py
 
 from __future__ import annotations
 
 import tkinter as tk
 from src.gui.tools.base_tool import BaseTool
-from src.gui.theme import PALETTE
+from src.gui.theme import PALETTE, PAD_XL
 
 
 class SelectTextTool(BaseTool):
@@ -39,9 +13,7 @@ class SelectTextTool(BaseTool):
         super().__init__(ctx)
         self._root = root
 
-        # Flat list of character records for the current page.
-        # Each entry: {"bbox": (x0,y0,x1,y1), "c": str,
-        #              "line_idx": int, "block_idx": int}
+        # Flat list of character records for the locked page.
         self._chars: list[dict] = []
 
         # Anchor (mouse-down) and head (current drag end) indices into _chars
@@ -53,23 +25,34 @@ class SelectTextTool(BaseTool):
         # Track the last rendered selection so we only re-render on change
         self._last_rendered_range: tuple[int, int] | None = None
 
+        # Lock state for the page currently being interacted with.
+        # This prevents continuous scrolling from shifting the math underneath the tool.
+        self._active_page_idx: int | None = None
+        self._active_offset_x: float = 0.0
+        self._active_offset_y: float = 0.0
+        self._active_scale: float = 1.0
+
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def activate(self) -> None:
         self.ctx.canvas.config(cursor="ibeam")
-        self._load_chars()
+        # Defer loading characters until the user actually interacts or hovers
+        self._chars = []
+        self._active_page_idx = None
 
     def deactivate(self) -> None:
-        # Clear selection and force a clean render to remove the highlight
         had_selection = self._anchor_idx is not None
         self._chars      = []
         self._anchor_idx = None
         self._head_idx   = None
         self._dragging   = False
         self._last_rendered_range = None
+        page_to_invalidate = self._active_page_idx
+        self._active_page_idx = None
+        
         if had_selection:
-            if hasattr(self.ctx, "invalidate_cache"):
-                self.ctx.invalidate_cache(self.ctx.current_page)
+            if hasattr(self.ctx, "invalidate_cache") and page_to_invalidate is not None:
+                self.ctx.invalidate_cache(page_to_invalidate)
             self.ctx.render()
 
     def reload(self) -> None:
@@ -79,22 +62,20 @@ class SelectTextTool(BaseTool):
         self._head_idx    = None
         self._dragging    = False
         self._last_rendered_range = None
-        if had_selection and hasattr(self.ctx, "invalidate_cache"):
-            self.ctx.invalidate_cache(self.ctx.current_page)
-        self._load_chars()
+        if had_selection and hasattr(self.ctx, "invalidate_cache") and self._active_page_idx is not None:
+            self.ctx.invalidate_cache(self._active_page_idx)
+        # We don't blind-load chars here anymore; we lazy load on interaction
 
     # ── public API for the render pipeline ────────────────────────────────────
 
     def get_highlight_rects_for_page(self, page_idx: int) -> list[tuple]:
         """
-        Return a list of (x0, y0, x1, y1) rects in PDF user-space points,
-        one per selected line, for the given page.
-
-        Returns [] when there is no selection or the selection is on a
-        different page.  Called by main_window during render.
+        Return a list of (x0, y0, x1, y1) rects in PDF user-space points.
+        Checks against the tool's locked active page, not the global current page.
         """
-        if page_idx != self.ctx.current_page:
+        if self._active_page_idx is None or page_idx != self._active_page_idx:
             return []
+            
         rng = self._selection_range()
         if rng is None:
             return []
@@ -134,6 +115,18 @@ class SelectTextTool(BaseTool):
     # ── mouse events ─────────────────────────────────────────────────────────
 
     def on_click(self, canvas_x: float, canvas_y: float) -> None:
+        page_idx, ox, oy = self._resolve_page_and_offsets(canvas_y)
+        
+        # If we clicked a different page, reload chars for THAT specific page
+        if page_idx != self._active_page_idx or not self._chars:
+            self._active_page_idx = page_idx
+            self._load_chars_for_page(page_idx)
+            
+        # Lock the offsets for the duration of this drag interaction
+        self._active_offset_x = ox
+        self._active_offset_y = oy
+        self._active_scale = self.ctx.scale
+        
         self._dragging   = True
         self._anchor_idx = self._nearest_char(canvas_x, canvas_y)
         self._head_idx   = self._anchor_idx
@@ -160,6 +153,17 @@ class SelectTextTool(BaseTool):
     def on_motion(self, canvas_x: float, canvas_y: float) -> None:
         if self._dragging:
             return
+            
+        # Dynamically switch the loaded page context if we hover over a different page
+        page_idx, ox, oy = self._resolve_page_and_offsets(canvas_y)
+        if page_idx != self._active_page_idx or not self._chars:
+            self._active_page_idx = page_idx
+            self._load_chars_for_page(page_idx)
+            
+        self._active_offset_x = ox
+        self._active_offset_y = oy
+        self._active_scale = self.ctx.scale
+        
         pdf_x, pdf_y = self._canvas_to_pdf(canvas_x, canvas_y)
         over_text = any(
             ch["bbox"][0] <= pdf_x <= ch["bbox"][2] and
@@ -170,22 +174,42 @@ class SelectTextTool(BaseTool):
 
     # ── internals ─────────────────────────────────────────────────────────────
 
+    def _resolve_page_and_offsets(self, cy: float) -> tuple[int, float, float]:
+        """Ask the editor which page is under the cursor and get its exact offsets."""
+        editor = self.ctx._editor
+        if getattr(editor, "_continuous_mode", False) and self.ctx.doc:
+            page_idx = editor._cont_page_at_y(cy)
+            oy = editor._cont_page_top(page_idx)
+            try:
+                p = self.ctx.doc.get_page(page_idx)
+                iw = int(p.width * self.ctx.scale)
+                cw = self.ctx.canvas.winfo_width()
+                ox = max(PAD_XL, (cw - iw) // 2)
+            except Exception:
+                ox = self.ctx.page_offset_x
+            return page_idx, ox, oy
+        else:
+            return self.ctx.current_page, self.ctx.page_offset_x, self.ctx.page_offset_y
+
     def _trigger_render_if_changed(self) -> None:
         """Only call ctx.render() when the selection range actually changes."""
         rng = self._selection_range()
         if rng != self._last_rendered_range:
             self._last_rendered_range = rng
-            # Force the continuous scroll cache to drop the old page image
-            if hasattr(self.ctx, "invalidate_cache"):
-                self.ctx.invalidate_cache(self.ctx.current_page)
+            if hasattr(self.ctx, "invalidate_cache") and self._active_page_idx is not None:
+                self.ctx.invalidate_cache(self._active_page_idx)
             self.ctx.render()
 
-    def _load_chars(self) -> None:
+    def _load_chars_for_page(self, page_idx: int) -> None:
         self._chars = []
         if not self.ctx.doc:
             return
-        page    = self.ctx.doc.get_page(self.ctx.current_page)
-        rawdict = page.get_text_rawdict()
+        try:
+            page = self.ctx.doc.get_page(page_idx)
+            rawdict = page.get_text_rawdict()
+        except Exception:
+            return
+            
         if not rawdict:
             return
 
@@ -264,7 +288,8 @@ class SelectTextTool(BaseTool):
         return "".join(result)
 
     def _canvas_to_pdf(self, cx: float, cy: float) -> tuple[float, float]:
-        ox = self.ctx.page_offset_x
-        oy = self.ctx.page_offset_y
-        s  = self.ctx.scale
+        """Convert using the specific locked coordinates of the active page."""
+        ox = self._active_offset_x
+        oy = self._active_offset_y
+        s  = self._active_scale
         return (cx - ox) / s, (cy - oy) / s

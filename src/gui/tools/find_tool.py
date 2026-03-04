@@ -89,23 +89,21 @@ class FindTool:
         return len(self._hits)
 
     def goto_hit(self, idx: int) -> None:
-        """
-        Navigate to hit *idx* (0-based), draw overlays, publish state.
-        Clamps *idx* to the valid range; wraps around if needed.
-        """
         if not self._hits:
             return
 
         self._current_idx = idx % len(self._hits)
         target_page, _rect = self._hits[self._current_idx]
 
-        # Navigate if needed — use the editor's internal navigate method
-        # via a ctx callback so we don't bypass history clearing.
+        # Invalidate the cache for the new active page before rendering
+        if hasattr(self.ctx, "invalidate_cache"):
+            self.ctx.invalidate_cache(target_page)
+
         if self.ctx.current_page != target_page:
             self.ctx.navigate_to_page(target_page)
-            # navigate_to_page triggers a render; overlays are drawn after.
+        else:
+            self.ctx.render()
 
-        self._draw_overlays_for_page(target_page)
         self._scroll_to_active()
         self._publish_state()
 
@@ -127,25 +125,32 @@ class FindTool:
         self.ctx.set_tool_state(STATE_CLOSED, None)
 
     def clear_overlays(self) -> None:
-        """Remove hit highlight overlays from the canvas."""
-        for iid in self._overlays:
-            try:
-                self.ctx.canvas.delete(iid)
-            except Exception:
-                pass
-        self._overlays      = []
-        self._overlay_page  = None
-        self.ctx.canvas.delete("find_highlight")
+        # Trigger cache invalidation to wipe the highlights cleanly
+        if self._overlay_page is not None:
+            if hasattr(self.ctx, "invalidate_cache"):
+                self.ctx.invalidate_cache(self._overlay_page)
+            self._overlay_page = None
+            self.ctx.render()
 
     def redraw_overlays(self) -> None:
-        """
-        Re-draw overlays for the current page after a render wipes them.
-        Called by the window after every _render() when the find bar is open.
-        """
-        if self._hits and self._current_idx >= 0:
-            target_page, _ = self._hits[self._current_idx]
-            if target_page == self.ctx.current_page:
-                self._draw_overlays_for_page(target_page)
+        pass # Now baked into the image, canvas redrawing is not needed
+
+    def _draw_overlays_for_page(self, page_idx: int) -> None:
+        pass # Now baked into the image, canvas redrawing is not needed
+
+    def get_highlight_rects_for_page(self, page_idx: int) -> tuple[list, list]:
+        """Returns (active_hit_rects, inactive_hit_rects) for the image compositor."""
+        active = []
+        inactive = []
+        self._overlay_page = page_idx
+        for hit_idx, (p_idx, rect) in enumerate(self._hits):
+            if p_idx != page_idx:
+                continue
+            if hit_idx == self._current_idx:
+                active.append(rect)
+            else:
+                inactive.append(rect)
+        return active, inactive
 
     @property
     def is_active(self) -> bool:
@@ -157,32 +162,6 @@ class FindTool:
         return len(self._hits)
 
     # ── internals ─────────────────────────────────────────────────────────────
-
-    def _draw_overlays_for_page(self, page_idx: int) -> None:
-        """Draw all hits on *page_idx*, highlighting the active one."""
-        self.clear_overlays()
-        self._overlay_page = page_idx
-
-        ox = self.ctx.page_offset_x
-        oy = self.ctx.page_offset_y
-        s  = self.ctx.scale
-
-        for hit_idx, (p_idx, (x0, y0, x1, y1)) in enumerate(self._hits):
-            if p_idx != page_idx:
-                continue
-            is_active = (hit_idx == self._current_idx)
-            outline   = _ACTIVE_OUTLINE if is_active else _HIT_OUTLINE
-            fill      = _ACTIVE_FILL    if is_active else _HIT_FILL
-            width     = 2               if is_active else 1
-            iid = self.ctx.canvas.create_rectangle(
-                ox + x0 * s, oy + y0 * s,
-                ox + x1 * s, oy + y1 * s,
-                outline=outline, fill=fill,
-                stipple=_HIT_STIPPLE, width=width,
-                tags="find_highlight",
-            )
-            self._overlays.append(iid)
-
     def _scroll_to_active(self) -> None:
         """Scroll the canvas so the active hit rect is visible."""
         if self._current_idx < 0 or not self._hits:

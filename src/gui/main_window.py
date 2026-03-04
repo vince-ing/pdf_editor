@@ -1308,19 +1308,44 @@ class InteractivePDFEditor:
     
     def _make_page_image(self, ppm: bytes, page_idx: int) -> tk.PhotoImage:
         """
-        Convert raw PPM bytes to a tk.PhotoImage, compositing any active
-        text-selection highlight rectangles directly into the pixel data.
-
-        When the select_text tool is inactive or has no selection for this
-        page, this is essentially free — composite_selection just decodes
-        the PPM and returns immediately with no overlay drawn.
+        Convert raw PPM bytes to a tk.PhotoImage, compositing both 
+        text-selection and search hit highlight rectangles into the pixel data.
         """
-        sel   = self._get_tool("select_text")
-        rects = sel.get_highlight_rects_for_page(page_idx) if sel else []
+        layers = []
+        
+        # 1. Text selection tool
+        sel = self._get_tool("select_text")
+        if sel:
+            sel_rects = sel.get_highlight_rects_for_page(page_idx)
+            if sel_rects:
+                layers.append({
+                    "rects": sel_rects, 
+                    "color": (74, 144, 217), 
+                    "alpha": 0.35
+                })
+
+        # 2. Search / Find / Redact tool hits
+        rt = self._get_tool("redact")
+        if rt and getattr(rt, "has_search_hits", False):
+            if hasattr(rt, "get_highlight_rects_for_page"):
+                active, inactive = rt.get_highlight_rects_for_page(page_idx)
+                if inactive:
+                    layers.append({
+                        "rects": inactive, 
+                        "color": (123, 63, 191), # Purple for inactive hits
+                        "alpha": 0.45
+                    })
+                if active:
+                    layers.append({
+                        "rects": active, 
+                        "color": (255, 184, 0), # Yellow/Orange for the current hit
+                        "alpha": 0.65
+                    })
+
         return composite_selection(
             ppm_bytes=ppm,
-            rects=rects,
             scale=self.scale_factor,
+            layers=layers
         )
 
     def _render_cont_page_refresh(self, page_idx: int) -> None:
