@@ -22,6 +22,7 @@ from src.services.redaction_service import RedactionService
 
 from src.commands.insert_text import InsertTextBoxCommand
 from src.commands.rotate_page import RotatePageCommand
+from src.commands.page_ops import ReorderPagesCommand, DuplicatePageCommand
 
 from src.gui.theme import (
     PALETTE, FONT_MONO, FONT_UI, FONT_LABEL,
@@ -230,6 +231,11 @@ class InteractivePDFEditor:
             get_current_page=lambda: self.current_page_idx,
             on_page_click=self._thumb_page_click,
             root=self.root,
+            on_reorder=self._thumb_reorder,
+            on_add_page=self._thumb_add_page,
+            on_delete_page=self._thumb_delete_page,
+            on_duplicate_page=self._thumb_duplicate_page,
+            on_rotate_page=self._thumb_rotate_page,
         )
         self._build_canvas_area(body)
         self._build_statusbar()
@@ -1129,39 +1135,140 @@ class InteractivePDFEditor:
             return
         self._navigate_to(idx)
 
-    def _rotate(self, angle: int):
+    def _thumb_reorder(self, src_idx: int, dst_idx: int):
+        """
+        Called by ThumbnailPanel after a drag-drop reorder.
+        src_idx  — original position of the dragged page.
+        dst_idx  — insert-before position in the *original* index space.
+        """
         if not self.doc:
             return
-        cmd = RotatePageCommand(self.page_service, self.doc, self.current_page_idx, angle)
-        cmd.execute()
-        self._push_history(cmd)
-        self._thumb.mark_dirty(self.current_page_idx)
-        self._render()
+        n         = self.doc.page_count
+        old_order = list(range(n))
 
-    def _add_page(self):
-        if not self.doc:
+        # Build new order: remove src, insert at dst
+        new_order = old_order[:]
+        new_order.pop(src_idx)
+        insert_at = dst_idx if dst_idx <= src_idx else dst_idx - 1
+        new_order.insert(insert_at, src_idx)
+
+        if new_order == old_order:
             return
-        current = self.doc.get_page(self.current_page_idx)
-        self.doc.insert_page(self.current_page_idx + 1,
-                             width=current.width, height=current.height)
-        self.current_page_idx += 1
+
+        cmd = ReorderPagesCommand(self.doc, new_order)
+        try:
+            cmd.execute()
+        except Exception as ex:
+            cmd.cleanup()
+            messagebox.showerror("Reorder Error", str(ex))
+            return
+        self._push_history(cmd)
+
+        # Keep the current page tracking the same logical page
+        self.current_page_idx = new_order.index(
+            old_order[self.current_page_idx]
+        ) if self.current_page_idx < n else 0
+
         self._mark_dirty()
         self._thumb.reset()
         self._render()
+        self._flash_status(f"↕ Moved page {src_idx + 1} → position {insert_at + 1}")
 
-    def _delete_page(self):
+    def _thumb_add_page(self, after_idx: int):
+        """Insert a blank page after after_idx (from thumbnail context menu / + button)."""
+        if not self.doc:
+            return
+        try:
+            ref        = self.doc.get_page(max(0, after_idx))
+            insert_pos = after_idx + 1
+            self.doc.insert_page(insert_pos, width=ref.width, height=ref.height)
+        except Exception as ex:
+            messagebox.showerror("Add Page Error", str(ex))
+            return
+        self.current_page_idx = insert_pos
+        self._mark_dirty()
+        self._thumb.reset()
+        self._render()
+        self._flash_status(f"+ Added blank page at position {insert_pos + 1}")
+
+    def _thumb_delete_page(self, idx: int):
+        """Delete the page at idx (called from hover badge or context menu)."""
         if not self.doc:
             return
         if self.doc.page_count <= 1:
             messagebox.showwarning("Cannot Delete", "A PDF must have at least one page.")
             return
-        if not messagebox.askyesno("Delete Page", f"Delete page {self.current_page_idx + 1}?"):
+        if not messagebox.askyesno(
+            "Delete Page",
+            f"Permanently delete page {idx + 1}?\nThis cannot be undone after saving.",
+            icon="warning",
+        ):
             return
-        self.doc.delete_page(self.current_page_idx)
+        try:
+            self.doc.delete_page(idx)
+        except Exception as ex:
+            messagebox.showerror("Delete Error", str(ex))
+            return
         self.current_page_idx = min(self.current_page_idx, self.doc.page_count - 1)
         self._mark_dirty()
         self._thumb.reset()
         self._render()
+        self._flash_status(f"✕ Deleted page {idx + 1}")
+
+    def _thumb_duplicate_page(self, idx: int):
+        """Duplicate the page at idx, inserting the copy immediately after."""
+        if not self.doc:
+            return
+        cmd = DuplicatePageCommand(self.doc, idx)
+        try:
+            cmd.execute()
+        except Exception as ex:
+            cmd.cleanup()
+            messagebox.showerror("Duplicate Error", str(ex))
+            return
+        self._push_history(cmd)
+        self.current_page_idx = idx + 1
+        self._mark_dirty()
+        self._thumb.reset()
+        self._render()
+        self._flash_status(f"⧉ Duplicated page {idx + 1}")
+
+    def _thumb_rotate_page(self, idx: int, angle: int):
+        """Rotate a specific page by angle (called from context menu)."""
+        if not self.doc:
+            return
+        cmd = RotatePageCommand(self.page_service, self.doc, idx, angle)
+        try:
+            cmd.execute()
+        except Exception as ex:
+            cmd.cleanup()
+            messagebox.showerror("Rotate Error", str(ex))
+            return
+        self._push_history(cmd)
+        self._thumb.mark_dirty(idx)
+        if idx == self.current_page_idx:
+            self._render()
+        self._flash_status(
+            f"{'↺' if angle < 0 else '↻'} Rotated page {idx + 1} {abs(angle)}°"
+        )
+
+    def _rotate(self, angle: int):
+        """Rotate current page from sidebar buttons."""
+        if not self.doc:
+            return
+        self._thumb_rotate_page(self.current_page_idx, angle)
+
+    def _add_page(self):
+        """Add page from sidebar button — inserts after current page."""
+        if not self.doc:
+            return
+        self._thumb_add_page(self.current_page_idx)
+
+    def _delete_page(self):
+        """Delete current page from sidebar button."""
+        if not self.doc:
+            return
+        self._thumb_delete_page(self.current_page_idx)
 
     # ── zoom ──────────────────────────────────────────────────────────────────
 
