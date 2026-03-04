@@ -40,6 +40,8 @@ from src.gui.tools.redact_tool import RedactTool
 from src.gui.tools.draw_tool import DrawTool
 from src.commands.draw_command import DrawAnnotationCommand
 from src.utils.recent_files import RecentFiles
+from src.services.image_conversion import ImageConversionService
+from src.commands.convert_images import ConvertImagesToPdfCommand
 
 
 # ── AppContext ────────────────────────────────────────────────────────────────
@@ -101,6 +103,9 @@ class InteractivePDFEditor:
         self.root.geometry("1200x820")
         self.root.minsize(800, 600)
         self.root.configure(bg=PALETTE["bg_dark"])
+        self.image_conversion_service = ImageConversionService()
+        self._is_staging_mode = False
+        self._staging_images: list[str] = []
 
         # Document state
         self.doc: PDFDocument | None = None
@@ -262,6 +267,7 @@ class InteractivePDFEditor:
             on_delete_page=self._thumb_delete_page,
             on_duplicate_page=self._thumb_duplicate_page,
             on_rotate_page=self._thumb_rotate_page,
+            get_image_thumbnail=self._get_image_thumbnail,
         )
         self._build_canvas_area(body)
         self._build_statusbar()
@@ -331,6 +337,12 @@ class InteractivePDFEditor:
         Tooltip(
             self._topbar_btn(bar, "🔍  Find & Redact", self._toggle_search_bar),
             "Search & redact text on this page  (Ctrl+F)",
+        )
+
+        tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
+        Tooltip(
+            self._topbar_btn(bar, "🖼️  Images to PDF", self._start_image_staging),
+            "Create a new PDF from a selection of images"
         )
 
         tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
@@ -521,7 +533,66 @@ class InteractivePDFEditor:
         )
         width_sp.pack(anchor="w", pady=(0, 4))
         width_sp.bind("<Return>", lambda e: self._on_annot_width_change())
+    
+    def _get_image_thumbnail(self, path: str, width: int) -> bytes:
+        return self.image_conversion_service.get_image_thumbnail(path, width)
 
+    def _start_image_staging(self):
+        """Open file picker for images and enter staging mode."""
+        if self._unsaved_changes:
+            answer = messagebox.askyesnocancel("Unsaved Changes", "You have unsaved changes.\nSave before continuing?")
+            if answer is None: return
+            if answer and not self._save_pdf(): return
+
+        paths = filedialog.askopenfilenames(
+            title="Select Images to Combine into PDF",
+            filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp *.tiff")]
+        )
+        if not paths:
+            return
+
+        self._commit_all_boxes()
+        if self.doc:
+            self.doc.close()
+            self.doc = None
+            
+        self._staging_images = list(paths)
+        self._is_staging_mode = True
+        self._current_path = None
+        self._update_title()
+        
+        self._thumb.reset_for_images(self._staging_images)
+        self._flash_status("Staging Mode: Drag thumbnails to reorder, then click Save.")
+        self._preview_staging_image(0)
+
+    def _preview_staging_image(self, idx: int):
+        """Render a high-res preview of the selected staging image."""
+        if not self._is_staging_mode or idx >= len(self._staging_images): return
+        
+        self.current_page_idx = idx
+        path = self._staging_images[idx]
+        canvas_w = self.canvas.winfo_width()
+        preview_w = int(canvas_w * 0.8 * self.scale_factor)
+        
+        img_bytes = self._get_image_thumbnail(path, width=preview_w)
+        if img_bytes:
+            self.tk_image = tk.PhotoImage(data=img_bytes)
+            self.canvas.delete("all")
+            self.canvas.create_image(canvas_w//2, 40, anchor=tk.N, image=self.tk_image, tags="page_img")
+            self._page_label.config(text=f"{idx + 1} / {len(self._staging_images)}")
+            self._st_size.config(text=f"Image Preview")
+            self._thumb.refresh_all_borders()
+            self._thumb.scroll_to_active()
+
+    def _exit_staging_mode(self):
+        """Cancel staging mode and return to welcome screen."""
+        if not self._is_staging_mode: return
+        self._is_staging_mode = False
+        self._staging_images.clear()
+        self.canvas.delete("all")
+        self._thumb.reset()
+        self._show_startup_screen()
+        self._flash_status("Image to PDF conversion cancelled", color=PALETTE["fg_secondary"])
 
     def _build_draw_opts(self, parent):
         """Sidebar panel shown when the Draw tool is active."""
@@ -1300,6 +1371,7 @@ class InteractivePDFEditor:
 
     def _open_pdf_path(self, path: str):
         """Open a PDF from a known path (used by dialog, recent list, startup screen)."""
+        self._is_staging_mode = False
         self._commit_all_boxes()
         if self.doc:
             self.doc.close()
@@ -1502,6 +1574,8 @@ class InteractivePDFEditor:
             self._startup_frame = None
 
     def _save_pdf(self) -> bool:
+        if self._is_staging_mode:
+            return self._generate_pdf_from_staging()
         if not self.doc:
             return False
         if not self._current_path:
@@ -1540,6 +1614,36 @@ class InteractivePDFEditor:
         except Exception as ex:
             messagebox.showerror("Save Error", str(ex))
             return False
+    
+    def _generate_pdf_from_staging(self) -> bool:
+        """Compile the staged images into a PDF file."""
+        if not self._staging_images: return False
+            
+        out_path = filedialog.asksaveasfilename(
+            title="Save Generated PDF",
+            defaultextension=".pdf",
+            filetypes=[("PDF Files", "*.pdf")],
+            initialfile="Combined_Images.pdf"
+        )
+        if not out_path:
+            return False
+
+        cmd = ConvertImagesToPdfCommand(
+            self.image_conversion_service, 
+            self._staging_images, 
+            out_path
+        )
+        cmd.execute()
+        
+        if cmd.success:
+            self._flash_status(f"✓ PDF created successfully")
+            self._is_staging_mode = False
+            self._staging_images.clear()
+            self._open_pdf_path(out_path)
+            return True
+        else:
+            messagebox.showerror("Error", "Failed to create PDF from images.")
+            return False
 
     # ── page management ───────────────────────────────────────────────────────
 
@@ -1573,9 +1677,11 @@ class InteractivePDFEditor:
             self._current_tool.activate()
 
     def _thumb_page_click(self, idx: int):
-        if not self.doc or idx == self.current_page_idx:
-            return
-        self._navigate_to(idx)
+        if self._is_staging_mode:
+            self._preview_staging_image(idx)
+        else:
+            if not self.doc or idx == self.current_page_idx: return
+            self._navigate_to(idx)
 
     def _thumb_reorder(self, src_idx: int, dst_idx: int):
         """
@@ -1583,39 +1689,47 @@ class InteractivePDFEditor:
         src_idx  — original position of the dragged page.
         dst_idx  — insert-before position in the *original* index space.
         """
-        if not self.doc:
-            return
-        n         = self.doc.page_count
-        old_order = list(range(n))
+        if self._is_staging_mode:
+            path = self._staging_images.pop(src_idx)
+            insert_at = dst_idx if dst_idx <= src_idx else dst_idx - 1
+            self._staging_images.insert(insert_at, path)
+            self._thumb.reset_for_images(self._staging_images)
+            self._preview_staging_image(insert_at)
+            self._flash_status(f"↕ Moved image {src_idx + 1} → position {insert_at + 1}")
+        else:
+            if not self.doc:
+                return
+            n         = self.doc.page_count
+            old_order = list(range(n))
 
-        # Build new order: remove src, insert at dst
-        new_order = old_order[:]
-        new_order.pop(src_idx)
-        insert_at = dst_idx if dst_idx <= src_idx else dst_idx - 1
-        new_order.insert(insert_at, src_idx)
+            # Build new order: remove src, insert at dst
+            new_order = old_order[:]
+            new_order.pop(src_idx)
+            insert_at = dst_idx if dst_idx <= src_idx else dst_idx - 1
+            new_order.insert(insert_at, src_idx)
 
-        if new_order == old_order:
-            return
+            if new_order == old_order:
+                return
 
-        cmd = ReorderPagesCommand(self.doc, new_order)
-        try:
-            cmd.execute()
-        except Exception as ex:
-            cmd.cleanup()
-            messagebox.showerror("Reorder Error", str(ex))
-            return
-        self._push_history(cmd)
+            cmd = ReorderPagesCommand(self.doc, new_order)
+            try:
+                cmd.execute()
+            except Exception as ex:
+                cmd.cleanup()
+                messagebox.showerror("Reorder Error", str(ex))
+                return
+            self._push_history(cmd)
 
-        # Keep the current page tracking the same logical page
-        self.current_page_idx = new_order.index(
-            old_order[self.current_page_idx]
-        ) if self.current_page_idx < n else 0
+            # Keep the current page tracking the same logical page
+            self.current_page_idx = new_order.index(
+                old_order[self.current_page_idx]
+            ) if self.current_page_idx < n else 0
 
-        self._mark_dirty()
-        self._cont_images.clear()
-        self._thumb.reset()
-        self._render()
-        self._flash_status(f"↕ Moved page {src_idx + 1} → position {insert_at + 1}")
+            self._mark_dirty()
+            self._cont_images.clear()
+            self._thumb.reset()
+            self._render()
+            self._flash_status(f"↕ Moved page {src_idx + 1} → position {insert_at + 1}")
 
     def _thumb_add_page(self, after_idx: int):
         """Insert a blank page after after_idx (from thumbnail context menu / + button)."""
@@ -2267,9 +2381,10 @@ class InteractivePDFEditor:
     # ── escape key ────────────────────────────────────────────────────────────
 
     def _on_escape(self):
-        """Escape: close search bar if open, otherwise dismiss text boxes."""
         if self._search_bar_visible:
             self._toggle_search_bar()
+        elif self._is_staging_mode:
+            self._exit_staging_mode()
         else:
             self._dismiss_boxes()
 

@@ -56,6 +56,7 @@ class ThumbnailPanel:
         on_delete_page=None,
         on_duplicate_page=None,
         on_rotate_page=None,
+        get_image_thumbnail=None,
     ):
         self._get_doc              = get_doc
         self._get_current_page     = get_current_page
@@ -66,6 +67,9 @@ class ThumbnailPanel:
         self._on_delete_page     = on_delete_page
         self._on_duplicate_page  = on_duplicate_page
         self._on_rotate_page     = on_rotate_page
+        self._get_image_thumbnail = get_image_thumbnail 
+        self._is_image_mode = False                     
+        self._image_paths: list[str] = []
 
         self._images: list       = []
         self._dirty: list[bool]  = []
@@ -155,9 +159,33 @@ class ThumbnailPanel:
 
     def hide(self):
         self._frame.pack_forget()
+    
+    def reset_for_images(self, image_paths: list[str]):
+        """Clear the panel and prepare it for image thumbnails (Staging Mode)."""
+        if self._after_id:
+            self._root.after_cancel(self._after_id)
+            self._after_id = None
+
+        self._canvas.delete("all")
+        self._is_image_mode = True
+        self._image_paths = list(image_paths)
+        self._images = [None] * len(self._image_paths)
+        self._dirty = [True] * len(self._image_paths)
+        
+        tw, th = 80, 110 # Uniform thumbnail size
+        x_off = (THUMB_PANEL_W - tw) // 2
+        
+        total_h = self._slot_h() * len(self._image_paths) + THUMB_PAD
+        self._canvas.config(scrollregion=(0, 0, THUMB_PANEL_W, total_h))
+
+        for i in range(len(self._image_paths)):
+            self._create_slot(i, x_off, tw, th)
+        
+        self._schedule_render()
 
     def reset(self):
         """Rebuild all thumbnail slots and schedule lazy rendering."""
+        self._is_image_mode = False
         if self._after_id:
             self._root.after_cancel(self._after_id)
             self._after_id = None
@@ -303,6 +331,33 @@ class ThumbnailPanel:
         _render_one(order)
 
     def _render_page(self, idx: int):
+        if self._is_image_mode:
+            # Render thumbnail from the raw image file via callback
+            if not self._get_image_thumbnail or idx >= len(self._image_paths):
+                return
+            path = self._image_paths[idx]
+            tw, th = 80, 110
+            ppm = self._get_image_thumbnail(path, tw)
+            if not ppm:
+                return
+            img = tk.PhotoImage(data=ppm)
+            self._images[idx] = img
+            self._dirty[idx] = False
+            
+            x_off = (THUMB_PANEL_W - tw) // 2
+            y_top = self._slot_y(idx)
+
+            self._canvas.delete(f"thumb_img_{idx}")
+            self._canvas.create_image(
+                x_off, y_top, anchor=tk.NW, image=img,
+                tags=(f"thumb_img_{idx}",),
+            )
+            self._canvas.tag_raise(f"thumb_border_{idx}")
+            self._canvas.tag_raise(f"thumb_label_{idx}")
+            self._canvas.tag_raise(f"thumb_hit_{idx}")
+            self._update_border(idx)
+            return
+        
         doc = self._get_doc()
         if not doc or idx >= doc.page_count:
             return
