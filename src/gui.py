@@ -4,6 +4,8 @@ PDF Editor — Modern GUI
   • Text preview font/size matches the baked PDF output exactly
   • Snapshot-based undo for text insertion
   • Smooth zoom, page centering, dark theme
+  • Highlight and Rectangle annotation tools
+  • Collapsible page-thumbnail panel (right side, lazy rendering)
 """
 
 import tkinter as tk
@@ -14,10 +16,12 @@ from src.core.document import PDFDocument
 from src.services.page_service import PageService
 from src.services.image_service import ImageService
 from src.services.text_service import TextService
+from src.services.annotation_service import AnnotationService          # NEW
 from src.commands.insert_text import InsertTextCommand, InsertTextBoxCommand
 from src.commands.insert_image import InsertImageCommand
 from src.commands.rotate_page import RotatePageCommand
 from src.commands.extract_images import ExtractSingleImageCommand
+from src.commands.annotate import AddHighlightCommand, AddRectAnnotationCommand  # NEW
 
 
 # ── Design tokens ──────────────────────────────────────────────────────────────
@@ -67,6 +71,11 @@ GRIP_RADIUS = 4    # corner rounding (not available in tk, used for visual ref)
 
 MIN_BOX_PX  = 60   # minimum box width/height in canvas pixels
 MAX_UNDO_STEPS = 20  # maximum number of undoable actions kept in history
+
+# Thumbnail panel
+THUMB_SCALE  = 0.18   # render scale for thumbnails (≈ 108px wide for A4)
+THUMB_PAD    = 8      # px gap between thumbnails
+THUMB_PANEL_W = 148   # fixed width of the thumbnail panel (px)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -621,9 +630,10 @@ class InteractivePDFEditor:
         self._unsaved_changes = False            # True after any mutation
 
         # Services
-        self.page_service  = PageService()
-        self.text_service  = TextService()
-        self.image_service = ImageService()
+        self.page_service       = PageService()
+        self.text_service       = TextService()
+        self.image_service      = ImageService()
+        self.annotation_service = AnnotationService()   # NEW
 
         # Tool state
         self.active_tool = tk.StringVar(value="text")
@@ -631,6 +641,17 @@ class InteractivePDFEditor:
         self.fontsize    = 14
         self.text_color  = (0, 0, 0)
         self.text_align  = 0   # 0=left 1=center 2=right 3=justify
+
+        # ── Annotation tool state (NEW) ───────────────────────────────────────
+        # Stroke color as an (R, G, B) tuple with values 0–255
+        self.annot_stroke_rgb: tuple = (220, 50, 50)    # default: red-ish
+        # Fill color for rect annotations (None = transparent)
+        self.annot_fill_rgb: tuple | None = None
+        # Stroke width for rect annotations
+        self.annot_width: float = 1.5
+        # Rubber-band drag state shared by highlight + rect tools
+        self._annot_drag_start: tuple | None = None     # (canvas_x, canvas_y)
+        self._annot_rubber_band: int | None  = None     # canvas item ID
 
         # Active text boxes
         self._text_boxes: list[TextBox] = []
@@ -644,6 +665,14 @@ class InteractivePDFEditor:
         # History
         self._history: list    = []
         self._history_idx: int = -1
+
+        # Thumbnail panel state
+        self._thumb_visible: bool        = True
+        self._thumb_images: list         = []   # tk.PhotoImage references (keep alive)
+        self._thumb_dirty: list[bool]    = []   # True → needs re-render
+        self._thumb_frame: tk.Frame | None       = None
+        self._thumb_canvas: tk.Canvas | None     = None
+        self._thumb_after_id                     = None   # pending after() job
 
         self._build_ui()
         self._apply_ttk_style()
@@ -683,6 +712,7 @@ class InteractivePDFEditor:
         body = tk.Frame(self.root, bg=PALETTE["bg_dark"])
         body.pack(fill=tk.BOTH, expand=True)
         self._build_sidebar(body)
+        self._build_thumb_panel(body)   # packed RIGHT before canvas so it sits on the right
         self._build_canvas_area(body)
         self._build_statusbar()
 
@@ -718,6 +748,12 @@ class InteractivePDFEditor:
         Tooltip(self._topbar_btn(bar, "−", self._zoom_out), "Zoom out  (Ctrl+−)")
         Tooltip(self._topbar_btn(bar, "+", self._zoom_in),  "Zoom in   (Ctrl+=)")
         Tooltip(self._topbar_btn(bar, "⟳", self._zoom_reset), "Reset zoom  (Ctrl+0)")
+
+        tk.Frame(bar, bg=PALETTE["border"], width=1).pack(
+            side=tk.LEFT, fill=tk.Y, pady=8)
+        self._thumb_toggle_btn = self._topbar_btn(bar, "⊞  Pages", self._toggle_thumb_panel)
+        Tooltip(self._thumb_toggle_btn, "Show / hide page thumbnails  (Ctrl+T)")
+        self.root.bind("<Control-t>", lambda e: self._toggle_thumb_panel())
 
         self._update_zoom_label()
 
@@ -768,6 +804,8 @@ class InteractivePDFEditor:
             ("📝  Text",          "text",         "Click canvas to add a text box"),
             ("🖼  Extract Image", "extract",      "Click an image to save it"),
             ("📌  Insert Image",  "insert_image", "Choose a file then drag to place it"),
+            ("🖍  Highlight",     "highlight",    "Drag to highlight a region"),     # NEW
+            ("▭  Rectangle",     "rect_annot",   "Drag to draw a rectangle annotation"),  # NEW
         ]:
             rb = tk.Radiobutton(sb, text=label, variable=self.active_tool, value=val,
                                 bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
@@ -826,6 +864,12 @@ class InteractivePDFEditor:
             self._sb_align_btns.append(btn)
         self._sb_refresh_align()
 
+        # ── NEW: Annotation options panel (hidden until annotation tool selected) ──
+        self._annot_opts = tk.Frame(sb, bg=PALETTE["bg_panel"])
+        # (packed/unpacked by _on_tool_change)
+
+        self._build_annot_opts(self._annot_opts)
+
         self._hint = tk.Label(sb,
             text="Click canvas to place a text box.\n"
                  "Drag the ◢ grip to move.\n"
@@ -833,6 +877,396 @@ class InteractivePDFEditor:
             bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"],
             font=FONT_LABEL, justify="center", wraplength=176)
         self._hint.pack(side=tk.BOTTOM, pady=14)
+
+    # ── NEW: annotation options panel builder ─────────────────────────────────
+
+    def _build_annot_opts(self, parent):
+        """Build the annotation color / width options panel."""
+        self._opt_lbl(parent, "Stroke Color")
+        stroke_row = tk.Frame(parent, bg=PALETTE["bg_panel"])
+        stroke_row.pack(fill=tk.X, pady=(0, 8))
+        self._annot_stroke_swatch = tk.Button(
+            stroke_row, text="  ", relief="flat", bd=1, width=3,
+            bg=self._rgb255_to_hex(self.annot_stroke_rgb),
+            cursor="hand2", command=self._pick_annot_stroke_color,
+            highlightthickness=1, highlightbackground="#555",
+        )
+        self._annot_stroke_swatch.pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(stroke_row, text="Pick color", bg=PALETTE["bg_panel"],
+                 fg=PALETTE["fg_secondary"], font=FONT_LABEL).pack(side=tk.LEFT)
+
+        self._opt_lbl(parent, "Fill Color")
+        fill_row = tk.Frame(parent, bg=PALETTE["bg_panel"])
+        fill_row.pack(fill=tk.X, pady=(0, 8))
+
+        # "No fill" toggle
+        self._annot_fill_none_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            fill_row, text="No fill", variable=self._annot_fill_none_var,
+            bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
+            selectcolor=PALETTE["accent_dim"],
+            activebackground=PALETTE["bg_hover"],
+            font=FONT_LABEL, cursor="hand2",
+            command=self._on_annot_fill_toggle,
+        ).pack(side=tk.LEFT)
+
+        self._annot_fill_swatch = tk.Button(
+            fill_row, text="  ", relief="flat", bd=1, width=3,
+            bg="#FFFF00", cursor="hand2", command=self._pick_annot_fill_color,
+            highlightthickness=1, highlightbackground="#555",
+            state=tk.DISABLED,
+        )
+        self._annot_fill_swatch.pack(side=tk.LEFT, padx=(8, 0))
+
+        self._opt_lbl(parent, "Stroke Width")
+        self._annot_width_var = tk.DoubleVar(value=self.annot_width)
+        width_sp = tk.Spinbox(
+            parent, from_=0.5, to=10.0, increment=0.5,
+            textvariable=self._annot_width_var, width=6,
+            command=self._on_annot_width_change,
+            bg="#252535", fg=PALETTE["fg_primary"],
+            buttonbackground=PALETTE["border"],
+            relief="flat", highlightthickness=0,
+        )
+        width_sp.pack(anchor="w", pady=(0, 4))
+        width_sp.bind("<Return>", lambda e: self._on_annot_width_change())
+
+    # ─────────────────────── annotation option callbacks (NEW) ───────────────
+
+    def _pick_annot_stroke_color(self):
+        result = colorchooser.askcolor(
+            color=self._rgb255_to_hex(self.annot_stroke_rgb),
+            title="Annotation Stroke Color",
+        )
+        if result and result[0]:
+            self.annot_stroke_rgb = tuple(int(v) for v in result[0])
+            self._annot_stroke_swatch.config(
+                bg=self._rgb255_to_hex(self.annot_stroke_rgb))
+
+    def _on_annot_fill_toggle(self):
+        no_fill = self._annot_fill_none_var.get()
+        if no_fill:
+            self.annot_fill_rgb = None
+            self._annot_fill_swatch.config(state=tk.DISABLED)
+        else:
+            # Default to yellow when enabling fill
+            if self.annot_fill_rgb is None:
+                self.annot_fill_rgb = (255, 255, 0)
+            self._annot_fill_swatch.config(
+                bg=self._rgb255_to_hex(self.annot_fill_rgb), state=tk.NORMAL)
+
+    def _pick_annot_fill_color(self):
+        current = self._rgb255_to_hex(self.annot_fill_rgb or (255, 255, 0))
+        result  = colorchooser.askcolor(color=current, title="Annotation Fill Color")
+        if result and result[0]:
+            self.annot_fill_rgb = tuple(int(v) for v in result[0])
+            self._annot_fill_swatch.config(bg=self._rgb255_to_hex(self.annot_fill_rgb))
+
+    def _on_annot_width_change(self, _e=None):
+        try:
+            self.annot_width = max(0.5, min(10.0, float(self._annot_width_var.get())))
+        except (ValueError, tk.TclError):
+            pass
+
+    @staticmethod
+    def _rgb255_to_hex(rgb: tuple) -> str:
+        r, g, b = [max(0, min(255, int(v))) for v in rgb]
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    @staticmethod
+    def _rgb255_to_float(rgb: tuple) -> tuple:
+        """Convert 0–255 RGB tuple to 0.0–1.0 float tuple for PyMuPDF."""
+        return tuple(v / 255.0 for v in rgb)
+
+    def _build_thumb_panel(self, parent):
+        """
+        Build the right-hand page-thumbnail panel.
+
+        Layout
+        ------
+        A fixed-width Frame containing:
+          • a slim header label
+          • a Canvas (with vertical scrollbar) that holds all thumbnails
+
+        Each thumbnail is drawn as a canvas image item with a coloured border
+        rectangle on top. The active page gets an accent-coloured border;
+        others get a subtle dark border.
+
+        Lazy rendering
+        --------------
+        Thumbnails are rendered in the background via after_idle() calls so
+        the UI stays responsive while opening large PDFs.  Each slot in
+        self._thumb_images starts as None and is filled as pages are visited.
+        self._thumb_dirty[i] = True forces a re-render on the next pass
+        (used after rotate, add/delete page, undo/redo).
+        """
+        self._thumb_frame = tk.Frame(
+            parent, bg=PALETTE["bg_panel"], width=THUMB_PANEL_W,
+            highlightthickness=1, highlightbackground=PALETTE["border"],
+        )
+        self._thumb_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        self._thumb_frame.pack_propagate(False)
+
+        # Header
+        hdr = tk.Frame(self._thumb_frame, bg=PALETTE["bg_mid"], height=26)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="PAGES", bg=PALETTE["bg_mid"],
+                 fg=PALETTE["fg_dim"], font=("Helvetica", 8, "bold"),
+                 padx=10).pack(side=tk.LEFT, fill=tk.Y)
+
+        # Scrollable canvas + scrollbar
+        scroll_frame = tk.Frame(self._thumb_frame, bg=PALETTE["bg_panel"])
+        scroll_frame.pack(fill=tk.BOTH, expand=True)
+
+        vsb = ttk.Scrollbar(scroll_frame, orient=tk.VERTICAL)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._thumb_canvas = tk.Canvas(
+            scroll_frame,
+            bg=PALETTE["bg_panel"],
+            highlightthickness=0,
+            yscrollcommand=vsb.set,
+        )
+        self._thumb_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.config(command=self._thumb_canvas.yview)
+
+        # Mouse-wheel scroll inside the thumbnail panel
+        self._thumb_canvas.bind("<MouseWheel>", self._on_thumb_scroll)
+        self._thumb_canvas.bind("<Button-4>",   self._on_thumb_scroll)
+        self._thumb_canvas.bind("<Button-5>",   self._on_thumb_scroll)
+
+    # ─────────────────────── thumbnail logic ──────────────────────────────────
+
+    def _toggle_thumb_panel(self):
+        """Show or hide the thumbnail panel, update the toggle button appearance."""
+        self._thumb_visible = not self._thumb_visible
+        if self._thumb_visible:
+            self._thumb_frame.pack(side=tk.RIGHT, fill=tk.Y)
+            self._thumb_toggle_btn.config(fg=PALETTE["fg_primary"])
+            # Scroll to the active page after the panel appears
+            self.root.after(50, self._thumb_scroll_to_active)
+        else:
+            self._thumb_frame.pack_forget()
+            self._thumb_toggle_btn.config(fg=PALETTE["fg_dim"])
+
+    def _thumb_reset(self):
+        """
+        Called when a new document is opened (or the page count changes).
+        Clears all cached images and rebuilds the static layout slots on the
+        thumbnail canvas, then schedules lazy rendering.
+        """
+        if not self._thumb_canvas:
+            return
+
+        # Cancel any in-flight lazy render job
+        if self._thumb_after_id:
+            self.root.after_cancel(self._thumb_after_id)
+            self._thumb_after_id = None
+
+        self._thumb_canvas.delete("all")
+        self._thumb_images = []
+        self._thumb_dirty  = []
+
+        if not self.doc:
+            return
+
+        n = self.doc.page_count
+        self._thumb_images = [None] * n
+        self._thumb_dirty  = [True]  * n
+
+        # Pre-calculate thumbnail geometry using page 0 dimensions
+        p0    = self.doc.get_page(0)
+        tw    = int(p0.width  * THUMB_SCALE)
+        th    = int(p0.height * THUMB_SCALE)
+        x_off = (THUMB_PANEL_W - tw) // 2    # centre horizontally
+
+        total_h = (th + THUMB_PAD + 18) * n + THUMB_PAD   # +18 for page number label
+
+        self._thumb_canvas.config(scrollregion=(0, 0, THUMB_PANEL_W, total_h))
+
+        # Draw placeholder rectangles + page-number labels for each slot
+        for i in range(n):
+            y_top = THUMB_PAD + i * (th + THUMB_PAD + 18)
+            # Placeholder fill
+            self._thumb_canvas.create_rectangle(
+                x_off, y_top, x_off + tw, y_top + th,
+                fill=PALETTE["bg_hover"], outline=PALETTE["border"],
+                width=1, tags=(f"thumb_border_{i}",),
+            )
+            # Page number label below the thumbnail
+            self._thumb_canvas.create_text(
+                THUMB_PANEL_W // 2, y_top + th + 6,
+                text=str(i + 1),
+                fill=PALETTE["fg_dim"],
+                font=("Helvetica", 7),
+                tags=(f"thumb_label_{i}",),
+            )
+            # Invisible click-target overlay (covers border + image area)
+            hit = self._thumb_canvas.create_rectangle(
+                x_off, y_top, x_off + tw, y_top + th,
+                fill="", outline="", tags=(f"thumb_hit_{i}",),
+            )
+            self._thumb_canvas.tag_bind(
+                f"thumb_hit_{i}", "<Button-1>",
+                lambda e, idx=i: self._thumb_click(idx),
+            )
+            self._thumb_canvas.tag_bind(
+                f"thumb_hit_{i}", "<Enter>",
+                lambda e, idx=i: self._thumb_hover(idx, True),
+            )
+            self._thumb_canvas.tag_bind(
+                f"thumb_hit_{i}", "<Leave>",
+                lambda e, idx=i: self._thumb_hover(idx, False),
+            )
+
+        # Kick off lazy rendering starting from the current page
+        self._thumb_schedule_render(priority_page=self.current_page_idx)
+
+    def _thumb_geometry(self, page_idx: int) -> tuple:
+        """Return (tw, th, x_off, y_top) for the given page slot."""
+        p   = self.doc.get_page(page_idx)
+        tw  = int(p.width  * THUMB_SCALE)
+        th  = int(p.height * THUMB_SCALE)
+        x_off = (THUMB_PANEL_W - tw) // 2
+        y_top = THUMB_PAD + page_idx * (th + THUMB_PAD + 18)
+        return tw, th, x_off, y_top
+
+    def _thumb_schedule_render(self, priority_page: int = 0):
+        """
+        Schedule incremental thumbnail rendering via after_idle().
+        Pages are rendered in two passes:
+          1. The current (priority) page first for immediate feedback.
+          2. All other dirty pages in order.
+        """
+        if not self.doc:
+            return
+        n = self.doc.page_count
+
+        # Build render order: priority page first, then rest in document order
+        order = [priority_page] + [i for i in range(n) if i != priority_page]
+
+        def _render_one(remaining):
+            if not remaining or not self.doc:
+                self._thumb_after_id = None
+                return
+            idx = remaining[0]
+            rest = remaining[1:]
+            if 0 <= idx < len(self._thumb_dirty) and self._thumb_dirty[idx]:
+                self._thumb_render_page(idx)
+            self._thumb_after_id = self.root.after_idle(lambda: _render_one(rest))
+
+        _render_one(order)
+
+    def _thumb_render_page(self, idx: int):
+        """Render page `idx` at THUMB_SCALE and draw it onto the thumbnail canvas."""
+        if not self.doc or idx >= self.doc.page_count:
+            return
+        try:
+            page = self.doc.get_page(idx)
+            ppm  = page.render_to_ppm(scale=THUMB_SCALE)
+            img  = tk.PhotoImage(data=ppm)
+        except Exception:
+            return
+
+        self._thumb_images[idx] = img   # keep a reference so GC doesn't collect it
+        self._thumb_dirty[idx]  = False
+
+        tw, th, x_off, y_top = self._thumb_geometry(idx)
+
+        # Remove old image item for this slot (tagged thumb_img_N)
+        self._thumb_canvas.delete(f"thumb_img_{idx}")
+
+        # Draw the rendered image
+        self._thumb_canvas.create_image(
+            x_off, y_top, anchor=tk.NW, image=img,
+            tags=(f"thumb_img_{idx}",),
+        )
+
+        # Raise the border + hit overlay above the image so clicks register
+        self._thumb_canvas.tag_raise(f"thumb_border_{idx}")
+        self._thumb_canvas.tag_raise(f"thumb_hit_{idx}")
+        self._thumb_canvas.tag_raise(f"thumb_label_{idx}")
+
+        # Refresh border colour (in case this is the active page)
+        self._thumb_update_border(idx)
+
+    def _thumb_update_border(self, idx: int):
+        """Set the border colour for slot `idx` (accent if active, dim otherwise)."""
+        if not self._thumb_canvas:
+            return
+        is_active = (idx == self.current_page_idx)
+        color = PALETTE["accent"] if is_active else PALETTE["border"]
+        width = 2 if is_active else 1
+        self._thumb_canvas.itemconfig(
+            f"thumb_border_{idx}", outline=color, width=width)
+        # Also brighten the page-number label for the active page
+        self._thumb_canvas.itemconfig(
+            f"thumb_label_{idx}",
+            fill=PALETTE["fg_primary"] if is_active else PALETTE["fg_dim"],
+        )
+
+    def _thumb_refresh_all_borders(self):
+        """Repaint every border — called after active page changes."""
+        if not self.doc or not self._thumb_canvas:
+            return
+        for i in range(self.doc.page_count):
+            self._thumb_update_border(i)
+
+    def _thumb_mark_dirty(self, page_idx: int | None = None):
+        """
+        Mark one page (or all pages if page_idx is None) as needing re-render,
+        then schedule a lazy render pass.
+        """
+        if not self._thumb_dirty:
+            return
+        if page_idx is None:
+            self._thumb_dirty = [True] * len(self._thumb_dirty)
+        elif 0 <= page_idx < len(self._thumb_dirty):
+            self._thumb_dirty[page_idx] = True
+        self._thumb_schedule_render(priority_page=self.current_page_idx)
+
+    def _thumb_scroll_to_active(self):
+        """Scroll the thumbnail panel so the active thumbnail is visible."""
+        if not self.doc or not self._thumb_canvas:
+            return
+        n = self.doc.page_count
+        if n == 0:
+            return
+        # Fraction of the scroll region occupied by pages above the active one
+        frac = self.current_page_idx / max(n, 1)
+        self._thumb_canvas.yview_moveto(max(0.0, frac - 0.1))
+
+    def _thumb_click(self, idx: int):
+        """Navigate to page `idx` when its thumbnail is clicked."""
+        if not self.doc or idx == self.current_page_idx:
+            return
+        self._commit_all_boxes()
+        self._img_drag_cancel()
+        self._annot_drag_cancel()
+        old = self.current_page_idx
+        self.current_page_idx = idx
+        self._thumb_update_border(old)
+        self._thumb_update_border(idx)
+        self._render()
+
+    def _thumb_hover(self, idx: int, entering: bool):
+        """Highlight a thumbnail on hover (unless it's the active page)."""
+        if idx == self.current_page_idx:
+            return
+        color = PALETTE["accent_light"] if entering else PALETTE["border"]
+        width = 2 if entering else 1
+        if self._thumb_canvas:
+            self._thumb_canvas.itemconfig(
+                f"thumb_border_{idx}", outline=color, width=width)
+
+    def _on_thumb_scroll(self, event):
+        if event.num == 4:
+            self._thumb_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self._thumb_canvas.yview_scroll(1, "units")
+        elif hasattr(event, "delta"):
+            self._thumb_canvas.yview_scroll(-1 * (event.delta // 120), "units")
 
     def _build_canvas_area(self, parent):
         frame = tk.Frame(parent, bg=PALETTE["bg_dark"])
@@ -885,12 +1319,10 @@ class InteractivePDFEditor:
                                  font=FONT_MONO, padx=10)
         self._st_size.pack(side=tk.LEFT)
         sep()
-        # ── NEW: action feedback label ────────────────────────────────────────
         self._st_action = tk.Label(bar, text="",
                                    bg=PALETTE["shadow"], fg=PALETTE["success"],
                                    font=FONT_MONO, padx=10)
         self._st_action.pack(side=tk.LEFT)
-        # ─────────────────────────────────────────────────────────────────────
         self._st_zoom = tk.Label(bar, text="",
                                  bg=PALETTE["shadow"], fg=PALETTE["fg_dim"],
                                  font=FONT_MONO, padx=10)
@@ -899,15 +1331,9 @@ class InteractivePDFEditor:
     # ─────────────────────── status bar feedback ──────────────────────────────
 
     def _flash_status(self, message: str, color: str = None, duration_ms: int = 3000):
-        """
-        Display a transient message in the status bar action label.
-        The message fades out after `duration_ms` milliseconds.
-        Cancels any previously scheduled clear so rapid actions don't stack.
-        """
         if color is None:
             color = PALETTE["success"]
         self._st_action.config(text=message, fg=color)
-        # Cancel any previous scheduled clear
         if hasattr(self, "_flash_after_id") and self._flash_after_id:
             self.root.after_cancel(self._flash_after_id)
         self._flash_after_id = self.root.after(
@@ -948,8 +1374,14 @@ class InteractivePDFEditor:
     def _on_tool_change(self):
         tool = self.active_tool.get()
         self._st_tool.config(text=f"Tool: {tool.replace('_', ' ').title()}")
-        # Reset any in-progress image drag
+        # Reset any in-progress drag
         self._img_drag_cancel()
+        self._annot_drag_cancel()
+
+        # Hide both option panels; show the appropriate one
+        self._txt_opts.pack_forget()
+        self._annot_opts.pack_forget()
+
         if tool == "text":
             self.canvas.config(cursor="crosshair")
             self._txt_opts.pack(fill=tk.X, padx=12, pady=4)
@@ -961,14 +1393,26 @@ class InteractivePDFEditor:
             )
         elif tool == "insert_image":
             self.canvas.config(cursor="crosshair")
-            self._txt_opts.pack_forget()
             self._hint.config(
                 text="Click canvas to choose\nan image file, then drag\nto place it.",
                 fg=PALETTE["fg_dim"],
             )
-        else:
+        elif tool == "highlight":
+            self.canvas.config(cursor="crosshair")
+            self._annot_opts.pack(fill=tk.X, padx=12, pady=4)
+            self._hint.config(
+                text="Drag to highlight\na region on the page.\nCtrl+Z to undo.",
+                fg=PALETTE["fg_dim"],
+            )
+        elif tool == "rect_annot":
+            self.canvas.config(cursor="crosshair")
+            self._annot_opts.pack(fill=tk.X, padx=12, pady=4)
+            self._hint.config(
+                text="Drag to draw a\nrectangle annotation.\nCtrl+Z to undo.",
+                fg=PALETTE["fg_dim"],
+            )
+        else:   # extract
             self.canvas.config(cursor="arrow")
-            self._txt_opts.pack_forget()
             self._hint.config(
                 text="Click on an image\nto extract it.",
                 fg=PALETTE["fg_dim"],
@@ -1005,17 +1449,16 @@ class InteractivePDFEditor:
     # ─────────────────────── file operations ──────────────────────────────────
 
     def _open_pdf(self):
-        # Guard against losing unsaved work
         if self._unsaved_changes:
             answer = messagebox.askyesnocancel(
                 "Unsaved Changes",
                 "You have unsaved changes.\nSave before opening a new file?",
             )
-            if answer is None:       # Cancel — abort open
+            if answer is None:
                 return
-            if answer:               # Yes — save first
+            if answer:
                 if not self._save_pdf():
-                    return           # Save was cancelled, abort open
+                    return
 
         path = filedialog.askopenfilename(
             title="Open PDF", filetypes=[("PDF Files", "*.pdf"), ("All", "*.*")])
@@ -1035,13 +1478,9 @@ class InteractivePDFEditor:
         self._clear_history()
         self._update_title()
         self._render()
+        self._thumb_reset()   # rebuild thumbnail panel for new document
 
     def _save_pdf(self) -> bool:
-        """
-        Save to the currently open file path using incremental write.
-        Falls back to Save As if no path is known yet (new/unsaved document).
-        Returns True on success, False if cancelled or failed.
-        """
         if not self.doc:
             return False
         if not self._current_path:
@@ -1051,18 +1490,13 @@ class InteractivePDFEditor:
             self.doc.save(self._current_path, incremental=True)
             self._unsaved_changes = False
             self._update_title()
-            self._flash_status("✓ Saved")   # ← NEW: success feedback
+            self._flash_status("✓ Saved")
             return True
         except Exception as ex:
             messagebox.showerror("Save Error", str(ex))
             return False
 
     def _save_pdf_as(self) -> bool:
-        """
-        Prompt for a new file path and do a full (non-incremental) save.
-        Updates _current_path and title on success.
-        Returns True on success, False if cancelled or failed.
-        """
         if not self.doc:
             return False
         self._commit_all_boxes()
@@ -1073,16 +1507,15 @@ class InteractivePDFEditor:
             initialfile=os.path.basename(self._current_path) if self._current_path else "document.pdf",
         )
         if not path:
-            # ← NEW: explicit feedback so user knows the save did NOT happen
             self._flash_status("Save cancelled", color=PALETTE["fg_secondary"])
             return False
         try:
             self.doc.save(path)
             self._current_path    = path
             self._unsaved_changes = False
-            self.doc.path         = path   # keep PDFDocument in sync
+            self.doc.path         = path
             self._update_title()
-            self._flash_status(f"✓ Saved as {os.path.basename(path)}")   # ← NEW
+            self._flash_status(f"✓ Saved as {os.path.basename(path)}")
             return True
         except Exception as ex:
             messagebox.showerror("Save Error", str(ex))
@@ -1094,6 +1527,7 @@ class InteractivePDFEditor:
         if self.doc and self.current_page_idx > 0:
             self._commit_all_boxes()
             self._img_drag_cancel()
+            self._annot_drag_cancel()
             self.current_page_idx -= 1
             self._render()
 
@@ -1101,6 +1535,7 @@ class InteractivePDFEditor:
         if self.doc and self.current_page_idx < self.doc.page_count - 1:
             self._commit_all_boxes()
             self._img_drag_cancel()
+            self._annot_drag_cancel()
             self.current_page_idx += 1
             self._render()
 
@@ -1110,7 +1545,8 @@ class InteractivePDFEditor:
         cmd = RotatePageCommand(self.page_service, self.doc,
                                 self.current_page_idx, angle)
         cmd.execute()
-        self._push_history(cmd)   # _push_history calls _mark_dirty
+        self._push_history(cmd)
+        self._thumb_mark_dirty(self.current_page_idx)   # rotation changes thumbnail
         self._render()
 
     def _add_page(self):
@@ -1124,6 +1560,7 @@ class InteractivePDFEditor:
         )
         self.current_page_idx += 1
         self._mark_dirty()
+        self._thumb_reset()   # page count changed
         self._render()
 
     def _delete_page(self):
@@ -1138,6 +1575,7 @@ class InteractivePDFEditor:
         self.doc.delete_page(self.current_page_idx)
         self.current_page_idx = min(self.current_page_idx, self.doc.page_count - 1)
         self._mark_dirty()
+        self._thumb_reset()   # page count changed
         self._render()
 
     # ─────────────────────── zoom ─────────────────────────────────────────────
@@ -1174,7 +1612,6 @@ class InteractivePDFEditor:
         iw = int(page.width  * self.scale_factor)
         ih = int(page.height * self.scale_factor)
 
-        # Centre the page horizontally in the canvas
         cw = self.canvas.winfo_width()
         self._page_offset_x = max(40, (cw - iw) // 2)
         self._page_offset_y = 30
@@ -1184,11 +1621,9 @@ class InteractivePDFEditor:
         self.canvas.delete("page_img")
         self.canvas.delete("page_shadow")
 
-        # Shadow
         self.canvas.create_rectangle(
             ox + 5, oy + 5, ox + iw + 5, oy + ih + 5,
             fill="#000000", outline="", stipple="gray25", tags="page_shadow")
-        # Page
         self.canvas.create_image(ox, oy, anchor=tk.NW,
                                  image=self.tk_image, tags="page_img")
 
@@ -1198,9 +1633,12 @@ class InteractivePDFEditor:
             text=f"{self.current_page_idx + 1} / {self.doc.page_count}")
         self._st_size.config(text=f"{int(page.width)} × {int(page.height)} pt")
 
-        # Reposition open text boxes for new offset/scale
         for box in list(self._text_boxes):
             box.rescale(self.scale_factor, self._page_offset_x, self._page_offset_y)
+
+        # Keep thumbnail borders in sync with active page
+        self._thumb_refresh_all_borders()
+        self._thumb_scroll_to_active()
 
     # ─────────────────────── canvas events ────────────────────────────────────
 
@@ -1212,69 +1650,150 @@ class InteractivePDFEditor:
     def _on_canvas_click(self, event):
         if not self.doc:
             return
-        # A TextBox grip/resize press fires before this canvas binding.
-        # If it set the flag, skip spawning a new box this click.
         if self._suppress_next_click:
             self._suppress_next_click = False
             return
         cx = self.canvas.canvasx(event.x)
         cy = self.canvas.canvasy(event.y)
         pdf_x, pdf_y = self._canvas_to_pdf(cx, cy)
+        tool = self.active_tool.get()
 
-        if self.active_tool.get() == "text":
+        if tool == "text":
             self._spawn_textbox(pdf_x, pdf_y)
-        elif self.active_tool.get() == "extract":
+        elif tool == "extract":
             self._handle_extract(pdf_x, pdf_y)
-        elif self.active_tool.get() == "insert_image":
+        elif tool == "insert_image":
             if self._img_pending_path is None:
-                # First click: pick the file. Drag begins on the NEXT press.
                 self._img_pick_file()
             else:
-                # Second click: start the rubber-band drag.
                 self._img_drag_start  = (cx, cy)
                 self._img_rubber_band = None
+        elif tool in ("highlight", "rect_annot"):
+            # Start rubber-band drag for annotation tools
+            self._annot_drag_start  = (cx, cy)
+            self._annot_rubber_band = None
 
     def _on_canvas_drag(self, event):
-        if self.active_tool.get() != "insert_image":
-            return
-        if self._img_drag_start is None:
-            return
         cx = self.canvas.canvasx(event.x)
         cy = self.canvas.canvasy(event.y)
-        x0, y0 = self._img_drag_start
-        if self._img_rubber_band is None:
-            self._img_rubber_band = self.canvas.create_rectangle(
-                x0, y0, cx, cy,
-                outline=PALETTE["accent_light"], width=2, dash=(5, 3),
-            )
-        else:
-            self.canvas.coords(self._img_rubber_band, x0, y0, cx, cy)
+        tool = self.active_tool.get()
+
+        if tool == "insert_image":
+            if self._img_drag_start is None:
+                return
+            x0, y0 = self._img_drag_start
+            if self._img_rubber_band is None:
+                self._img_rubber_band = self.canvas.create_rectangle(
+                    x0, y0, cx, cy,
+                    outline=PALETTE["accent_light"], width=2, dash=(5, 3),
+                )
+            else:
+                self.canvas.coords(self._img_rubber_band, x0, y0, cx, cy)
+
+        elif tool in ("highlight", "rect_annot"):
+            # NEW: draw rubber band for annotation drag
+            if self._annot_drag_start is None:
+                return
+            x0, y0 = self._annot_drag_start
+            # Choose a color hint: yellow for highlight, red for rect
+            outline_color = "#FFD700" if tool == "highlight" else self._rgb255_to_hex(self.annot_stroke_rgb)
+            if self._annot_rubber_band is None:
+                self._annot_rubber_band = self.canvas.create_rectangle(
+                    x0, y0, cx, cy,
+                    outline=outline_color, width=2, dash=(4, 3),
+                )
+            else:
+                self.canvas.coords(self._annot_rubber_band, x0, y0, cx, cy)
 
     def _on_canvas_release(self, event):
-        if self.active_tool.get() != "insert_image":
-            return
-        if self._img_drag_start is None:
-            return
-
         cx = self.canvas.canvasx(event.x)
         cy = self.canvas.canvasy(event.y)
-        x0, y0 = self._img_drag_start
-        pending_path = self._img_pending_path  # capture before cancel clears it
+        tool = self.active_tool.get()
 
-        # Remove rubber band and reset drag state (but keep pending path until used)
+        if tool == "insert_image":
+            self._handle_image_release(cx, cy)
+        elif tool in ("highlight", "rect_annot"):
+            self._handle_annot_release(cx, cy, tool)   # NEW
+
+    # ── NEW: annotation drag commit ───────────────────────────────────────────
+
+    def _handle_annot_release(self, cx: float, cy: float, tool: str):
+        """Commit a rubber-band drag as a highlight or rect annotation."""
+        if self._annot_drag_start is None:
+            return
+
+        x0, y0 = self._annot_drag_start
+
+        # Clean up rubber band
+        if self._annot_rubber_band is not None:
+            self.canvas.delete(self._annot_rubber_band)
+            self._annot_rubber_band = None
+        self._annot_drag_start = None
+
+        # Require a minimum drag size
+        if abs(cx - x0) < 6 or abs(cy - y0) < 6:
+            return
+
+        # Convert canvas → PDF coords (normalise so x0<x1, y0<y1)
+        px0, py0 = self._canvas_to_pdf(min(x0, cx), min(y0, cy))
+        px1, py1 = self._canvas_to_pdf(max(x0, cx), max(y0, cy))
+        rect = (px0, py0, px1, py1)
+
+        if tool == "highlight":
+            cmd = AddHighlightCommand(
+                self.annotation_service, self.doc,
+                self.current_page_idx, rect,
+            )
+        else:  # rect_annot
+            stroke_float = self._rgb255_to_float(self.annot_stroke_rgb)
+            fill_float   = (self._rgb255_to_float(self.annot_fill_rgb)
+                            if self.annot_fill_rgb is not None else None)
+            cmd = AddRectAnnotationCommand(
+                self.annotation_service, self.doc,
+                self.current_page_idx, rect,
+                color=stroke_float,
+                fill=fill_float,
+                width=self.annot_width,
+            )
+
+        try:
+            cmd.execute()
+            self._push_history(cmd)
+        except Exception as ex:
+            cmd.cleanup()
+            messagebox.showerror("Annotation Error", str(ex))
+            return
+
+        label = "Highlight" if tool == "highlight" else "Rectangle"
+        self._flash_status(f"✓ {label} annotation added")
+        self._render()
+
+    def _annot_drag_cancel(self):
+        """Remove the rubber band and reset annotation drag state."""
+        if self._annot_rubber_band is not None:
+            self.canvas.delete(self._annot_rubber_band)
+            self._annot_rubber_band = None
+        self._annot_drag_start = None
+
+    # ── image insertion (unchanged logic, refactored into helper) ─────────────
+
+    def _handle_image_release(self, cx: float, cy: float):
+        if self._img_drag_start is None:
+            return
+        x0, y0 = self._img_drag_start
+        pending_path = self._img_pending_path
+
         if self._img_rubber_band is not None:
             self.canvas.delete(self._img_rubber_band)
             self._img_rubber_band = None
         self._img_drag_start = None
 
-        # Require a minimum drag size to avoid accidental placements
         if abs(cx - x0) < 10 or abs(cy - y0) < 10:
             return
-
         if not pending_path:
             return
 
-        self._img_pending_path = None  # consumed
+        self._img_pending_path = None
 
         px0, py0 = self._canvas_to_pdf(min(x0, cx), min(y0, cy))
         px1, py1 = self._canvas_to_pdf(max(x0, cx), max(y0, cy))
@@ -1295,7 +1814,6 @@ class InteractivePDFEditor:
         self._render()
 
     def _img_pick_file(self):
-        """Open file dialog to choose an image. Stores path for the next drag."""
         path = filedialog.askopenfilename(
             title="Choose Image to Insert — then drag to place it",
             filetypes=[
@@ -1306,20 +1824,17 @@ class InteractivePDFEditor:
         if not path:
             return
         self._img_pending_path = path
-        # Give the user a visual cue that a file is loaded and ready to place
         self._hint.config(
             text=f"✓ {os.path.basename(path)}\n\nNow drag on the canvas\nto place the image.",
             fg=PALETTE["success"],
         )
 
     def _img_drag_cancel(self):
-        """Remove the rubber band and fully reset insertion drag state."""
         if self._img_rubber_band is not None:
             self.canvas.delete(self._img_rubber_band)
             self._img_rubber_band = None
         self._img_drag_start   = None
         self._img_pending_path = None
-        # Reset hint text if insert_image tool is still active
         if self.active_tool.get() == "insert_image":
             self._hint.config(
                 text="Click canvas to choose\nan image file, then drag\nto place it.",
@@ -1355,8 +1870,6 @@ class InteractivePDFEditor:
         pdf_w = page.width * 0.42
         pdf_h = self.fontsize * 4
 
-        # Sample the pixel colour from the rendered page at the click point so
-        # the text entry background blends in — giving a "transparent" appearance.
         bg_color = self._sample_page_color(pdf_x, pdf_y)
 
         box = TextBox(
@@ -1380,11 +1893,6 @@ class InteractivePDFEditor:
         self._text_boxes.append(box)
 
     def _sample_page_color(self, pdf_x: float, pdf_y: float) -> str:
-        """
-        Sample a pixel from the rendered tk_image at the given PDF coordinates.
-        Falls back to the canvas background if the image isn't available or the
-        point is outside the page.
-        """
         canvas_fallback = self.canvas.cget("bg")
         if self.tk_image is None:
             return canvas_fallback
@@ -1402,8 +1910,6 @@ class InteractivePDFEditor:
         if not text:
             return
 
-        # Use insert_textbox so text word-wraps within the box bounds and
-        # alignment is honoured. The rect maps directly from the overlay box.
         rect = (box.pdf_x, box.pdf_y,
                 box.pdf_x + box.pdf_w, box.pdf_y + box.pdf_h)
 
@@ -1423,7 +1929,6 @@ class InteractivePDFEditor:
         self._render()
 
     def _on_box_interact(self):
-        """Called when a TextBox grip/resize is pressed. Prevents canvas click spawning a new box."""
         self._suppress_next_click = True
 
     def _on_box_deleted(self, box: TextBox):
@@ -1470,7 +1975,6 @@ class InteractivePDFEditor:
     # ─────────────────────── history ─────────────────────────────────────────
 
     def _update_title(self):
-        """Reflect current file name and unsaved-changes indicator in the window title."""
         if self._current_path:
             name = os.path.basename(self._current_path)
             marker = " •" if self._unsaved_changes else ""
@@ -1480,38 +1984,29 @@ class InteractivePDFEditor:
                             else "PDF Editor")
 
     def _mark_dirty(self):
-        """Mark the document as having unsaved changes."""
         if not self._unsaved_changes:
             self._unsaved_changes = True
             self._update_title()
 
     def _push_history(self, cmd):
-        """
-        Append cmd to the history stack, respecting MAX_UNDO_STEPS.
-
-        When the stack is full, the oldest entry is popped and its snapshot
-        file is deleted before the new command is appended. This prevents
-        unbounded temporary-file accumulation on large PDFs.
-        """
-        # Discard (and clean up) any forward history that is now unreachable.
         discarded = self._history[self._history_idx + 1:]
         for old_cmd in discarded:
             old_cmd.cleanup()
         self._history = self._history[:self._history_idx + 1]
 
-        # Enforce the undo depth limit — evict the oldest entry if needed.
         if len(self._history) >= MAX_UNDO_STEPS:
             evicted = self._history.pop(0)
             evicted.cleanup()
-            # history_idx shifts left by one because we removed from the front.
             self._history_idx = max(-1, self._history_idx - 1)
 
         self._history.append(cmd)
         self._history_idx = len(self._history) - 1
         self._mark_dirty()
+        # Schedule a thumbnail re-render for the modified page.
+        # _thumb_mark_dirty is safe to call before _thumb_dirty is initialised.
+        self._thumb_mark_dirty(self.current_page_idx)
 
     def _clear_history(self):
-        """Clean up all snapshot files and reset the history stack."""
         for cmd in self._history:
             cmd.cleanup()
         self._history.clear()
@@ -1522,14 +2017,14 @@ class InteractivePDFEditor:
             self._flash_status("Nothing to undo", color=PALETTE["fg_secondary"])
             return
         cmd = self._history[self._history_idx]
-        # Derive a human-readable label from the command class name
         label = type(cmd).__name__.replace("Command", "").replace("Insert", "Insert ")
         try:
             cmd.undo()
             self._history_idx -= 1
             self._mark_dirty()
+            self._thumb_mark_dirty(self.current_page_idx)
             self._render()
-            self._flash_status(f"↩ Undid {label}")   # ← NEW: undo feedback
+            self._flash_status(f"↩ Undid {label}")
         except NotImplementedError:
             messagebox.showinfo("Undo", "This action cannot be undone.")
         except Exception as ex:
@@ -1545,8 +2040,9 @@ class InteractivePDFEditor:
             cmd.execute()
             self._history_idx += 1
             self._mark_dirty()
+            self._thumb_mark_dirty(self.current_page_idx)
             self._render()
-            self._flash_status(f"↪ Redid {label}")   # ← NEW: redo feedback
+            self._flash_status(f"↪ Redid {label}")
         except Exception as ex:
             messagebox.showerror("Redo Error", str(ex))
 
@@ -1558,13 +2054,16 @@ class InteractivePDFEditor:
                 "Unsaved Changes",
                 "You have unsaved changes.\nSave before closing?",
             )
-            if answer is None:   # Cancel
+            if answer is None:
                 return
-            if answer:           # Yes — save
+            if answer:
                 if not self._save_pdf():
-                    return       # Save was cancelled, don't close
+                    return
         self._commit_all_boxes()
         self._img_drag_cancel()
+        self._annot_drag_cancel()
+        if self._thumb_after_id:
+            self.root.after_cancel(self._thumb_after_id)
         self._clear_history()
         if self.doc:
             self.doc.close()
