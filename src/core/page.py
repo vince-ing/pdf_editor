@@ -114,6 +114,18 @@ class PDFPage:
         """Returns text blocks as (x0, y0, x1, y1, text, block_no, block_type)."""
         return self._page.get_text("blocks")
 
+    def get_text_rawdict(self) -> dict:
+        """
+        Return the full page text as a nested dict with per-character bboxes.
+
+        Structure: {"blocks": [{"type": 0, "lines": [{"spans": [{"chars":
+            [{"c": str, "bbox": (x0,y0,x1,y1), "origin": (x,y)}, ...]}]}]}]}
+
+        type 0 = text block, type 1 = image block.
+        Used by SelectTextTool for character-level hit detection.
+        """
+        return self._page.get_text("rawdict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+
     def get_links(self) -> list[dict]:
         return self._page.get_links()
 

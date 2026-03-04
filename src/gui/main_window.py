@@ -59,6 +59,7 @@ from src.gui.tools.redact_tool import RedactTool
 from src.gui.tools.draw_tool   import DrawTool
 
 from src.utils.recent_files import RecentFiles
+from src.utils.selection_compositor import composite_selection
 
 try:
     from src.services.merge_split_service  import MergeSplitService
@@ -1167,7 +1168,7 @@ class InteractivePDFEditor:
     def _render_single(self) -> None:
         page = self.doc.get_page(self.current_page_idx)
         ppm  = page.render_to_ppm(scale=self.scale_factor)
-        self.tk_image = tk.PhotoImage(data=ppm)
+        self.tk_image = self._make_page_image(ppm, self.current_page_idx)
         iw = int(page.width  * self.scale_factor)
         ih = int(page.height * self.scale_factor)
         cw = self.canvas.winfo_width()
@@ -1297,7 +1298,7 @@ class InteractivePDFEditor:
             try:
                 page = doc.get_page(idx)
                 ppm  = page.render_to_ppm(scale=self.scale_factor)
-                self._cont_images[key] = tk.PhotoImage(data=ppm)
+                self._cont_images[key] = self._make_page_image(ppm, idx)
             except Exception:
                 return
         img = self._cont_images[key]
@@ -1308,6 +1309,23 @@ class InteractivePDFEditor:
             ox, y, anchor=tk.NW, image=img,
             tags=("page_img", f"page_img_{idx}"))
         self.canvas.tag_lower(f"page_bg_{idx}", f"page_img_{idx}")
+    
+    def _make_page_image(self, ppm: bytes, page_idx: int) -> tk.PhotoImage:
+        """
+        Convert raw PPM bytes to a tk.PhotoImage, compositing any active
+        text-selection highlight rectangles directly into the pixel data.
+
+        When the select_text tool is inactive or has no selection for this
+        page, this is essentially free — composite_selection just decodes
+        the PPM and returns immediately with no overlay drawn.
+        """
+        sel   = self._get_tool("select_text")
+        rects = sel.get_highlight_rects_for_page(page_idx) if sel else []
+        return composite_selection(
+            ppm_bytes=ppm,
+            rects=rects,
+            scale=self.scale_factor,
+        )
 
     def _render_cont_page_refresh(self, page_idx: int) -> None:
         if not self.doc or not self._continuous_mode:

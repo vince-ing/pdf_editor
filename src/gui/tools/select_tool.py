@@ -1,234 +1,262 @@
 """
-SelectTextTool — click or rubber-band drag to select and copy PDF text blocks.
+SelectTextTool — click-drag text selection with character-level precision.
 
-Text blocks are loaded from PyMuPDF's get_text("blocks") call when the tool
-activates (or the page changes).  Invisible hit-target rectangles are drawn
-over each block on the canvas; a visible highlight overlay is shown for
-selected blocks.
+Architecture
+------------
+This tool owns ONLY selection state — it never draws canvas items.
+The highlight is rendered by compositing a semi-transparent blue rectangle
+directly into the PIL page image before it becomes a tk.PhotoImage.
+This gives a perfectly smooth, anti-aliased highlight identical to a browser
+or native PDF viewer.
+
+The rendering pipeline calls ``get_highlight_rects_for_page(page_idx)`` to
+retrieve the current selection as a list of PDF-space (x0,y0,x1,y1) rects
+(one per line), then blends them onto the image with PIL before display.
+
+Whenever the selection changes the tool calls ``ctx.render()`` so the window
+re-runs its normal render path — the compositing happens automatically.
+
+Interaction model
+-----------------
+• Mouse-down  : anchor the selection start at the nearest character.
+• Mouse-drag  : extend selection live; re-renders on every motion event.
+• Mouse-up    : finalise; auto-copies to clipboard if text was selected.
+• Click empty : clears selection.
+• Ctrl+C      : explicit copy.
+• on_motion() : ibeam cursor over text, arrow elsewhere.
 """
 
-import tkinter as tk
+from __future__ import annotations
 
+import tkinter as tk
 from src.gui.tools.base_tool import BaseTool
 from src.gui.theme import PALETTE
 
 
 class SelectTextTool(BaseTool):
-    """
-    Click a text block to select/deselect it.
-    Drag a rubber-band to select multiple overlapping blocks.
-    Ctrl+C (or automatic after release) copies selected text to the clipboard.
-    """
 
-    def __init__(self, ctx, root: tk.Tk):
+    def __init__(self, ctx, root: tk.Tk) -> None:
         super().__init__(ctx)
         self._root = root
 
-        self._blocks: list       = []   # (x0, y0, x1, y1, text)
-        self._hit_ids: list[int] = []   # canvas item IDs for hit targets
-        self._hl_ids: list[int]  = []   # canvas item IDs for highlight overlays
-        self._selected: set[int] = set()
+        # Flat list of character records for the current page.
+        # Each entry: {"bbox": (x0,y0,x1,y1), "c": str,
+        #              "line_idx": int, "block_idx": int}
+        self._chars: list[dict] = []
 
-        self._drag_start: tuple | None = None
-        self._rubber_band: int | None  = None
+        # Anchor (mouse-down) and head (current drag end) indices into _chars
+        self._anchor_idx: int | None = None
+        self._head_idx:   int | None = None
+
+        self._dragging = False
+
+        # Track the last rendered selection so we only re-render on change
+        self._last_rendered_range: tuple[int, int] | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
-    def activate(self):
+    def activate(self) -> None:
         self.ctx.canvas.config(cursor="ibeam")
-        self._load_blocks()
+        self._load_chars()
 
-    def deactivate(self):
-        self.clear()
+    def deactivate(self) -> None:
+        # Clear selection and force a clean render to remove the highlight
+        had_selection = self._anchor_idx is not None
+        self._chars      = []
+        self._anchor_idx = None
+        self._head_idx   = None
+        self._dragging   = False
+        self._last_rendered_range = None
+        if had_selection:
+            self.ctx.render()
 
-    # ── public helpers (called by main window on page change) ─────────────────
+    def reload(self) -> None:
+        """Re-load after a page change or re-render (called by main_window)."""
+        self._anchor_idx  = None
+        self._head_idx    = None
+        self._dragging    = False
+        self._last_rendered_range = None
+        self._load_chars()
 
-    def reload(self):
-        """Re-load text blocks after a page change or re-render."""
-        self.clear()
-        self._load_blocks()
+    # ── public API for the render pipeline ────────────────────────────────────
 
-    def copy(self):
-        """Copy all selected block text to the system clipboard."""
-        if not self._selected or not self._blocks:
-            return
-        ordered = sorted(
-            self._selected,
-            key=lambda i: (self._blocks[i][1], self._blocks[i][0]),
-        )
-        combined = "\n\n".join(self._blocks[i][4] for i in ordered)
-        if not combined:
+    def get_highlight_rects_for_page(self, page_idx: int) -> list[tuple]:
+        """
+        Return a list of (x0, y0, x1, y1) rects in PDF user-space points,
+        one per selected line, for the given page.
+
+        Returns [] when there is no selection or the selection is on a
+        different page.  Called by main_window during render.
+        """
+        if page_idx != self.ctx.current_page:
+            return []
+        rng = self._selection_range()
+        if rng is None:
+            return []
+        lo, hi = rng
+        selected = self._chars[lo : hi + 1]
+        if not selected:
+            return []
+
+        # Group by line_idx
+        lines: dict[int, list[dict]] = {}
+        for ch in selected:
+            lines.setdefault(ch["line_idx"], []).append(ch)
+
+        rects = []
+        for line_chars in lines.values():
+            x0 = min(ch["bbox"][0] for ch in line_chars)
+            y0 = min(ch["bbox"][1] for ch in line_chars)
+            x1 = max(ch["bbox"][2] for ch in line_chars)
+            y1 = max(ch["bbox"][3] for ch in line_chars)
+            rects.append((x0, y0, x1, y1))
+        return rects
+
+    # ── clipboard ─────────────────────────────────────────────────────────────
+
+    def copy(self) -> None:
+        text = self._selection_text()
+        if not text:
             return
         try:
             self._root.clipboard_clear()
-            self._root.clipboard_append(combined)
+            self._root.clipboard_append(text)
             self._root.update()
         except Exception:
             pass
-        count = len(self._selected)
-        label = "block" if count == 1 else "blocks"
-        self.ctx.flash_status(f"✓ Copied {count} text {label} to clipboard")
+        self.ctx.flash_status("✓ Copied selected text to clipboard")
 
-    def clear(self):
-        """Remove all canvas overlays and reset internal state."""
-        self.ctx.canvas.delete("textsel")
-        self._blocks    = []
-        self._hit_ids   = []
-        self._hl_ids    = []
-        self._selected  = set()
-        if self._rubber_band is not None:
-            self.ctx.canvas.delete(self._rubber_band)
-            self._rubber_band = None
-        self._drag_start = None
+    # ── mouse events ─────────────────────────────────────────────────────────
 
-    # ── events ────────────────────────────────────────────────────────────────
+    def on_click(self, canvas_x: float, canvas_y: float) -> None:
+        self._dragging   = True
+        self._anchor_idx = self._nearest_char(canvas_x, canvas_y)
+        self._head_idx   = self._anchor_idx
+        self._trigger_render_if_changed()
 
-    def on_click(self, canvas_x: float, canvas_y: float):
-        self._clear_selection()
-        self._drag_start  = (canvas_x, canvas_y)
-        self._rubber_band = None
-
-    def on_drag(self, canvas_x: float, canvas_y: float):
-        if self._drag_start is None:
+    def on_drag(self, canvas_x: float, canvas_y: float) -> None:
+        if not self._dragging or self._anchor_idx is None:
             return
-        x0, y0 = self._drag_start
-        if self._rubber_band is None:
-            self._rubber_band = self.ctx.canvas.create_rectangle(
-                x0, y0, canvas_x, canvas_y,
-                outline=PALETTE["accent_light"],
-                fill=PALETTE["accent_dim"],
-                width=1, stipple="gray25",
-            )
-        else:
-            self.ctx.canvas.coords(self._rubber_band, x0, y0, canvas_x, canvas_y)
-        self._update_from_drag(
-            min(x0, canvas_x), min(y0, canvas_y),
-            max(x0, canvas_x), max(y0, canvas_y),
-        )
+        new_head = self._nearest_char(canvas_x, canvas_y)
+        if new_head != self._head_idx:
+            self._head_idx = new_head
+            self._trigger_render_if_changed()
 
-    def on_release(self, canvas_x: float, canvas_y: float):
-        if self._rubber_band is not None:
-            self.ctx.canvas.delete(self._rubber_band)
-            self._rubber_band = None
-
-        if self._drag_start is None:
+    def on_release(self, canvas_x: float, canvas_y: float) -> None:
+        self._dragging = False
+        if self._anchor_idx is None:
             return
-        x0, y0          = self._drag_start
-        self._drag_start = None
-
-        is_click = abs(canvas_x - x0) < 5 and abs(canvas_y - y0) < 5
-        if is_click:
-            pdf_x, pdf_y = self._canvas_to_pdf(canvas_x, canvas_y)
-            for i, (bx0, by0, bx1, by1, _txt) in enumerate(self._blocks):
-                if bx0 <= pdf_x <= bx1 and by0 <= pdf_y <= by1:
-                    self._toggle_block(i)
-                    break
-
-        if self._selected:
+        self._head_idx = self._nearest_char(canvas_x, canvas_y)
+        self._trigger_render_if_changed()
+        text = self._selection_text()
+        if text and text.strip():
             self.copy()
 
-    def on_motion(self, canvas_x: float, canvas_y: float):
-        """Show faint hover tint when not in a drag."""
-        if self._drag_start is not None:
+    def on_motion(self, canvas_x: float, canvas_y: float) -> None:
+        if self._dragging:
             return
         pdf_x, pdf_y = self._canvas_to_pdf(canvas_x, canvas_y)
-        for i, (x0, y0, x1, y1, _txt) in enumerate(self._blocks):
-            if i in self._selected:
-                continue
-            inside = x0 <= pdf_x <= x1 and y0 <= pdf_y <= y1
-            if i < len(self._hl_ids):
-                hl = self._hl_ids[i]
-                if inside:
-                    self.ctx.canvas.itemconfig(
-                        hl, state="normal",
-                        fill=PALETTE["fg_dim"], stipple="gray50",
-                    )
-                else:
-                    self.ctx.canvas.itemconfig(hl, state="hidden")
+        over_text = any(
+            ch["bbox"][0] <= pdf_x <= ch["bbox"][2] and
+            ch["bbox"][1] <= pdf_y <= ch["bbox"][3]
+            for ch in self._chars
+        )
+        self.ctx.canvas.config(cursor="ibeam" if over_text else "arrow")
 
     # ── internals ─────────────────────────────────────────────────────────────
 
-    def _load_blocks(self):
+    def _trigger_render_if_changed(self) -> None:
+        """Only call ctx.render() when the selection range actually changes."""
+        rng = self._selection_range()
+        if rng != self._last_rendered_range:
+            self._last_rendered_range = rng
+            self.ctx.render()
+
+    def _load_chars(self) -> None:
+        self._chars = []
         if not self.ctx.doc:
             return
-        page = self.ctx.doc.get_page(self.ctx.current_page)
-        raw  = page.get_text_blocks()
-        self._blocks = [
-            (x0, y0, x1, y1, txt.strip())
-            for x0, y0, x1, y1, txt, _bno, btype in raw
-            if btype == 0 and txt.strip()
-        ]
-        self._hit_ids = []
-        self._hl_ids  = []
-        self._selected = set()
+        page    = self.ctx.doc.get_page(self.ctx.current_page)
+        rawdict = page.get_text_rawdict()
+        if not rawdict:
+            return
 
+        line_counter = 0
+        for block_idx, block in enumerate(rawdict.get("blocks", [])):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    for ch in span.get("chars", []):
+                        c    = ch.get("c", "")
+                        bbox = ch.get("bbox")
+                        if not c or bbox is None:
+                            continue
+                        self._chars.append({
+                            "bbox":      tuple(bbox),
+                            "c":         c,
+                            "line_idx":  line_counter,
+                            "block_idx": block_idx,
+                        })
+                line_counter += 1
+
+        # Reading order: top-to-bottom, left-to-right
+        self._chars.sort(key=lambda ch: (round(ch["bbox"][1]), ch["bbox"][0]))
+
+    def _nearest_char(self, canvas_x: float, canvas_y: float) -> int | None:
+        if not self._chars:
+            return None
+        pdf_x, pdf_y = self._canvas_to_pdf(canvas_x, canvas_y)
+
+        # Prefer exact bbox hit
+        exact: list[tuple[float, int]] = []
+        for i, ch in enumerate(self._chars):
+            x0, y0, x1, y1 = ch["bbox"]
+            if x0 <= pdf_x <= x1 and y0 <= pdf_y <= y1:
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                exact.append(((pdf_x - cx) ** 2 + (pdf_y - cy) ** 2, i))
+        if exact:
+            return min(exact)[1]
+
+        # Fall back to nearest centre
+        best_d, best_i = float("inf"), 0
+        for i, ch in enumerate(self._chars):
+            x0, y0, x1, y1 = ch["bbox"]
+            d = (pdf_x - (x0+x1)/2) ** 2 + (pdf_y - (y0+y1)/2) ** 2
+            if d < best_d:
+                best_d, best_i = d, i
+        return best_i
+
+    def _selection_range(self) -> tuple[int, int] | None:
+        if self._anchor_idx is None or self._head_idx is None:
+            return None
+        return min(self._anchor_idx, self._head_idx), \
+               max(self._anchor_idx, self._head_idx)
+
+    def _selection_text(self) -> str:
+        rng = self._selection_range()
+        if not rng:
+            return ""
+        lo, hi = rng
+        selected = self._chars[lo : hi + 1]
+        if not selected:
+            return ""
+        result     = []
+        prev_line  = selected[0]["line_idx"]
+        prev_block = selected[0]["block_idx"]
+        for ch in selected:
+            if ch["block_idx"] != prev_block:
+                result.append("\n\n")
+                prev_block = ch["block_idx"]
+                prev_line  = ch["line_idx"]
+            elif ch["line_idx"] != prev_line:
+                result.append("\n")
+                prev_line = ch["line_idx"]
+            result.append(ch["c"])
+        return "".join(result)
+
+    def _canvas_to_pdf(self, cx: float, cy: float) -> tuple[float, float]:
         ox = self.ctx.page_offset_x
         oy = self.ctx.page_offset_y
         s  = self.ctx.scale
-
-        for i, (x0, y0, x1, y1, _txt) in enumerate(self._blocks):
-            cx0, cy0 = ox + x0 * s, oy + y0 * s
-            cx1, cy1 = ox + x1 * s, oy + y1 * s
-
-            self.ctx.canvas.create_rectangle(
-                cx0, cy0, cx1, cy1,
-                outline=PALETTE["fg_dim"], width=1, dash=(3, 6),
-                fill="", tags=("textsel", f"textsel_outline_{i}"),
-            )
-            hl_id = self.ctx.canvas.create_rectangle(
-                cx0, cy0, cx1, cy1,
-                fill=PALETTE["accent"], outline=PALETTE["accent_light"],
-                width=1, stipple="gray25",
-                tags=("textsel", f"textsel_hl_{i}"),
-            )
-            self.ctx.canvas.itemconfig(hl_id, state="hidden")
-
-            hit_id = self.ctx.canvas.create_rectangle(
-                cx0, cy0, cx1, cy1,
-                fill="", outline="",
-                tags=("textsel", f"textsel_hit_{i}"),
-            )
-            self._hit_ids.append(hit_id)
-            self._hl_ids.append(hl_id)
-
-    def _clear_selection(self):
-        for i in list(self._selected):
-            if i < len(self._hl_ids):
-                self.ctx.canvas.itemconfig(self._hl_ids[i], state="hidden")
-        self._selected = set()
-
-    def _toggle_block(self, idx: int):
-        if idx in self._selected:
-            self._selected.discard(idx)
-            if idx < len(self._hl_ids):
-                self.ctx.canvas.itemconfig(self._hl_ids[idx], state="hidden")
-        else:
-            self._selected.add(idx)
-            if idx < len(self._hl_ids):
-                self.ctx.canvas.itemconfig(
-                    self._hl_ids[idx], state="normal",
-                    fill=PALETTE["accent"], stipple="gray25",
-                )
-
-    def _update_from_drag(self, cx0: float, cy0: float, cx1: float, cy1: float):
-        ox = self.ctx.page_offset_x
-        oy = self.ctx.page_offset_y
-        s  = self.ctx.scale
-        for i, (bx0, by0, bx1, by1, _txt) in enumerate(self._blocks):
-            bcx0 = ox + bx0 * s
-            bcy0 = oy + by0 * s
-            bcx1 = ox + bx1 * s
-            bcy1 = oy + by1 * s
-            overlaps = not (bcx1 < cx0 or bcx0 > cx1 or bcy1 < cy0 or bcy0 > cy1)
-            hl = self._hl_ids[i] if i < len(self._hl_ids) else None
-            if overlaps:
-                self._selected.add(i)
-                if hl:
-                    self.ctx.canvas.itemconfig(
-                        hl, state="normal",
-                        fill=PALETTE["accent"], stipple="gray25",
-                    )
-            else:
-                self._selected.discard(i)
-                if hl:
-                    self.ctx.canvas.itemconfig(hl, state="hidden")
+        return (cx - ox) / s, (cy - oy) / s
