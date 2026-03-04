@@ -25,6 +25,12 @@ import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 
+try:
+    from PIL import Image, ImageTk, ImageDraw
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
 from src.core.document import PDFDocument
 from src.services.page_service       import PageService
 from src.services.image_service      import ImageService
@@ -125,7 +131,8 @@ class AppContext:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _mk_btn(parent, text, cmd, bg=None, fg=None, font=None, padx=PAD_M, pady=PAD_S, **kw):
-    return tk.Button(
+    """Fully flat tk.Button — zero relief, zero border, hover via activebackground."""
+    btn = tk.Button(
         parent, text=text, command=cmd,
         bg=bg or PALETTE["bg_hover"],
         fg=fg or PALETTE["fg_primary"],
@@ -138,6 +145,112 @@ def _mk_btn(parent, text, cmd, bg=None, fg=None, font=None, padx=PAD_M, pady=PAD
         highlightthickness=0,
         **kw,
     )
+    return btn
+
+
+class RoundedButton(tk.Canvas):
+    """
+    A canvas-based button with a true rounded-rectangle background.
+    Works in standard tkinter without any external dependencies.
+    Falls back to a flat tk.Button appearance if the canvas is too small.
+    """
+    _RADIUS = 6
+
+    def __init__(self, parent, text="", command=None,
+                 bg=None, fg=None, hover_bg=None,
+                 active_bg=None, active_fg=None,
+                 font=None, width=None, height=28,
+                 icon_img=None,   # optional PIL PhotoImage
+                 **kw):
+        self._bg       = bg       or PALETTE["bg_hover"]
+        self._fg       = fg       or PALETTE["fg_primary"]
+        self._hover_bg = hover_bg or PALETTE["bg_card"]
+        self._act_bg   = active_bg or PALETTE["accent_dim"]
+        self._act_fg   = active_fg or PALETTE["accent_light"]
+        self._font     = font or FONT_LABEL
+        self._text     = text
+        self._cmd      = command
+        self._icon_img = icon_img
+        self._pressed  = False
+
+        # Estimate canvas width if not given
+        if width is None:
+            char_px = 7
+            width = max(40, len(text) * char_px + 24)
+
+        super().__init__(
+            parent,
+            width=width, height=height,
+            bg=PALETTE["bg_panel"],   # outer canvas matches panel
+            highlightthickness=0, bd=0,
+            cursor="hand2",
+            **kw,
+        )
+        self._w = width
+        self._h = height
+        self._draw(self._bg)
+
+        self.bind("<Enter>",           self._on_enter)
+        self.bind("<Leave>",           self._on_leave)
+        self.bind("<ButtonPress-1>",   self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
+
+    def _rounded_rect(self, x1, y1, x2, y2, r, **kw):
+        """Draw a rounded rectangle on this canvas."""
+        self.create_arc(x1,   y1,   x1+2*r, y1+2*r, start=90,  extent=90,  style="pieslice", **kw)
+        self.create_arc(x2-2*r, y1, x2,   y1+2*r, start=0,   extent=90,  style="pieslice", **kw)
+        self.create_arc(x1,   y2-2*r, x1+2*r, y2, start=180, extent=90,  style="pieslice", **kw)
+        self.create_arc(x2-2*r, y2-2*r, x2, y2,   start=270, extent=90,  style="pieslice", **kw)
+        self.create_rectangle(x1+r, y1, x2-r, y2, **kw)
+        self.create_rectangle(x1, y1+r, x2, y2-r, **kw)
+
+    def _draw(self, bg_color):
+        self.delete("all")
+        r = self._RADIUS
+        self._rounded_rect(1, 1, self._w-1, self._h-1, r,
+                           fill=bg_color, outline=PALETTE["border"])
+        if self._icon_img:
+            self.create_image(self._w // 2, self._h // 2,
+                              image=self._icon_img, anchor="center")
+        elif self._text:
+            fg = self._act_fg if self._pressed else self._fg
+            self.create_text(self._w // 2, self._h // 2,
+                             text=self._text, fill=fg,
+                             font=self._font, anchor="center")
+
+    def _on_enter(self, _=None):
+        self._draw(self._act_bg if self._pressed else self._hover_bg)
+
+    def _on_leave(self, _=None):
+        self._pressed = False
+        self._draw(self._bg)
+
+    def _on_press(self, _=None):
+        self._pressed = True
+        self._draw(self._act_bg)
+
+    def _on_release(self, _=None):
+        self._pressed = False
+        self._draw(self._hover_bg)
+        if self._cmd:
+            self._cmd()
+
+    def configure(self, **kw):
+        if "bg" in kw:
+            self._bg = kw.pop("bg")
+        if "fg" in kw:
+            self._fg = kw.pop("fg")
+        if "text" in kw:
+            self._text = kw.pop("text")
+        if "state" in kw:
+            state = kw.pop("state")
+            self._cmd_enabled = (state != tk.DISABLED)
+            self._draw(self._bg)
+        self._draw(self._bg)
+        if kw:
+            super().configure(**kw)
+
+    config = configure
 
 
 def _mk_label(parent, text, fg=None, font=None, **kw):
@@ -207,6 +320,19 @@ class InteractivePDFEditor:
         self.root.geometry("1280x860")
         self.root.minsize(900, 640)
         self.root.configure(bg=PALETTE["bg_dark"])
+
+        # ── Tool keyboard shortcuts ──────────────────────────────────────────
+        # Maps lowercase key -> tool name
+        self._TOOL_KEYS = {
+            "v": "select_text",
+            "t": "text",
+            "h": "highlight",
+            "r": "rect_annot",
+            "d": "draw",
+            "x": "redact",
+            "i": "insert_image",
+            "e": "extract",
+        }
 
         # Services
         self.page_service        = PageService()
@@ -395,12 +521,35 @@ class InteractivePDFEditor:
         self._build_statusbar()
         self._startup_frame = None
 
-    # ── Top bar ───────────────────────────────────────────────────────────────
+    # ── Top bar / custom title bar ────────────────────────────────────────────
 
     def _build_topbar(self):
         bar = tk.Frame(self.root, bg=PALETTE["bg_mid"], height=48)
         bar.pack(fill=tk.X)
         bar.pack_propagate(False)
+        self._topbar = bar
+
+        # Window drag on the bar background
+
+        # ── Far right: OS window controls (close / max / min) ────────────────
+        wctrl = tk.Frame(bar, bg=PALETTE["bg_mid"])
+        wctrl.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _wc_btn(txt, cmd, hover_color, text_color=PALETTE["fg_secondary"]):
+            b = tk.Button(wctrl, text=txt, command=cmd,
+                          bg=PALETTE["bg_mid"], fg=text_color,
+                          activebackground=hover_color,
+                          activeforeground="#FFFFFF",
+                          font=("Helvetica Neue", 11), relief="flat", bd=0,
+                          padx=14, pady=0, cursor="hand2", highlightthickness=0)
+            b.pack(side=tk.LEFT, fill=tk.Y)
+            b.bind("<Enter>", lambda e, b=b, c=hover_color: b.config(bg=c))
+            b.bind("<Leave>", lambda e, b=b: b.config(bg=PALETTE["bg_mid"]))
+            return b
+
+        _wc_btn("✕", self._wc_close,    "#C0635A", "#E8E8E8")
+        _wc_btn("□", self._wc_maximize, PALETTE["bg_hover"])
+        _wc_btn("−", self._wc_minimize, PALETTE["bg_hover"])
 
         # ── Left cluster: logo + file actions ────────────────────────────────
         left = tk.Frame(bar, bg=PALETTE["bg_mid"])
@@ -434,7 +583,7 @@ class InteractivePDFEditor:
         Tooltip(self._topbar_btn(left, "↩ Undo", self._undo), "Undo  (Ctrl+Z)")
         Tooltip(self._topbar_btn(left, "↪ Redo", self._redo), "Redo  (Ctrl+Y)")
 
-        # ── Centre: document title ────────────────────────────────────────────
+        # ── Centre: document title (also draggable) ───────────────────────────
         self._title_lbl = tk.Label(
             bar, text="PDF Editor",
             bg=PALETTE["bg_mid"], fg=PALETTE["fg_primary"],
@@ -444,7 +593,7 @@ class InteractivePDFEditor:
 
         # ── Right cluster: zoom + view + secondary actions ────────────────────
         right = tk.Frame(bar, bg=PALETTE["bg_mid"])
-        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, PAD_M))
+        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 0))
 
         # Secondary actions
         if _HAS_MERGE_SPLIT:
@@ -483,7 +632,7 @@ class InteractivePDFEditor:
         Tooltip(self._btn_scroll, "Continuous scroll view")
         self._update_view_mode_buttons()
 
-        # Key bindings
+        # ── Key bindings ──────────────────────────────────────────────────────
         self.root.bind("<Control-o>",     lambda e: self._open_pdf())
         self.root.bind("<Control-s>",     lambda e: self._save_pdf())
         self.root.bind("<Control-S>",     lambda e: self._save_pdf_as())
@@ -500,8 +649,40 @@ class InteractivePDFEditor:
         self.root.bind("<F3>",            lambda e: self._search_bar_next())
         self.root.bind("<Shift-F3>",      lambda e: self._search_bar_prev())
         self.root.bind("<Control-t>",     lambda e: self._toggle_right_panel())
+        # Single-key tool shortcuts (only when no entry is focused)
+        self.root.bind("<KeyPress>",      self._on_key_press)
 
         self._update_zoom_label()
+
+    # ── Window control helpers (wired to OS, no overrideredirect) ─────────
+
+    def _wc_close(self):
+        self._on_closing()
+
+    def _wc_minimize(self):
+        self.root.iconify()
+
+    def _wc_maximize(self):
+        self.root.state("zoomed")
+
+    def _wc_restore(self):
+        self.root.state("normal")
+
+    # ── Single-key tool shortcuts ──────────────────────────────────────────────
+
+    def _on_key_press(self, event):
+        """Route single-key presses to tools; ignore when an Entry/Text is focused."""
+        focused = self.root.focus_get()
+        if isinstance(focused, (tk.Entry, tk.Text)):
+            return
+        key = event.keysym.lower()
+        if key in self._TOOL_KEYS:
+            tool = self._TOOL_KEYS[key]
+            self._select_tool(tool)
+            self._flash_status(
+                f"Tool: {tool.replace('_', ' ').title()}  [{key.upper()}]",
+                color=PALETTE["accent_light"], duration_ms=1200,
+            )
 
     def _topbar_btn(self, parent, text, cmd, padx=PAD_M, **kw):
         btn = tk.Button(
@@ -520,6 +701,37 @@ class InteractivePDFEditor:
 
     # ── Left icon toolbar ─────────────────────────────────────────────────────
 
+    # ── Pillow icon helpers ────────────────────────────────────────────────────
+
+    def _make_icon(self, symbol: str, size: int = 20,
+                   fg: str | None = None, bg: str | None = None) -> "tk.PhotoImage | None":
+        """
+        Render a Unicode symbol into a crisp anti-aliased PhotoImage using Pillow.
+        Falls back to None (caller uses plain text) if Pillow is not available.
+        """
+        if not _HAS_PIL:
+            return None
+        try:
+            fg  = fg or PALETTE["fg_secondary"]
+            bg  = bg or PALETTE["bg_panel"]
+            pad = 4
+            total = size + pad * 2
+            img = Image.new("RGBA", (total, total), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            # Fill background
+            r_bg = tuple(int(bg.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+            draw.rectangle([0, 0, total, total], fill=r_bg + (255,))
+            # Draw symbol — PIL may not render complex Unicode well; use text() anyway
+            r_fg = tuple(int(fg.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+            try:
+                draw.text((pad, pad), symbol, fill=r_fg + (255,))
+            except Exception:
+                pass
+            photo = ImageTk.PhotoImage(img)
+            return photo
+        except Exception:
+            return None
+
     def _build_icon_toolbar(self, parent):
         self._icon_bar = tk.Frame(
             parent, bg=PALETTE["bg_panel"],
@@ -529,22 +741,31 @@ class InteractivePDFEditor:
         self._icon_bar.pack(side=tk.LEFT, fill=tk.Y)
         self._icon_bar.pack_propagate(False)
 
+        # Keep PIL image refs alive
+        self._icon_images: list = []
+
         # Top spacer
         tk.Frame(self._icon_bar, bg=PALETTE["bg_panel"], height=PAD_M).pack()
 
         self._icon_btns: dict = {}
 
+        # Shortcut key labels per tool
+        _key_for = {v: k.upper() for k, v in self._TOOL_KEYS.items()}
+
         for entry in self._TOOLS:
             name, icon, tip, group = entry
 
             if name == "__sep__":
-                # Section label
                 tk.Frame(self._icon_bar, bg=PALETTE["border"], height=1).pack(
                     fill=tk.X, padx=8, pady=(PAD_M, 2))
-                tk.Label(self._icon_bar, text=icon,   # icon is actually the label text here
+                tk.Label(self._icon_bar, text=icon,
                          bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"],
                          font=("Helvetica Neue", 7), anchor="center").pack(fill=tk.X)
                 continue
+
+            # Build button — flat with hover bindings for crisp flat look
+            key_hint = f"  [{_key_for.get(name, '')}]" if name in _key_for else ""
+            full_tip  = tip + key_hint
 
             btn = tk.Button(
                 self._icon_bar,
@@ -554,17 +775,20 @@ class InteractivePDFEditor:
                 fg=PALETTE["fg_secondary"],
                 activebackground=PALETTE["accent_subtle"],
                 activeforeground=PALETTE["accent_light"],
-                font=("Helvetica Neue", 14),
+                font=("Helvetica Neue", 15),
                 relief="flat", bd=0,
                 width=2, pady=PAD_S,
                 cursor="hand2",
                 highlightthickness=0,
             )
             btn.pack(fill=tk.X, padx=4, pady=1)
+            # Crisp hover using Enter/Leave instead of Tk's activebackground
+            btn.bind("<Enter>", lambda e, b=btn, n=name: self._icon_hover(b, n, True))
+            btn.bind("<Leave>", lambda e, b=btn, n=name: self._icon_hover(b, n, False))
             self._icon_btns[name] = btn
-            Tooltip(btn, tip)
+            Tooltip(btn, full_tip)
 
-        # Page action buttons at the bottom
+        # ── Bottom page-action strip ──────────────────────────────────────────
         tk.Frame(self._icon_bar, bg=PALETTE["bg_panel"]).pack(fill=tk.BOTH, expand=True)
         _mk_sep(self._icon_bar).pack(fill=tk.X, padx=8, pady=(PAD_S, 2))
 
@@ -576,8 +800,7 @@ class InteractivePDFEditor:
             ("👁", self._ocr_current_page,     "OCR Page"),
         ]:
             b = tk.Button(
-                self._icon_bar, text=icon,
-                command=cmd,
+                self._icon_bar, text=icon, command=cmd,
                 bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"],
                 activebackground=PALETTE["bg_hover"],
                 activeforeground=PALETTE["fg_primary"],
@@ -587,12 +810,21 @@ class InteractivePDFEditor:
                 cursor="hand2", highlightthickness=0,
             )
             b.pack(fill=tk.X, padx=4, pady=1)
+            b.bind("<Enter>", lambda e, b=b: b.config(bg=PALETTE["bg_hover"], fg=PALETTE["fg_primary"]))
+            b.bind("<Leave>", lambda e, b=b: b.config(bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"]))
             Tooltip(b, tip)
 
         tk.Frame(self._icon_bar, bg=PALETTE["bg_panel"], height=PAD_M).pack()
-
-        # Initial active state
         self._refresh_icon_states()
+
+    def _icon_hover(self, btn: tk.Button, name: str, entering: bool):
+        """Hover colour for icon buttons — don't override the active-tool highlight."""
+        if name == self.active_tool.get():
+            return   # active tool keeps its own colour
+        if entering:
+            btn.config(bg=PALETTE["bg_hover"], fg=PALETTE["fg_primary"])
+        else:
+            btn.config(bg=PALETTE["bg_panel"], fg=PALETTE["fg_secondary"])
 
     def _select_tool(self, name: str):
         self.active_tool.set(name)
@@ -602,15 +834,9 @@ class InteractivePDFEditor:
         active = self.active_tool.get()
         for name, btn in self._icon_btns.items():
             if name == active:
-                btn.configure(
-                    bg=PALETTE["accent_subtle"],
-                    fg=PALETTE["accent_light"],
-                )
+                btn.configure(bg=PALETTE["accent_subtle"], fg=PALETTE["accent_light"])
             else:
-                btn.configure(
-                    bg=PALETTE["bg_panel"],
-                    fg=PALETTE["fg_secondary"],
-                )
+                btn.configure(bg=PALETTE["bg_panel"], fg=PALETTE["fg_secondary"])
 
     # ── Right panel (tabbed) ──────────────────────────────────────────────────
 
@@ -1598,8 +1824,12 @@ class InteractivePDFEditor:
 
     def _thumb_reorder(self, src_idx, dst_idx):
         if self._is_staging_mode:
+            if src_idx == dst_idx:
+                return
             path = self._staging_images.pop(src_idx)
-            insert_at = dst_idx if dst_idx <= src_idx else dst_idx - 1
+            # dst_idx is the target slot in the original list; adjust for the pop
+            insert_at = dst_idx if dst_idx < src_idx else dst_idx - 1
+            insert_at = max(0, min(insert_at, len(self._staging_images)))
             self._staging_images.insert(insert_at, path)
             self._thumb.reset_for_images(self._staging_images)
             self._preview_staging_image(insert_at)
@@ -1607,27 +1837,45 @@ class InteractivePDFEditor:
         else:
             if not self.doc:
                 return
-            n = self.doc.page_count
-            old = list(range(n))
-            new = old[:]
-            new.pop(src_idx)
-            insert_at = dst_idx if dst_idx <= src_idx else dst_idx - 1
-            new.insert(insert_at, src_idx)
-            if new == old:
+            if src_idx == dst_idx:
                 return
-            cmd = ReorderPagesCommand(self.doc, new)
+            n = self.doc.page_count
+            if not (0 <= src_idx < n) or not (0 <= dst_idx <= n):
+                return
+
+            # Build the new page order:
+            # start with [0..n-1], remove src, insert at dst (adjusted for removal)
+            order = list(range(n))
+            order.pop(src_idx)
+            insert_at = dst_idx if dst_idx < src_idx else dst_idx - 1
+            insert_at = max(0, min(insert_at, len(order)))
+            order.insert(insert_at, src_idx)
+
+            if order == list(range(n)):
+                return   # no-op
+
+            # Track which page the user was viewing
+            prev_page = self.current_page_idx
+            cmd = ReorderPagesCommand(self.doc, order)
             try:
                 cmd.execute()
             except Exception as ex:
                 cmd.cleanup()
                 messagebox.showerror("Reorder Error", str(ex))
                 return
-            self._push_history(cmd)
-            self.current_page_idx = new.index(old[self.current_page_idx]) if self.current_page_idx < n else 0
+
+            # Find where the previously-viewed page ended up
+            try:
+                self.current_page_idx = order.index(prev_page)
+            except ValueError:
+                self.current_page_idx = 0
+
             self._mark_dirty()
             self._cont_images.clear()
             self._thumb.reset()
             self._render()
+            # Only record in history after a successful render
+            self._push_history(cmd)
             self._flash_status(f"↕ Moved page {src_idx+1} → {insert_at+1}")
 
     def _thumb_add_page(self, after_idx: int):
@@ -2400,10 +2648,11 @@ class InteractivePDFEditor:
             self._flash_status("Nothing to undo", color=PALETTE["fg_secondary"])
             return
         try:
+            # Peek at the command type before undoing so we know how to refresh
+            cmd = (self._history._undo_stack[-1]
+                   if hasattr(self._history, "_undo_stack") else None)
             label = self._history.undo()
-            self._thumb.mark_dirty(self.current_page_idx)
-            self._cont_invalidate_cache(self.current_page_idx)
-            self._render()
+            self._after_history_step(cmd)
             self._flash_status(f"↩ Undid {label}")
         except Exception as ex:
             messagebox.showerror("Undo Error", str(ex))
@@ -2413,13 +2662,27 @@ class InteractivePDFEditor:
             self._flash_status("Nothing to redo", color=PALETTE["fg_secondary"])
             return
         try:
+            cmd = (self._history._redo_stack[-1]
+                   if hasattr(self._history, "_redo_stack") else None)
             label = self._history.redo()
-            self._thumb.mark_dirty(self.current_page_idx)
-            self._cont_invalidate_cache(self.current_page_idx)
-            self._render()
+            self._after_history_step(cmd)
             self._flash_status(f"↪ Redid {label}")
         except Exception as ex:
             messagebox.showerror("Redo Error", str(ex))
+
+    def _after_history_step(self, cmd):
+        """Refresh UI after any undo/redo step, with full reset for page-order changes."""
+        is_reorder = isinstance(cmd, (ReorderPagesCommand, DuplicatePageCommand))
+        if is_reorder or cmd is None:
+            # Page order / count may have changed — clamp index and rebuild everything
+            n = self.doc.page_count if self.doc else 0
+            self.current_page_idx = max(0, min(self.current_page_idx, n - 1))
+            self._cont_images.clear()
+            self._thumb.reset()
+        else:
+            self._thumb.mark_dirty(self.current_page_idx)
+            self._cont_invalidate_cache(self.current_page_idx)
+        self._render()
 
     # ── Status & title ────────────────────────────────────────────────────────
 
