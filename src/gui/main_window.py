@@ -18,6 +18,7 @@ from src.services.page_service import PageService
 from src.services.image_service import ImageService
 from src.services.text_service import TextService
 from src.services.annotation_service import AnnotationService
+from src.services.redaction_service import RedactionService
 
 from src.commands.insert_text import InsertTextBoxCommand
 from src.commands.rotate_page import RotatePageCommand
@@ -34,6 +35,7 @@ from src.gui.panels.thumbnail import ThumbnailPanel
 from src.gui.tools.annot_tool import AnnotationTool
 from src.gui.tools.image_tool import ImageInsertTool, ImageExtractTool
 from src.gui.tools.select_tool import SelectTextTool
+from src.gui.tools.redact_tool import RedactTool
 
 
 # ── AppContext ────────────────────────────────────────────────────────────────
@@ -111,11 +113,17 @@ class InteractivePDFEditor:
         self.text_service       = TextService()
         self.image_service      = ImageService()
         self.annotation_service = AnnotationService()
+        self.redaction_service  = RedactionService()
 
         # Annotation style state (used by AnnotationTool via getters)
         self.annot_stroke_rgb: tuple       = (220, 50, 50)
+
         self.annot_fill_rgb: tuple | None  = None
         self.annot_width: float            = 1.5
+
+        # Redaction state
+        self.redact_fill_color: tuple  = (0.0, 0.0, 0.0)   # black (0-1 floats)
+        self.redact_label: str         = ""                 # replacement text
 
         # Text defaults
         self.active_tool = tk.StringVar(value="text")
@@ -167,6 +175,11 @@ class InteractivePDFEditor:
         )
         self._tools["extract"] = ImageExtractTool(ctx, self.image_service)
         self._tools["select_text"] = SelectTextTool(ctx, self.root)
+        self._tools["redact"] = RedactTool(
+            ctx, self.redaction_service,
+            get_fill_color=lambda: self.redact_fill_color,
+            get_replacement_text=lambda: self.redact_label,
+        )
 
     def _get_tool(self, name: str):
         return self._tools.get(name)
@@ -306,6 +319,7 @@ class InteractivePDFEditor:
             ("🖍  Highlight",     "highlight",    "Drag to highlight a region"),
             ("▭  Rectangle",     "rect_annot",   "Drag to draw a rectangle annotation"),
             ("⬚  Select Text",   "select_text",  "Click or drag to select & copy text"),
+            ("⬛  Redact",        "redact",       "Drag to permanently redact content"),
         ]:
             rb = tk.Radiobutton(sb, text=label, variable=self.active_tool, value=val,
                                 bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
@@ -324,6 +338,9 @@ class InteractivePDFEditor:
 
         self._annot_opts = tk.Frame(sb, bg=PALETTE["bg_panel"])
         self._build_annot_opts(self._annot_opts)
+
+        self._redact_opts = tk.Frame(sb, bg=PALETTE["bg_panel"])
+        self._build_redact_opts(self._redact_opts)
 
         self._hint = tk.Label(sb,
             text="Click canvas to place a text box.\n"
@@ -423,6 +440,110 @@ class InteractivePDFEditor:
         )
         width_sp.pack(anchor="w", pady=(0, 4))
         width_sp.bind("<Return>", lambda e: self._on_annot_width_change())
+
+    def _build_redact_opts(self, parent):
+        """Sidebar panel shown when the Redact tool is active."""
+        # ── Fill colour swatch ────────────────────────────────────────────────
+        self._opt_lbl(parent, "Fill Color")
+        fill_row = tk.Frame(parent, bg=PALETTE["bg_panel"])
+        fill_row.pack(fill=tk.X, pady=(0, 8))
+
+        # Convert 0-1 float to hex for the button background
+        def _fill_hex():
+            r, g, b = [int(v * 255) for v in self.redact_fill_color]
+            return f"#{r:02x}{g:02x}{b:02x}"
+
+        self._redact_fill_swatch = tk.Button(
+            fill_row, text="  ", relief="flat", bd=1, width=3,
+            bg=_fill_hex(), cursor="hand2",
+            command=self._pick_redact_fill_color,
+            highlightthickness=1, highlightbackground="#555",
+        )
+        self._redact_fill_swatch.pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(fill_row, text="Pick color", bg=PALETTE["bg_panel"],
+                 fg=PALETTE["fg_secondary"], font=FONT_LABEL).pack(side=tk.LEFT)
+
+        # ── Replacement label ─────────────────────────────────────────────────
+        self._opt_lbl(parent, "Replacement Label")
+        self._redact_label_var = tk.StringVar(value=self.redact_label)
+        lbl_entry = tk.Entry(
+            parent, textvariable=self._redact_label_var,
+            bg="#252535", fg=PALETTE["fg_primary"],
+            insertbackground=PALETTE["fg_primary"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=PALETTE["border"], width=16,
+        )
+        lbl_entry.pack(fill=tk.X, pady=(0, 4))
+        lbl_entry.bind("<KeyRelease>", lambda e: self._on_redact_label_change())
+        tk.Label(parent, text='e.g. "[REDACTED]" or leave blank',
+                 bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"],
+                 font=("Helvetica", 7), wraplength=160).pack(anchor="w", pady=(0, 10))
+
+        # ── Search & redact section ───────────────────────────────────────────
+        tk.Frame(parent, bg=PALETTE["border"], height=1).pack(fill=tk.X, pady=(0, 8))
+        self._opt_lbl(parent, "Search & Redact")
+
+        self._redact_query_var = tk.StringVar()
+        query_entry = tk.Entry(
+            parent, textvariable=self._redact_query_var,
+            bg="#252535", fg=PALETTE["fg_primary"],
+            insertbackground=PALETTE["fg_primary"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=PALETTE["border"], width=16,
+        )
+        query_entry.pack(fill=tk.X, pady=(0, 4))
+        query_entry.bind("<Return>", lambda e: self._redact_find())
+
+        # Case-sensitive toggle
+        self._redact_case_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            parent, text="Case-sensitive",
+            variable=self._redact_case_var,
+            bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
+            selectcolor=PALETTE["accent_dim"],
+            activebackground=PALETTE["bg_hover"],
+            font=FONT_LABEL, cursor="hand2",
+        ).pack(anchor="w", pady=(0, 6))
+
+        # Find button
+        self._redact_find_btn = tk.Button(
+            parent, text="🔍  Find on Page",
+            bg=PALETTE["bg_hover"], fg=PALETTE["fg_primary"],
+            activebackground=PALETTE["accent_dim"],
+            font=FONT_LABEL, relief="flat", bd=0,
+            padx=8, pady=4, cursor="hand2",
+            command=self._redact_find,
+        )
+        self._redact_find_btn.pack(fill=tk.X, pady=(0, 4))
+
+        # Confirm / Cancel row (hidden until hits are found)
+        self._redact_confirm_frame = tk.Frame(parent, bg=PALETTE["bg_panel"])
+        self._redact_confirm_frame.pack(fill=tk.X, pady=(0, 4))
+        self._redact_confirm_frame.pack_forget()   # hidden initially
+
+        self._redact_hit_label = tk.Label(
+            self._redact_confirm_frame, text="",
+            bg=PALETTE["bg_panel"], fg=PALETTE["danger"],
+            font=("Helvetica", 8, "bold"),
+        )
+        self._redact_hit_label.pack(anchor="w", pady=(0, 4))
+
+        tk.Button(
+            self._redact_confirm_frame, text="⬛  Redact All",
+            bg=PALETTE["danger"], fg="#0F0F13",
+            activebackground="#C05050",
+            font=("Helvetica", 9, "bold"), relief="flat", bd=0,
+            padx=8, pady=4, cursor="hand2",
+            command=self._redact_confirm,
+        ).pack(fill=tk.X, pady=(0, 2))
+
+        tk.Button(
+            self._redact_confirm_frame, text="✕  Cancel",
+            bg=PALETTE["bg_hover"], fg=PALETTE["fg_secondary"],
+            font=FONT_LABEL, relief="flat", bd=0,
+            padx=8, pady=3, cursor="hand2",
+            command=self._redact_cancel_hits,
+        ).pack(fill=tk.X)
 
     def _build_canvas_area(self, parent):
         frame = tk.Frame(parent, bg=PALETTE["bg_dark"])
@@ -525,6 +646,12 @@ class InteractivePDFEditor:
         # Switch option panels
         self._txt_opts.pack_forget()
         self._annot_opts.pack_forget()
+        self._redact_opts.pack_forget()
+        # Also cancel any staged search hits when leaving the redact tool
+        if self.active_tool.get() != "redact":
+            rt = self._get_tool("redact")
+            if rt and rt.has_pending_hits:
+                rt.cancel_hits()
 
         hints = {
             "text":         ("crosshair", self._txt_opts,
@@ -539,6 +666,8 @@ class InteractivePDFEditor:
                              "Click a text block\nor drag to select multiple.\nCtrl+C copies the selection."),
             "extract":      ("arrow",    None,
                              "Click on an image\nto extract it."),
+            "redact":       ("crosshair", self._redact_opts,
+                             "Drag to permanently redact\na region.\n\nOr search below to find\nand redact text matches.\n\n⚠ Redaction is permanent\nand removes content."),
         }
         cursor, panel, hint_text = hints.get(tool_name, ("crosshair", None, ""))
         self.canvas.config(cursor=cursor)
@@ -612,6 +741,55 @@ class InteractivePDFEditor:
             self.annot_width = max(0.5, min(10.0, float(self._annot_width_var.get())))
         except (ValueError, tk.TclError):
             pass
+
+    # ── redaction option callbacks ────────────────────────────────────────────
+
+    def _pick_redact_fill_color(self):
+        """Open a colour picker for the redaction fill, stored as 0–1 floats."""
+        r, g, b = [int(v * 255) for v in self.redact_fill_color]
+        current  = f"#{r:02x}{g:02x}{b:02x}"
+        result   = colorchooser.askcolor(color=current, title="Redaction Fill Color")
+        if result and result[0]:
+            r8, g8, b8 = [int(v) for v in result[0]]
+            self.redact_fill_color = (r8 / 255.0, g8 / 255.0, b8 / 255.0)
+            self._redact_fill_swatch.config(bg=f"#{r8:02x}{g8:02x}{b8:02x}")
+
+    def _on_redact_label_change(self):
+        self.redact_label = self._redact_label_var.get()
+
+    def _redact_find(self):
+        """Search page for query text, show hit overlays, reveal confirm panel."""
+        rt = self._get_tool("redact")
+        if not rt or not self.doc:
+            return
+        query = self._redact_query_var.get().strip()
+        if not query:
+            self._flash_status("Enter a search term first", color=PALETTE["fg_secondary"])
+            return
+        count = rt.find_hits(query, case_sensitive=self._redact_case_var.get())
+        if count == 0:
+            self._redact_confirm_frame.pack_forget()
+            self._flash_status(f'No matches for "{query}"', color=PALETTE["fg_secondary"])
+        else:
+            self._redact_hit_label.config(text=f"⚠ {count} match(es) found")
+            self._redact_confirm_frame.pack(fill=tk.X, pady=(0, 4))
+            self._flash_status(f"Found {count} match(es) — confirm to redact",
+                               color=PALETTE["danger"])
+
+    def _redact_confirm(self):
+        """Commit all pending search hits as permanent redactions."""
+        rt = self._get_tool("redact")
+        if rt:
+            rt.confirm_redact_hits()
+        self._redact_confirm_frame.pack_forget()
+
+    def _redact_cancel_hits(self):
+        """Discard pending hits without redacting."""
+        rt = self._get_tool("redact")
+        if rt:
+            rt.cancel_hits()
+        self._redact_confirm_frame.pack_forget()
+        self._flash_status("Redaction cancelled", color=PALETTE["fg_secondary"])
 
     # ── file operations ───────────────────────────────────────────────────────
 
