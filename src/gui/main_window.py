@@ -117,7 +117,6 @@ class InteractivePDFEditor:
 
         # Annotation style state (used by AnnotationTool via getters)
         self.annot_stroke_rgb: tuple       = (220, 50, 50)
-
         self.annot_fill_rgb: tuple | None  = None
         self.annot_width: float            = 1.5
 
@@ -138,6 +137,10 @@ class InteractivePDFEditor:
 
         # History
         self._history = HistoryManager(on_change=self._on_history_change)
+
+        # Search bar state
+        self._search_bar_visible = False
+        self._search_bar_frame   = None   # set in _build_canvas_area
 
         # Build UI
         self._build_ui()
@@ -179,6 +182,8 @@ class InteractivePDFEditor:
             ctx, self.redaction_service,
             get_fill_color=lambda: self.redact_fill_color,
             get_replacement_text=lambda: self.redact_label,
+            on_navigate_page=self._navigate_to,
+            on_hit_changed=self._on_search_hit_changed,
         )
 
     def _get_tool(self, name: str):
@@ -261,6 +266,14 @@ class InteractivePDFEditor:
         Tooltip(self._topbar_btn(bar, "⟳", self._zoom_reset), "Reset zoom  (Ctrl+0)")
 
         tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
+
+        # ── Search & Redact button in top bar ──────────────────────────────
+        Tooltip(
+            self._topbar_btn(bar, "🔍  Find & Redact", self._toggle_search_bar),
+            "Search & redact text on this page  (Ctrl+F)",
+        )
+
+        tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
         self._thumb_toggle_btn = self._topbar_btn(bar, "⊞  Pages", self._toggle_thumb_panel)
         Tooltip(self._thumb_toggle_btn, "Show / hide page thumbnails  (Ctrl+T)")
 
@@ -278,8 +291,12 @@ class InteractivePDFEditor:
         self.root.bind("<Control-0>",     lambda e: self._zoom_reset())
         self.root.bind("<Left>",          lambda e: self._prev_page())
         self.root.bind("<Right>",         lambda e: self._next_page())
-        self.root.bind("<Escape>",        lambda e: self._dismiss_boxes())
+        self.root.bind("<Escape>",        lambda e: self._on_escape())
         self.root.bind("<Control-c>",     lambda e: self._copy_selected_text())
+        # Global Ctrl+F → show search bar
+        self.root.bind("<Control-f>",     lambda e: self._toggle_search_bar())
+        self.root.bind("<F3>",            lambda e: self._search_bar_next())
+        self.root.bind("<Shift-F3>",      lambda e: self._search_bar_prev())
 
     def _topbar_btn(self, parent, text, cmd) -> tk.Button:
         btn = tk.Button(parent, text=text, command=cmd,
@@ -443,12 +460,10 @@ class InteractivePDFEditor:
 
     def _build_redact_opts(self, parent):
         """Sidebar panel shown when the Redact tool is active."""
-        # ── Fill colour swatch ────────────────────────────────────────────────
         self._opt_lbl(parent, "Fill Color")
         fill_row = tk.Frame(parent, bg=PALETTE["bg_panel"])
         fill_row.pack(fill=tk.X, pady=(0, 8))
 
-        # Convert 0-1 float to hex for the button background
         def _fill_hex():
             r, g, b = [int(v * 255) for v in self.redact_fill_color]
             return f"#{r:02x}{g:02x}{b:02x}"
@@ -463,7 +478,6 @@ class InteractivePDFEditor:
         tk.Label(fill_row, text="Pick color", bg=PALETTE["bg_panel"],
                  fg=PALETTE["fg_secondary"], font=FONT_LABEL).pack(side=tk.LEFT)
 
-        # ── Replacement label ─────────────────────────────────────────────────
         self._opt_lbl(parent, "Replacement Label")
         self._redact_label_var = tk.StringVar(value=self.redact_label)
         lbl_entry = tk.Entry(
@@ -479,7 +493,6 @@ class InteractivePDFEditor:
                  bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"],
                  font=("Helvetica", 7), wraplength=160).pack(anchor="w", pady=(0, 10))
 
-        # ── Search & redact section ───────────────────────────────────────────
         tk.Frame(parent, bg=PALETTE["border"], height=1).pack(fill=tk.X, pady=(0, 8))
         self._opt_lbl(parent, "Search & Redact")
 
@@ -494,7 +507,6 @@ class InteractivePDFEditor:
         query_entry.pack(fill=tk.X, pady=(0, 4))
         query_entry.bind("<Return>", lambda e: self._redact_find())
 
-        # Case-sensitive toggle
         self._redact_case_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             parent, text="Case-sensitive",
@@ -505,7 +517,6 @@ class InteractivePDFEditor:
             font=FONT_LABEL, cursor="hand2",
         ).pack(anchor="w", pady=(0, 6))
 
-        # Find button
         self._redact_find_btn = tk.Button(
             parent, text="🔍  Find on Page",
             bg=PALETTE["bg_hover"], fg=PALETTE["fg_primary"],
@@ -516,10 +527,9 @@ class InteractivePDFEditor:
         )
         self._redact_find_btn.pack(fill=tk.X, pady=(0, 4))
 
-        # Confirm / Cancel row (hidden until hits are found)
         self._redact_confirm_frame = tk.Frame(parent, bg=PALETTE["bg_panel"])
         self._redact_confirm_frame.pack(fill=tk.X, pady=(0, 4))
-        self._redact_confirm_frame.pack_forget()   # hidden initially
+        self._redact_confirm_frame.pack_forget()
 
         self._redact_hit_label = tk.Label(
             self._redact_confirm_frame, text="",
@@ -548,6 +558,126 @@ class InteractivePDFEditor:
     def _build_canvas_area(self, parent):
         frame = tk.Frame(parent, bg=PALETTE["bg_dark"])
         frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # ── Inline search/redact bar (hidden by default) ──────────────────
+        self._search_bar_frame = tk.Frame(
+            frame, bg=PALETTE["bg_mid"], height=40,
+            highlightthickness=1, highlightbackground=PALETTE["border"],
+        )
+        # Not packed yet — shown by _toggle_search_bar()
+
+        def _sb_btn(parent, text, cmd, **kw):
+            defaults = dict(
+                bg=PALETTE["bg_hover"], fg=PALETTE["fg_primary"],
+                activebackground=PALETTE["accent_dim"],
+                activeforeground=PALETTE["accent_light"],
+                font=FONT_LABEL, relief="flat", bd=0,
+                padx=8, pady=4, cursor="hand2",
+            )
+            defaults.update(kw)
+            return tk.Button(parent, text=text, command=cmd, **defaults)
+
+        # ✕ close button — far right
+        _sb_btn(
+            self._search_bar_frame, "✕", self._toggle_search_bar,
+            bg=PALETTE["bg_mid"], fg=PALETTE["fg_dim"],
+            activebackground=PALETTE["bg_hover"],
+            font=("Helvetica", 11), padx=10,
+        ).pack(side=tk.RIGHT)
+
+        tk.Frame(self._search_bar_frame, bg=PALETTE["border"], width=1).pack(
+            side=tk.RIGHT, fill=tk.Y, pady=6)
+
+        # Redact buttons — right side
+        self._sb_redact_all_btn = tk.Button(
+            self._search_bar_frame,
+            text="⬛  Redact All",
+            command=self._search_bar_redact_all,
+            bg=PALETTE["danger"], fg="#0F0F13",
+            activebackground="#C05050",
+            font=("Helvetica", 9, "bold"), relief="flat", bd=0,
+            padx=10, pady=4, cursor="hand2",
+            state=tk.DISABLED,
+        )
+        self._sb_redact_all_btn.pack(side=tk.RIGHT, padx=(0, 4))
+
+        self._sb_redact_one_btn = tk.Button(
+            self._search_bar_frame,
+            text="Redact This",
+            command=self._search_bar_redact_one,
+            bg="#7B2020", fg="#FFCCCC",
+            activebackground="#9B3030",
+            font=FONT_LABEL, relief="flat", bd=0,
+            padx=8, pady=4, cursor="hand2",
+            state=tk.DISABLED,
+        )
+        self._sb_redact_one_btn.pack(side=tk.RIGHT, padx=(0, 4))
+
+        tk.Frame(self._search_bar_frame, bg=PALETTE["border"], width=1).pack(
+            side=tk.RIGHT, fill=tk.Y, pady=6)
+
+        # Hit counter label  "3 of 14 (p.2)"
+        self._sb_hit_lbl = tk.Label(
+            self._search_bar_frame, text="",
+            bg=PALETTE["bg_mid"], fg=PALETTE["fg_secondary"],
+            font=FONT_MONO, padx=8, width=18, anchor="w",
+        )
+        self._sb_hit_lbl.pack(side=tk.RIGHT)
+
+        # Prev / Next navigation arrows
+        self._sb_next_btn = _sb_btn(
+            self._search_bar_frame, "▶", self._search_bar_next,
+            state=tk.DISABLED,
+        )
+        self._sb_next_btn.pack(side=tk.RIGHT, padx=(0, 2))
+
+        self._sb_prev_btn = _sb_btn(
+            self._search_bar_frame, "◀", self._search_bar_prev,
+            state=tk.DISABLED,
+        )
+        self._sb_prev_btn.pack(side=tk.RIGHT, padx=(0, 2))
+
+        tk.Frame(self._search_bar_frame, bg=PALETTE["border"], width=1).pack(
+            side=tk.RIGHT, fill=tk.Y, pady=6)
+
+        # Left side: label + entry + case checkbox + Find button
+        tk.Label(
+            self._search_bar_frame,
+            text="🔍  Find & Redact:",
+            bg=PALETTE["bg_mid"], fg=PALETTE["fg_secondary"],
+            font=FONT_LABEL, padx=8,
+        ).pack(side=tk.LEFT)
+
+        self._sb_query_var = tk.StringVar()
+        self._sb_entry = tk.Entry(
+            self._search_bar_frame,
+            textvariable=self._sb_query_var,
+            bg="#252535", fg=PALETTE["fg_primary"],
+            insertbackground=PALETTE["fg_primary"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=PALETTE["border"],
+            width=26, font=FONT_UI,
+        )
+        self._sb_entry.pack(side=tk.LEFT, padx=(0, 6), ipady=4)
+        self._sb_entry.bind("<Return>",  lambda e: self._search_bar_find())
+        self._sb_entry.bind("<Escape>",  lambda e: self._toggle_search_bar())
+
+        self._sb_case_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            self._search_bar_frame,
+            text="Aa",
+            variable=self._sb_case_var,
+            bg=PALETTE["bg_mid"], fg=PALETTE["fg_secondary"],
+            selectcolor=PALETTE["accent_dim"],
+            activebackground=PALETTE["bg_hover"],
+            font=FONT_LABEL, cursor="hand2",
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        _sb_btn(
+            self._search_bar_frame, "Search All Pages", self._search_bar_find,
+        ).pack(side=tk.LEFT, padx=(0, 4))
+
+        # ── Scrollbars and canvas ─────────────────────────────────────────
         self.v_scroll = ttk.Scrollbar(frame, orient=tk.VERTICAL)
         self.v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.h_scroll = ttk.Scrollbar(frame, orient=tk.HORIZONTAL)
@@ -633,21 +763,129 @@ class InteractivePDFEditor:
         btn.pack(fill=tk.X, padx=4, pady=1)
         return btn
 
+    # ── search bar (Ctrl+F / top-bar button) ──────────────────────────────────
+
+    def _toggle_search_bar(self):
+        """Show or hide the inline search/redact bar above the canvas."""
+        self._search_bar_visible = not self._search_bar_visible
+        if self._search_bar_visible:
+            self._search_bar_frame.pack(side=tk.TOP, fill=tk.X, before=self.canvas)
+            self._sb_entry.focus_set()
+            self._sb_entry.select_range(0, tk.END)
+            if self.active_tool.get() != "redact":
+                self.active_tool.set("redact")
+                self._on_tool_change()
+        else:
+            self._search_bar_frame.pack_forget()
+            self._search_bar_clear()
+
+    def _search_bar_find(self):
+        """Search ALL pages and jump to the first hit."""
+        if not self.doc:
+            return
+        query = self._sb_query_var.get().strip()
+        if not query:
+            self._sb_hit_lbl.config(text="Enter a search term")
+            return
+
+        if self.active_tool.get() != "redact":
+            self.active_tool.set("redact")
+            self._on_tool_change()
+
+        rt = self._get_tool("redact")
+        if not rt:
+            return
+
+        total = rt.search_all_pages(query, case_sensitive=self._sb_case_var.get())
+
+        if total == 0:
+            self._sb_hit_lbl.config(text=f'No matches')
+            self._sb_prev_btn.config(state=tk.DISABLED)
+            self._sb_next_btn.config(state=tk.DISABLED)
+            self._sb_redact_one_btn.config(state=tk.DISABLED)
+            self._sb_redact_all_btn.config(state=tk.DISABLED)
+            self._flash_status(f'No matches for "{query}"', color=PALETTE["fg_secondary"])
+        # If hits found, _on_search_hit_changed callback updates the UI
+
+    def _search_bar_next(self):
+        rt = self._get_tool("redact")
+        if rt:
+            rt.navigate_next()
+
+    def _search_bar_prev(self):
+        rt = self._get_tool("redact")
+        if rt:
+            rt.navigate_prev()
+
+    def _search_bar_redact_one(self):
+        """Redact only the currently focused (yellow) hit."""
+        rt = self._get_tool("redact")
+        if rt:
+            rt.redact_current_hit()
+        self._redact_confirm_frame.pack_forget()
+
+    def _search_bar_redact_all(self):
+        """Redact every hit across all pages."""
+        rt = self._get_tool("redact")
+        if rt:
+            rt.redact_all_hits()
+        self._redact_confirm_frame.pack_forget()
+
+    def _search_bar_clear(self):
+        """Clear staged hits without redacting (called when bar is hidden)."""
+        rt = self._get_tool("redact")
+        if rt and rt.has_search_hits:
+            rt.cancel_search()
+        self._sb_hit_lbl.config(text="")
+        self._sb_prev_btn.config(state=tk.DISABLED)
+        self._sb_next_btn.config(state=tk.DISABLED)
+        self._sb_redact_one_btn.config(state=tk.DISABLED)
+        self._sb_redact_all_btn.config(state=tk.DISABLED)
+        self._redact_confirm_frame.pack_forget()
+
+    def _on_search_hit_changed(self, cur_idx: int, total: int):
+        """
+        Callback fired by RedactTool after every navigation / search update.
+        Updates the counter label and enables/disables arrow + redact buttons.
+        """
+        if total == 0 or cur_idx < 0:
+            self._sb_hit_lbl.config(text="No matches", fg=PALETTE["fg_dim"])
+            self._sb_prev_btn.config(state=tk.DISABLED)
+            self._sb_next_btn.config(state=tk.DISABLED)
+            self._sb_redact_one_btn.config(state=tk.DISABLED)
+            self._sb_redact_all_btn.config(state=tk.DISABLED)
+            return
+
+        rt = self._get_tool("redact")
+        page_idx = rt._all_hits[cur_idx][0] if rt else 0
+        page_lbl = f"p.{page_idx + 1}"
+
+        self._sb_hit_lbl.config(
+            text=f"{cur_idx + 1} of {total}  ({page_lbl})",
+            fg=PALETTE["fg_primary"],
+        )
+        can_nav = total > 1
+        self._sb_prev_btn.config(state=tk.NORMAL if can_nav else tk.DISABLED)
+        self._sb_next_btn.config(state=tk.NORMAL if can_nav else tk.DISABLED)
+        self._sb_redact_one_btn.config(state=tk.NORMAL)
+        self._sb_redact_all_btn.config(state=tk.NORMAL)
+
+        # Keep sidebar confirm panel in sync
+        self._redact_hit_label.config(text=f"⚠ {total} match(es) across all pages")
+        self._redact_confirm_frame.pack(fill=tk.X, pady=(0, 4))
+
     # ── sidebar events ────────────────────────────────────────────────────────
 
     def _on_tool_change(self):
         tool_name = self.active_tool.get()
         self._st_tool.config(text=f"Tool: {tool_name.replace('_', ' ').title()}")
 
-        # Deactivate previous tool
         if self._current_tool is not None:
             self._current_tool.deactivate()
 
-        # Switch option panels
         self._txt_opts.pack_forget()
         self._annot_opts.pack_forget()
         self._redact_opts.pack_forget()
-        # Also cancel any staged search hits when leaving the redact tool
         if self.active_tool.get() != "redact":
             rt = self._get_tool("redact")
             if rt and rt.has_pending_hits:
@@ -667,7 +905,7 @@ class InteractivePDFEditor:
             "extract":      ("arrow",    None,
                              "Click on an image\nto extract it."),
             "redact":       ("crosshair", self._redact_opts,
-                             "Drag to permanently redact\na region.\n\nOr search below to find\nand redact text matches.\n\n⚠ Redaction is permanent\nand removes content."),
+                             "Drag to permanently redact\na region.\n\nOr use 🔍 Find & Redact\n(Ctrl+F) to search by text.\n\n⚠ Redaction is permanent\nand removes content."),
         }
         cursor, panel, hint_text = hints.get(tool_name, ("crosshair", None, ""))
         self.canvas.config(cursor=cursor)
@@ -675,7 +913,6 @@ class InteractivePDFEditor:
             panel.pack(fill=tk.X, padx=12, pady=4)
         self._hint.config(text=hint_text, fg=PALETTE["fg_dim"])
 
-        # Activate new tool
         self._current_tool = self._get_tool(tool_name)
         if self._current_tool:
             self._current_tool.activate()
@@ -745,7 +982,6 @@ class InteractivePDFEditor:
     # ── redaction option callbacks ────────────────────────────────────────────
 
     def _pick_redact_fill_color(self):
-        """Open a colour picker for the redaction fill, stored as 0–1 floats."""
         r, g, b = [int(v * 255) for v in self.redact_fill_color]
         current  = f"#{r:02x}{g:02x}{b:02x}"
         result   = colorchooser.askcolor(color=current, title="Redaction Fill Color")
@@ -758,7 +994,7 @@ class InteractivePDFEditor:
         self.redact_label = self._redact_label_var.get()
 
     def _redact_find(self):
-        """Search page for query text, show hit overlays, reveal confirm panel."""
+        """Search all pages for query text via sidebar panel."""
         rt = self._get_tool("redact")
         if not rt or not self.doc:
             return
@@ -766,29 +1002,35 @@ class InteractivePDFEditor:
         if not query:
             self._flash_status("Enter a search term first", color=PALETTE["fg_secondary"])
             return
-        count = rt.find_hits(query, case_sensitive=self._redact_case_var.get())
-        if count == 0:
+        total = rt.search_all_pages(query, case_sensitive=self._redact_case_var.get())
+        if total == 0:
             self._redact_confirm_frame.pack_forget()
             self._flash_status(f'No matches for "{query}"', color=PALETTE["fg_secondary"])
-        else:
-            self._redact_hit_label.config(text=f"⚠ {count} match(es) found")
-            self._redact_confirm_frame.pack(fill=tk.X, pady=(0, 4))
-            self._flash_status(f"Found {count} match(es) — confirm to redact",
-                               color=PALETTE["danger"])
+        # hit counter and confirm panel are updated via _on_search_hit_changed callback
 
     def _redact_confirm(self):
-        """Commit all pending search hits as permanent redactions."""
         rt = self._get_tool("redact")
         if rt:
-            rt.confirm_redact_hits()
+            rt.redact_all_hits()
         self._redact_confirm_frame.pack_forget()
+        if self._search_bar_visible:
+            self._sb_hit_lbl.config(text="")
+            self._sb_redact_one_btn.config(state=tk.DISABLED)
+            self._sb_redact_all_btn.config(state=tk.DISABLED)
+            self._sb_prev_btn.config(state=tk.DISABLED)
+            self._sb_next_btn.config(state=tk.DISABLED)
 
     def _redact_cancel_hits(self):
-        """Discard pending hits without redacting."""
         rt = self._get_tool("redact")
         if rt:
-            rt.cancel_hits()
+            rt.cancel_search()
         self._redact_confirm_frame.pack_forget()
+        if self._search_bar_visible:
+            self._sb_hit_lbl.config(text="")
+            self._sb_redact_one_btn.config(state=tk.DISABLED)
+            self._sb_redact_all_btn.config(state=tk.DISABLED)
+            self._sb_prev_btn.config(state=tk.DISABLED)
+            self._sb_next_btn.config(state=tk.DISABLED)
         self._flash_status("Redaction cancelled", color=PALETTE["fg_secondary"])
 
     # ── file operations ───────────────────────────────────────────────────────
@@ -876,7 +1118,6 @@ class InteractivePDFEditor:
         self._commit_all_boxes()
         if self._current_tool:
             self._current_tool.deactivate()
-        old = self.current_page_idx
         self.current_page_idx = idx
         self._thumb.refresh_all_borders()
         self._render()
@@ -992,7 +1233,6 @@ class InteractivePDFEditor:
         self._thumb.refresh_all_borders()
         self._thumb.scroll_to_active()
 
-        # Let the select tool re-draw its overlays after a page render
         if self.active_tool.get() == "select_text":
             sel = self._get_tool("select_text")
             if sel:
@@ -1151,7 +1391,6 @@ class InteractivePDFEditor:
         self._thumb.mark_dirty(self.current_page_idx)
 
     def _on_history_change(self):
-        """Called by HistoryManager after every push/undo/redo/clear."""
         self._mark_dirty()
 
     def _undo(self):
@@ -1202,6 +1441,15 @@ class InteractivePDFEditor:
         if not self._unsaved_changes:
             self._unsaved_changes = True
             self._update_title()
+
+    # ── escape key ────────────────────────────────────────────────────────────
+
+    def _on_escape(self):
+        """Escape: close search bar if open, otherwise dismiss text boxes."""
+        if self._search_bar_visible:
+            self._toggle_search_bar()
+        else:
+            self._dismiss_boxes()
 
     # ── colour helpers ────────────────────────────────────────────────────────
 

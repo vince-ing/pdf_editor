@@ -1,0 +1,62 @@
+├───src
+│   ├───commands
+│   │   │   annotate.py
+│   │   │   base.py
+│   │   │   extract_images.py
+│   │   │   insert_image.py
+│   │   │   insert_text.py
+│   │   │   macro.py
+│   │   │   redact.py
+│   │   │   rotate_page.py
+│   │   │   snapshot.py
+│   │
+│   ├───core
+│   │   │   document.py
+│   │   │   page.py
+│   │
+│   ├───gui
+│   │   │   app_context.py
+│   │   │   history_manager.py
+│   │   │   main_window.py
+│   │   │   theme.py
+│   │   │   __init__.py
+│   │   │
+│   │   ├───panels
+│   │   │   │   sidebar.py
+│   │   │   │   thumbnail.py
+│   │   │   │   __init__.py
+
+│   │   │
+│   │   ├───tools
+│   │   │   │   annot_tool.py
+│   │   │   │   base_tool.py
+│   │   │   │   find_tool.py
+│   │   │   │   image_tool.py
+│   │   │   │   redact_tool.py
+│   │   │   │   select_tool.py
+│   │   │   │   __init__.py
+│   │   │
+│   │   ├───widgets
+│   │   │   │   find_bar.py
+│   │   │   │   text_box.py
+│   │   │   │   tooltip.py
+│   │   │   │   __init__.py
+│   │
+│   ├───imaging
+│   │   │   filters.py
+│   │   │   image_processor.py
+│   │   │
+│   │   └───__pycache__
+│   │           image_processor.cpython-312.pyc
+│   │
+│   ├───services
+│   │   │   annotation_service.py
+│   │   │   image_service.py
+│   │   │   page_service.py
+│   │   │   redaction_service.py
+│   │   │   text_service.py
+│   │   │
+│   │
+│   ├───utils
+│   │   │   file_utils.py
+│   │   │

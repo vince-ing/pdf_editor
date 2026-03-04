@@ -21,11 +21,43 @@ class PDFDocument:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+    def can_save_incrementally(self) -> bool:
+        """
+        Return True only when an incremental save is safe to attempt.
+
+        PyMuPDF refuses incremental saves — and may corrupt the file — when:
+          • The document was never opened from disk (no path).
+          • The document has been restructured (pages deleted, reordered,
+            or inserted), which fitz tracks internally.
+          • The document was decrypted (encryption state would be inconsistent).
+          • The document is not a PDF (e.g. XPS opened via fitz).
+
+        Calling fitz's own can_save_incrementally() is the authoritative check;
+        we guard with a hasattr so the code degrades gracefully on very old
+        PyMuPDF builds that predate the method.
+        """
+        if not self.path:
+            return False
+        if hasattr(self._doc, "can_save_incrementally"):
+            return self._doc.can_save_incrementally()
+        # Fallback for PyMuPDF builds that lack the method: allow it and let
+        # fitz raise if the save actually fails — the caller catches that.
+        return True
+
     def save(self, output_path: str, incremental: bool = False, deflate: bool = True):
-        """Saves the current state of the document to the specified path."""
-        if incremental and output_path == self.path:
+        """
+        Save the document to *output_path*.
+
+        When *incremental* is True the caller is requesting an in-place update,
+        but we honour that only when ``can_save_incrementally()`` agrees it is
+        safe. If the document has been restructured (pages added/deleted/
+        reordered) we automatically fall back to a full garbage-collected save
+        so the file is never left in a corrupt state.
+        """
+        if incremental and output_path == self.path and self.can_save_incrementally():
             self._doc.save(output_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
         else:
+            # Full save: garbage=4 removes dead objects, deflate compresses streams.
             self._doc.save(output_path, deflate=deflate, garbage=4)
 
     def close(self):

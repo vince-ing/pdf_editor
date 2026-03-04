@@ -1,5 +1,9 @@
 import fitz
 
+# ── version-safe redaction constants ─────────────────────────────────────────
+_REDACT_IMAGE_PIXELS        = getattr(fitz, "PDF_REDACT_IMAGE_PIXELS",        2)
+_REDACT_LINE_ART_IF_COVERED = getattr(fitz, "PDF_REDACT_LINE_ART_IF_COVERED", 1)
+
 
 class PDFPage:
     """
@@ -131,3 +135,65 @@ class PDFPage:
     def crop(self, rect: tuple):
         """Crops the page's visible area to the given rect."""
         self._page.set_cropbox(fitz.Rect(*rect))
+
+    # ── redaction ─────────────────────────────────────────────────────────────
+
+    def add_redact_annot(
+        self,
+        rect: tuple,
+        fill_color: tuple = (0.0, 0.0, 0.0),
+        replacement_text: str = "",
+    ) -> None:
+        """
+        Mark *rect* as a redaction annotation without applying it yet.
+
+        Call ``apply_redactions()`` after marking all desired rects so that
+        apply_redactions() runs exactly once per redaction operation. Calling
+        apply_redactions() after each individual mark corrupts multi-match
+        redactions because subsequent annotations are applied to a stale page.
+
+        Parameters
+        ----------
+        rect : tuple
+            (x0, y0, x1, y1) in PDF user-space points.
+        fill_color : tuple
+            RGB 0.0–1.0 fill for the burnt-in box. Defaults to black.
+        replacement_text : str
+            Optional label drawn on the redaction box. Empty string = no label.
+        """
+        fitz_rect = fitz.Rect(*rect)
+        self._page.add_redact_annot(
+            quad=fitz_rect,
+            fill=list(fill_color),
+            text=replacement_text if replacement_text else None,
+            fontsize=10 if replacement_text else 0,
+        )
+
+    def apply_redactions(self) -> None:
+        """
+        Permanently burn in all pending redaction annotations on this page.
+
+        This destroys the underlying text, images, and vector graphics — it is
+        irreversible. Always call this after all ``add_redact_annot()`` calls
+        for a given operation are complete, never in a per-rect loop.
+        """
+        try:
+            self._page.apply_redactions(
+                images=_REDACT_IMAGE_PIXELS,
+                graphics=_REDACT_LINE_ART_IF_COVERED,
+            )
+        except TypeError:
+            # PyMuPDF < 1.21 — apply_redactions() takes no keyword arguments
+            self._page.apply_redactions()
+
+    def search_text_quads(self, query: str, case_sensitive: bool = False) -> list[tuple]:
+        """
+        Search for *query* and return bounding rects for every hit.
+
+        Returns
+        -------
+        list of (x0, y0, x1, y1) tuples in PDF user-space points.
+        """
+        flags = 0 if case_sensitive else getattr(fitz, "TEXT_DEHYPHENATE", 0)
+        quads = self._page.search_for(query, quads=True, flags=flags)
+        return [tuple(q.rect) for q in quads]

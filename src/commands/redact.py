@@ -61,6 +61,11 @@ class BulkRedactCommand(Command):
 
     All rects must be on the same page — this keeps the snapshot cost to
     one file write regardless of how many matches are redacted at once.
+
+    Uses ``add_redactions_bulk`` so that all annotations are marked first
+    and apply_redactions() is called exactly once. Calling add_redaction()
+    in a loop would invoke apply_redactions() once per rect, corrupting
+    every match after the first.
     """
 
     def __init__(
@@ -81,14 +86,13 @@ class BulkRedactCommand(Command):
         self._snapshot          = DocumentSnapshot(document)
 
     def execute(self):
-        for rect in self.rects:
-            self.redaction_service.add_redaction(
-                self.document,
-                self.page_index,
-                rect,
-                fill_color=self.fill_color,
-                replacement_text=self.replacement_text,
-            )
+        self.redaction_service.add_redactions_bulk(
+            self.document,
+            self.page_index,
+            self.rects,
+            fill_color=self.fill_color,
+            replacement_text=self.replacement_text,
+        )
 
     def undo(self):
         self._snapshot.restore(self.document)

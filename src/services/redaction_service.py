@@ -10,28 +10,11 @@ This is fundamentally different from drawing a black rectangle on top:
 the underlying content is *destroyed*, so it cannot be copy-pasted,
 searched, or extracted by any downstream tool.
 
-Compatibility note
-------------------
-PyMuPDF named the redaction integer constants (PDF_REDACT_IMAGE_PIXELS,
-PDF_REDACT_LINE_ART_IF_COVERED, etc.) only in newer releases. Older builds
-expose the same integers but not as module-level attributes. We therefore
-define the values ourselves so the code runs on any PyMuPDF version that
-supports apply_redactions() at all (≥ 1.18).
-
-Integer reference (from PyMuPDF source, stable across versions):
-  images  arg:  0 = none, 1 = blank, 2 = pixels (blank image data)
-  graphics arg: 0 = none, 1 = if_covered, 2 = all
+All fitz-level operations are delegated to PDFPage methods so this
+service never touches document._doc directly.
 """
 
-import fitz
-
 from src.core.document import PDFDocument
-
-# ── version-safe redaction constants ─────────────────────────────────────────
-# Use named attribute when available; fall back to the raw integer so we work
-# on every PyMuPDF release that has apply_redactions().
-_REDACT_IMAGE_PIXELS        = getattr(fitz, "PDF_REDACT_IMAGE_PIXELS",        2)
-_REDACT_LINE_ART_IF_COVERED = getattr(fitz, "PDF_REDACT_LINE_ART_IF_COVERED", 1)
 
 
 class RedactionService:
@@ -51,6 +34,10 @@ class RedactionService:
         Mark *rect* as a redaction annotation and immediately apply it so the
         underlying content is permanently destroyed.
 
+        For redacting a single rect. Use ``add_redactions_bulk`` when you need
+        to redact multiple rects in one pass — calling this method in a loop
+        would call apply_redactions() once per rect, which corrupts the page.
+
         Parameters
         ----------
         document : PDFDocument
@@ -64,27 +51,41 @@ class RedactionService:
             Optional label drawn on the redaction box (e.g. "[REDACTED]").
             Empty string means no label.
         """
-        page      = document._doc[page_index]
-        fitz_rect = fitz.Rect(*rect)
+        page = document.get_page(page_index)
+        page.add_redact_annot(rect, fill_color=fill_color, replacement_text=replacement_text)
+        page.apply_redactions()
 
-        page.add_redact_annot(
-            quad=fitz_rect,
-            fill=list(fill_color),
-            text=replacement_text if replacement_text else None,
-            fontsize=10 if replacement_text else 0,
-        )
+    def add_redactions_bulk(
+        self,
+        document: PDFDocument,
+        page_index: int,
+        rects: list[tuple],
+        fill_color: tuple = DEFAULT_FILL,
+        replacement_text: str = "",
+    ) -> None:
+        """
+        Mark all *rects* as redaction annotations, then apply them all in a
+        single pass so every match is burnt in correctly.
 
-        # This is the step that makes redaction permanent and irreversible.
-        # The kwargs were added in PyMuPDF 1.21; on older builds we call with
-        # no arguments (text is still removed unconditionally).
-        try:
-            page.apply_redactions(
-                images=_REDACT_IMAGE_PIXELS,
-                graphics=_REDACT_LINE_ART_IF_COVERED,
-            )
-        except TypeError:
-            # PyMuPDF < 1.21 — apply_redactions() takes no keyword arguments
-            page.apply_redactions()
+        Calling ``add_redaction`` in a loop is incorrect: each call would
+        invoke apply_redactions() immediately, leaving subsequent annots in an
+        undefined state. This method marks every rect first, then applies once.
+
+        Parameters
+        ----------
+        document : PDFDocument
+        page_index : int
+            0-based page index.
+        rects : list of (x0, y0, x1, y1) tuples in PDF user-space points.
+        fill_color : tuple
+            RGB 0.0–1.0 fill for all boxes. Defaults to black.
+        replacement_text : str
+            Optional label drawn on every box. Empty string means no label.
+        """
+        page = document.get_page(page_index)
+        for rect in rects:
+            page.add_redact_annot(rect, fill_color=fill_color, replacement_text=replacement_text)
+        page.apply_redactions()
 
     def find_text(
         self,
@@ -100,12 +101,5 @@ class RedactionService:
         -------
         list of (x0, y0, x1, y1) tuples in PDF user-space points.
         """
-        page  = document._doc[page_index]
-        flags = 0 if case_sensitive else getattr(fitz, "TEXT_DEHYPHENATE", 0)
-        quads = page.search_for(
-            query,
-            quads=True,
-            flags=flags,
-        )
-        # Convert each Quad to a Rect tuple
-        return [tuple(q.rect) for q in quads]
+        page = document.get_page(page_index)
+        return page.search_text_quads(query, case_sensitive=case_sensitive)

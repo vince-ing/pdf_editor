@@ -121,10 +121,15 @@ class ThumbnailPanel:
 
         for i in range(n):
             y_top = THUMB_PAD + i * (th + THUMB_PAD + 18)
+
+            # Placeholder: transparent fill so the image shows through once rendered.
+            # A solid fill here would cover the image after tag_raise reorders items.
             self._canvas.create_rectangle(
                 x_off, y_top, x_off + tw, y_top + th,
-                fill=PALETTE["bg_hover"], outline=PALETTE["border"],
-                width=1, tags=(f"thumb_border_{i}",),
+                fill="",                      # <-- transparent, not bg_hover
+                outline=PALETTE["border"],
+                width=1,
+                tags=(f"thumb_border_{i}",),
             )
             self._canvas.create_text(
                 THUMB_PANEL_W // 2, y_top + th + 6,
@@ -133,9 +138,11 @@ class ThumbnailPanel:
                 font=("Helvetica", 7),
                 tags=(f"thumb_label_{i}",),
             )
+            # Invisible hit-target rectangle on top of everything for click/hover
             self._canvas.create_rectangle(
                 x_off, y_top, x_off + tw, y_top + th,
-                fill="", outline="", tags=(f"thumb_hit_{i}",),
+                fill="", outline="",
+                tags=(f"thumb_hit_{i}",),
             )
             self._canvas.tag_bind(
                 f"thumb_hit_{i}", "<Button-1>",
@@ -228,14 +235,23 @@ class ThumbnailPanel:
         self._dirty[idx]  = False
 
         tw, th, x_off, y_top = self._geometry(idx)
+
+        # Remove old image item if re-rendering a dirty page
         self._canvas.delete(f"thumb_img_{idx}")
+
+        # Draw the image
         self._canvas.create_image(
             x_off, y_top, anchor=tk.NW, image=img,
             tags=(f"thumb_img_{idx}",),
         )
+
+        # Stack order (bottom → top): image → border → label → hit-target
+        # border has transparent fill so the image shows through it;
+        # hit-target is invisible but must stay on top to receive events.
         self._canvas.tag_raise(f"thumb_border_{idx}")
-        self._canvas.tag_raise(f"thumb_hit_{idx}")
         self._canvas.tag_raise(f"thumb_label_{idx}")
+        self._canvas.tag_raise(f"thumb_hit_{idx}")
+
         self._update_border(idx)
 
     def _update_border(self, idx: int):
