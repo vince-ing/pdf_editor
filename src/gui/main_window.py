@@ -37,6 +37,8 @@ from src.gui.tools.annot_tool import AnnotationTool
 from src.gui.tools.image_tool import ImageInsertTool, ImageExtractTool
 from src.gui.tools.select_tool import SelectTextTool
 from src.gui.tools.redact_tool import RedactTool
+from src.gui.tools.draw_tool import DrawTool
+from src.commands.draw_command import DrawAnnotationCommand
 from src.utils.recent_files import RecentFiles
 
 
@@ -126,6 +128,13 @@ class InteractivePDFEditor:
         self.annot_fill_rgb: tuple | None  = None
         self.annot_width: float            = 1.5
 
+        # Draw tool state
+        self.draw_mode       = "pen"           # pen | line | arrow | ellipse
+        self.draw_stroke_rgb = (220, 50, 50)
+        self.draw_fill_rgb: tuple | None = None
+        self.draw_width      = 2.0
+        self.draw_opacity    = 1.0
+
         # Redaction state
         self.redact_fill_color: tuple  = (0.0, 0.0, 0.0)   # black (0-1 floats)
         self.redact_label: str         = ""                 # replacement text
@@ -193,6 +202,15 @@ class InteractivePDFEditor:
             get_replacement_text=lambda: self.redact_label,
             on_navigate_page=self._navigate_to,
             on_hit_changed=self._on_search_hit_changed,
+        )
+        self._tools["draw"] = DrawTool(
+            ctx,
+            get_mode=lambda: self.draw_mode,
+            get_stroke_rgb=lambda: self.draw_stroke_rgb,
+            get_fill_rgb=lambda: self.draw_fill_rgb,
+            get_width=lambda: self.draw_width,
+            get_opacity=lambda: self.draw_opacity,
+            on_committed=self._on_draw_committed,
         )
 
     def _get_tool(self, name: str):
@@ -377,6 +395,7 @@ class InteractivePDFEditor:
             ("📌  Insert Image",  "insert_image", "Choose a file then drag to place it"),
             ("🖍  Highlight",     "highlight",    "Drag to highlight a region"),
             ("▭  Rectangle",     "rect_annot",   "Drag to draw a rectangle annotation"),
+            ("✏️  Draw",          "draw",         "Freehand pen, lines, arrows & shapes"),
             ("⬚  Select Text",   "select_text",  "Click or drag to select & copy text"),
             ("⬛  Redact",        "redact",       "Drag to permanently redact content"),
         ]:
@@ -397,6 +416,9 @@ class InteractivePDFEditor:
 
         self._annot_opts = tk.Frame(sb, bg=PALETTE["bg_panel"])
         self._build_annot_opts(self._annot_opts)
+
+        self._draw_opts = tk.Frame(sb, bg=PALETTE["bg_panel"])
+        self._build_draw_opts(self._draw_opts)
 
         self._redact_opts = tk.Frame(sb, bg=PALETTE["bg_panel"])
         self._build_redact_opts(self._redact_opts)
@@ -499,6 +521,104 @@ class InteractivePDFEditor:
         )
         width_sp.pack(anchor="w", pady=(0, 4))
         width_sp.bind("<Return>", lambda e: self._on_annot_width_change())
+
+
+    def _build_draw_opts(self, parent):
+        """Sidebar panel shown when the Draw tool is active."""
+
+        # ── Mode selector ──────────────────────────────────────────────────
+        self._opt_lbl(parent, "Mode")
+        mode_row = tk.Frame(parent, bg=PALETTE["bg_panel"])
+        mode_row.pack(fill=tk.X, pady=(0, 8))
+
+        self._draw_mode_btns: dict = {}
+        modes = [
+            ("pen",     "✏ Pen"),
+            ("line",    "╱ Line"),
+            ("arrow",   "→ Arrow"),
+            ("ellipse", "○ Ellipse"),
+        ]
+        for mode, label in modes:
+            btn = tk.Button(
+                mode_row, text=label,
+                font=("Helvetica", 8), relief="flat", bd=0,
+                padx=4, pady=3, cursor="hand2",
+                command=lambda m=mode: self._set_draw_mode(m),
+            )
+            btn.pack(side=tk.LEFT, padx=1, pady=0)
+            self._draw_mode_btns[mode] = btn
+        self._refresh_draw_mode_btns()
+
+        # ── Stroke color ───────────────────────────────────────────────────
+        self._opt_lbl(parent, "Stroke Color")
+        stroke_row = tk.Frame(parent, bg=PALETTE["bg_panel"])
+        stroke_row.pack(fill=tk.X, pady=(0, 8))
+        self._draw_stroke_swatch = tk.Button(
+            stroke_row, text="  ", relief="flat", bd=1, width=3,
+            bg=self._rgb255_to_hex(self.draw_stroke_rgb),
+            cursor="hand2", command=self._pick_draw_stroke_color,
+            highlightthickness=1, highlightbackground="#555",
+        )
+        self._draw_stroke_swatch.pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(stroke_row, text="Pick color", bg=PALETTE["bg_panel"],
+                 fg=PALETTE["fg_secondary"], font=FONT_LABEL).pack(side=tk.LEFT)
+
+        # ── Fill color (ellipse only) ──────────────────────────────────────
+        self._opt_lbl(parent, "Fill Color")
+        fill_row = tk.Frame(parent, bg=PALETTE["bg_panel"])
+        fill_row.pack(fill=tk.X, pady=(0, 8))
+        self._draw_fill_none_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            fill_row, text="No fill",
+            variable=self._draw_fill_none_var,
+            bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
+            selectcolor=PALETTE["accent_dim"],
+            activebackground=PALETTE["bg_hover"],
+            font=FONT_LABEL, cursor="hand2",
+            command=self._on_draw_fill_toggle,
+        ).pack(side=tk.LEFT)
+        self._draw_fill_swatch = tk.Button(
+            fill_row, text="  ", relief="flat", bd=1, width=3,
+            bg="#FFFF88", cursor="hand2",
+            command=self._pick_draw_fill_color,
+            highlightthickness=1, highlightbackground="#555",
+            state=tk.DISABLED,
+        )
+        self._draw_fill_swatch.pack(side=tk.LEFT, padx=(8, 0))
+
+        # ── Stroke width ───────────────────────────────────────────────────
+        self._opt_lbl(parent, "Width (pt)")
+        self._draw_width_var = tk.DoubleVar(value=self.draw_width)
+        w_sp = tk.Spinbox(
+            parent, from_=0.5, to=20.0, increment=0.5,
+            textvariable=self._draw_width_var, width=6,
+            command=self._on_draw_width_change,
+            bg="#252535", fg=PALETTE["fg_primary"],
+            buttonbackground=PALETTE["border"],
+            relief="flat", highlightthickness=0,
+        )
+        w_sp.pack(anchor="w", pady=(0, 8))
+        w_sp.bind("<Return>", lambda e: self._on_draw_width_change())
+
+        # ── Opacity ────────────────────────────────────────────────────────
+        self._opt_lbl(parent, "Opacity")
+        self._draw_opacity_var = tk.IntVar(value=int(self.draw_opacity * 100))
+        tk.Scale(
+            parent, from_=10, to=100,
+            variable=self._draw_opacity_var,
+            orient=tk.HORIZONTAL, showvalue=True,
+            bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
+            troughcolor=PALETTE["bg_mid"],
+            highlightthickness=0, bd=0,
+            command=lambda v: self._on_draw_opacity_change(),
+        ).pack(fill=tk.X, pady=(0, 4))
+
+        tk.Label(
+            parent,
+            text="Shift+drag: snap to 45 deg\n(Line & Arrow modes)",
+            bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"],
+            font=("Helvetica", 7), justify="left",
+        ).pack(anchor="w", pady=(4, 0))
 
     def _build_redact_opts(self, parent):
         """Sidebar panel shown when the Redact tool is active."""
@@ -948,6 +1068,8 @@ class InteractivePDFEditor:
                              "Click on an image\nto extract it."),
             "redact":       ("crosshair", self._redact_opts,
                              "Drag to permanently redact\na region.\n\nOr use 🔍 Find & Redact\n(Ctrl+F) to search by text.\n\n⚠ Redaction is permanent\nand removes content."),
+            "draw":         ("crosshair", self._draw_opts,
+                             "✏ Pen — freehand stroke\n╱ Line — straight line\n→ Arrow — line + arrowhead\n○ Ellipse — drag to draw\n\nShift+drag snaps to 45°\n(Line & Arrow modes)"),
         }
         cursor, panel, hint_text = hints.get(tool_name, ("crosshair", None, ""))
         self.canvas.config(cursor=cursor)
@@ -1020,6 +1142,90 @@ class InteractivePDFEditor:
             self.annot_width = max(0.5, min(10.0, float(self._annot_width_var.get())))
         except (ValueError, tk.TclError):
             pass
+
+    # ── draw tool callbacks ────────────────────────────────────────────────────
+
+    def _set_draw_mode(self, mode: str):
+        self.draw_mode = mode
+        self._refresh_draw_mode_btns()
+
+    def _refresh_draw_mode_btns(self):
+        if not hasattr(self, "_draw_mode_btns"):
+            return
+        for m, btn in self._draw_mode_btns.items():
+            if m == self.draw_mode:
+                btn.config(bg=PALETTE["accent"], fg="#FFFFFF")
+            else:
+                btn.config(bg=PALETTE["bg_hover"], fg=PALETTE["fg_secondary"])
+
+    def _pick_draw_stroke_color(self):
+        current = self._rgb255_to_hex(self.draw_stroke_rgb)
+        result  = colorchooser.askcolor(color=current, title="Draw Stroke Color")
+        if result and result[0]:
+            self.draw_stroke_rgb = tuple(int(v) for v in result[0])
+            self._draw_stroke_swatch.config(
+                bg=self._rgb255_to_hex(self.draw_stroke_rgb))
+
+    def _on_draw_fill_toggle(self):
+        if self._draw_fill_none_var.get():
+            self.draw_fill_rgb = None
+            self._draw_fill_swatch.config(state=tk.DISABLED)
+        else:
+            # Default fill colour when first enabling
+            if self.draw_fill_rgb is None:
+                self.draw_fill_rgb = (255, 255, 136)
+            self._draw_fill_swatch.config(
+                state=tk.NORMAL,
+                bg=self._rgb255_to_hex(self.draw_fill_rgb),
+            )
+
+    def _pick_draw_fill_color(self):
+        current = self._rgb255_to_hex(self.draw_fill_rgb or (255, 255, 136))
+        result  = colorchooser.askcolor(color=current, title="Draw Fill Color")
+        if result and result[0]:
+            self.draw_fill_rgb = tuple(int(v) for v in result[0])
+            self._draw_fill_swatch.config(
+                bg=self._rgb255_to_hex(self.draw_fill_rgb))
+
+    def _on_draw_width_change(self):
+        try:
+            self.draw_width = max(0.5, float(self._draw_width_var.get()))
+        except (ValueError, tk.TclError):
+            pass
+
+    def _on_draw_opacity_change(self):
+        try:
+            self.draw_opacity = max(0.1, min(1.0, self._draw_opacity_var.get() / 100))
+        except (ValueError, tk.TclError):
+            pass
+
+    def _on_draw_committed(self, page_idx: int, xref: int):
+        """Called by DrawTool after an annotation is written to the PDF."""
+        cmd = DrawAnnotationCommand(self.doc, page_idx, xref)
+        # execute() is a no-op (annotation already written), just register for undo
+        self._push_history(cmd)
+        self._mark_dirty()
+        self._cont_invalidate_cache(page_idx)
+        self._thumb.mark_dirty(page_idx)
+        # Re-render to show the committed annotation (preview is already gone)
+        if page_idx == self.current_page_idx:
+            self._render()
+        elif self._continuous_mode:
+            # Re-render just that page slot in continuous mode
+            self._render_cont_page_refresh(page_idx)
+
+    def _render_cont_page_refresh(self, page_idx: int):
+        """Force re-render of a single page in continuous mode."""
+        if not self.doc or not self._continuous_mode:
+            return
+        doc = self.doc
+        if page_idx >= doc.page_count:
+            return
+        p   = doc.get_page(page_idx)
+        iw  = int(p.width  * self.scale_factor)
+        ih  = int(p.height * self.scale_factor)
+        cw  = self.canvas.winfo_width()
+        self._render_cont_page(page_idx, iw, ih, cw)
 
     # ── redaction option callbacks ────────────────────────────────────────────
 
