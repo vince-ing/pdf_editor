@@ -1,30 +1,13 @@
-import fitz
 from src.commands.base import Command
-
-
-def _snapshot_doc(doc) -> bytes:
-    """
-    Serialize the entire fitz document to bytes.
-    Called *before* execute() so undo can restore the exact prior state.
-    """
-    return doc._doc.write()
-
-
-def _restore_doc(doc, snapshot: bytes):
-    """
-    Replace the live fitz document with one reopened from the snapshot bytes.
-    Swaps doc._doc in place so all other references to `doc` stay valid.
-    """
-    old = doc._doc
-    doc._doc = fitz.open("pdf", snapshot)
-    if not old.is_closed:
-        old.close()
+from src.commands.snapshot import DocumentSnapshot
 
 
 class InsertTextCommand(Command):
     """
-    Insert text onto a page.  Undo restores the full document from a
-    pre-execute snapshot — simple, reliable, no xref manipulation.
+    Insert text onto a page.
+
+    Undo restores the full document from a pre-execute snapshot stored on
+    disk (via DocumentSnapshot), keeping RAM usage flat regardless of PDF size.
     """
 
     def __init__(
@@ -46,7 +29,7 @@ class InsertTextCommand(Command):
         self.fontsize     = fontsize
         self.fontname     = fontname
         self.color        = color
-        self._snapshot    = _snapshot_doc(document)
+        self._snapshot    = DocumentSnapshot(document)
 
     def execute(self):
         self.text_service.insert_text(
@@ -55,11 +38,14 @@ class InsertTextCommand(Command):
         )
 
     def undo(self):
-        _restore_doc(self.document, self._snapshot)
+        self._snapshot.restore(self.document)
+
+    def cleanup(self):
+        self._snapshot.cleanup()
 
 
 class InsertTextBoxCommand(Command):
-    """Insert text into a bounding box.  Undo via document snapshot."""
+    """Insert text into a bounding box.  Undo via disk snapshot."""
 
     def __init__(
         self,
@@ -82,7 +68,7 @@ class InsertTextBoxCommand(Command):
         self.fontname     = fontname
         self.color        = color
         self.align        = align
-        self._snapshot    = _snapshot_doc(document)
+        self._snapshot    = DocumentSnapshot(document)
 
     def execute(self) -> float:
         return self.text_service.insert_textbox(
@@ -91,4 +77,7 @@ class InsertTextBoxCommand(Command):
         )
 
     def undo(self):
-        _restore_doc(self.document, self._snapshot)
+        self._snapshot.restore(self.document)
+
+    def cleanup(self):
+        self._snapshot.cleanup()

@@ -14,7 +14,8 @@ from src.core.document import PDFDocument
 from src.services.page_service import PageService
 from src.services.image_service import ImageService
 from src.services.text_service import TextService
-from src.commands.insert_text import InsertTextCommand
+from src.commands.insert_text import InsertTextCommand, InsertTextBoxCommand
+from src.commands.insert_image import InsertImageCommand
 from src.commands.rotate_page import RotatePageCommand
 from src.commands.extract_images import ExtractSingleImageCommand
 
@@ -125,9 +126,11 @@ class TextBox:
         font_index: int   = 0,
         fontsize: int     = 14,
         color_rgb: tuple  = (0, 0, 0),
+        entry_bg: str     = "#FFFFFF",
+        align: int        = 0,        # 0=left 1=center 2=right 3=justify
         on_commit = None,
         on_delete = None,
-        on_interact = None,   # called on any grip/resize press to suppress canvas click
+        on_interact = None,
     ):
         self.canvas        = canvas
         self.pdf_x         = pdf_x
@@ -138,8 +141,10 @@ class TextBox:
         self.page_offset_x = page_offset_x
         self.page_offset_y = page_offset_y
         self.font_index    = font_index
-        self.fontsize      = fontsize   # PDF points
-        self.color_rgb     = color_rgb  # (r, g, b) 0-255
+        self.fontsize      = fontsize
+        self.color_rgb     = color_rgb
+        self.entry_bg      = entry_bg
+        self.align         = align
         self.on_commit     = on_commit
         self.on_delete     = on_delete
         self.on_interact   = on_interact
@@ -162,6 +167,7 @@ class TextBox:
         self._entry      = None
         self._font_var   = tk.StringVar(value=PDF_FONT_LABELS[font_index])
         self._size_var   = tk.IntVar(value=fontsize)
+        self._align_var  = tk.IntVar(value=align)   # 0=L 1=C 2=R 3=J
         self._color_btn  = None
 
         self._build()
@@ -216,10 +222,12 @@ class TextBox:
         self._all_ids.append(self._toolbar_win_id)
 
         # ── Text entry ────────────────────────────────────────────────────────
+        # Get the canvas background colour so the entry blends in seamlessly
+        canvas_bg = c.cget("bg")
         self._entry = tk.Text(
             c,
             font=self._tk_font(),
-            bg=self.C_ENTRY_BG,
+            bg=self.entry_bg,
             fg=self._rgb_hex(self.color_rgb),
             selectbackground=self.C_ENTRY_SELECT,
             insertbackground=self.C_BORDER,
@@ -278,6 +286,8 @@ class TextBox:
         self._entry.bind("<Escape>",         lambda e: self._delete())
 
         self._entry.focus_set()
+        # Apply initial alignment to the entry widget
+        self._set_align(self.align)
 
     def _build_toolbar(self, parent):
         # Font family
@@ -301,7 +311,23 @@ class TextBox:
             cursor="hand2", command=self._pick_color,
             highlightthickness=1, highlightbackground="#555",
         )
-        self._color_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self._color_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        # Alignment toggle buttons  L C R J
+        align_frame = tk.Frame(parent, bg=self.C_TOOLBAR_BG)
+        align_frame.pack(side=tk.LEFT, padx=(0, 8))
+        self._align_btns = []
+        for idx, (symbol, tip) in enumerate([("≡L", "Left"), ("≡C", "Center"),
+                                             ("≡R", "Right"), ("≡J", "Justify")]):
+            btn = tk.Button(
+                align_frame, text=symbol, width=3,
+                font=("Helvetica", 8), relief="flat", bd=0,
+                padx=3, pady=1, cursor="hand2",
+                command=lambda i=idx: self._set_align(i),
+            )
+            btn.pack(side=tk.LEFT, padx=1)
+            self._align_btns.append(btn)
+        self._refresh_align_buttons()
 
         # Confirm
         tk.Button(parent, text="✓  Apply", bg=PALETTE["success"], fg="#0F0F13",
@@ -465,6 +491,24 @@ class TextBox:
             pass
         self._entry.config(font=self._tk_font())
 
+    def _set_align(self, align: int):
+        """Update alignment, refresh button highlights, update entry justify."""
+        self.align = align
+        self._align_var.set(align)
+        self._refresh_align_buttons()
+        # Mirror in the Tk Text widget (only left/center/right map; justify≈left)
+        tk_justify = ["left", "center", "right", "left"][align]
+        self._entry.tag_configure("all", justify=tk_justify)
+        self._entry.tag_add("all", "1.0", tk.END)
+
+    def _refresh_align_buttons(self):
+        """Highlight the active alignment button, dim the rest."""
+        for i, btn in enumerate(self._align_btns):
+            if i == self.align:
+                btn.config(bg=PALETTE["accent"], fg="#FFFFFF")
+            else:
+                btn.config(bg="#2A2A3D", fg=self.C_TOOLBAR_FG)
+
     def _pick_color(self):
         result = colorchooser.askcolor(
             color=self._rgb_hex(self.color_rgb), title="Text Color")
@@ -572,6 +616,8 @@ class InteractivePDFEditor:
         self.tk_image         = None
         self._page_offset_x   = 20
         self._page_offset_y   = 20
+        self._current_path: str | None = None   # path of the open file; None = unsaved
+        self._unsaved_changes = False            # True after any mutation
 
         # Services
         self.page_service  = PageService()
@@ -583,10 +629,16 @@ class InteractivePDFEditor:
         self.font_index  = 0
         self.fontsize    = 14
         self.text_color  = (0, 0, 0)
+        self.text_align  = 0   # 0=left 1=center 2=right 3=justify
 
         # Active text boxes
         self._text_boxes: list[TextBox] = []
         self._suppress_next_click = False   # set by TextBox grip/resize press
+
+        # Image insertion drag state
+        self._img_drag_start: tuple | None = None   # (canvas_x, canvas_y)
+        self._img_rubber_band: int | None  = None   # canvas rect item ID
+        self._img_pending_path: str | None = None   # file chosen before drag
 
         # History
         self._history: list    = []
@@ -646,9 +698,11 @@ class InteractivePDFEditor:
             side=tk.LEFT, fill=tk.Y, pady=8)
 
         for label, cmd, tip in [
-            ("📂  Open",  self._open_pdf, "Open PDF  (Ctrl+O)"),
-            ("💾  Save",  self._save_pdf, "Save PDF  (Ctrl+S)"),
-            ("↩  Undo",  self._undo,     "Undo last action  (Ctrl+Z)"),
+            ("📂  Open",    self._open_pdf,    "Open PDF  (Ctrl+O)"),
+            ("💾  Save",    self._save_pdf,    "Save PDF  (Ctrl+S)"),
+            ("📋  Save As", self._save_pdf_as, "Save PDF as new file  (Ctrl+Shift+S)"),
+            ("↩  Undo",    self._undo,         "Undo last action  (Ctrl+Z)"),
+            ("↪  Redo",    self._redo,         "Redo last undone action  (Ctrl+Y)"),
         ]:
             Tooltip(self._topbar_btn(bar, label, cmd), tip)
 
@@ -668,7 +722,9 @@ class InteractivePDFEditor:
 
         self.root.bind("<Control-o>",     lambda e: self._open_pdf())
         self.root.bind("<Control-s>",     lambda e: self._save_pdf())
+        self.root.bind("<Control-S>",     lambda e: self._save_pdf_as())
         self.root.bind("<Control-z>",     lambda e: self._undo())
+        self.root.bind("<Control-y>",     lambda e: self._redo())
         self.root.bind("<Control-equal>", lambda e: self._zoom_in())
         self.root.bind("<Control-minus>", lambda e: self._zoom_out())
         self.root.bind("<Control-0>",     lambda e: self._zoom_reset())
@@ -708,8 +764,9 @@ class InteractivePDFEditor:
 
         self._section(sb, "ACTIVE TOOL")
         for label, val, tip in [
-            ("📝  Text",          "text",    "Click canvas to add a text box"),
-            ("🖼  Extract Image", "extract", "Click an image to save it"),
+            ("📝  Text",          "text",         "Click canvas to add a text box"),
+            ("🖼  Extract Image", "extract",      "Click an image to save it"),
+            ("📌  Insert Image",  "insert_image", "Choose a file then drag to place it"),
         ]:
             rb = tk.Radiobutton(sb, text=label, variable=self.active_tool, value=val,
                                 bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
@@ -742,7 +799,7 @@ class InteractivePDFEditor:
 
         self._opt_lbl(self._txt_opts, "Color")
         color_row = tk.Frame(self._txt_opts, bg=PALETTE["bg_panel"])
-        color_row.pack(fill=tk.X)
+        color_row.pack(fill=tk.X, pady=(0, 8))
         self._color_swatch = tk.Button(
             color_row, text="  ", relief="flat", bd=1, width=3,
             bg="#000000", cursor="hand2", command=self._pick_global_color,
@@ -750,6 +807,23 @@ class InteractivePDFEditor:
         self._color_swatch.pack(side=tk.LEFT, padx=(0, 8))
         tk.Label(color_row, text="Pick color", bg=PALETTE["bg_panel"],
                  fg=PALETTE["fg_secondary"], font=FONT_LABEL).pack(side=tk.LEFT)
+
+        self._opt_lbl(self._txt_opts, "Alignment")
+        align_row = tk.Frame(self._txt_opts, bg=PALETTE["bg_panel"])
+        align_row.pack(fill=tk.X, pady=(0, 4))
+        self._sb_align_btns = []
+        for idx, (symbol, tip) in enumerate([("≡L", "Left"), ("≡C", "Center"),
+                                             ("≡R", "Right"), ("≡J", "Justify")]):
+            btn = tk.Button(
+                align_row, text=symbol, width=3,
+                font=("Helvetica", 8), relief="flat", bd=0,
+                padx=3, pady=2, cursor="hand2",
+                command=lambda i=idx: self._sb_align_change(i),
+            )
+            btn.pack(side=tk.LEFT, padx=1)
+            Tooltip(btn, tip)
+            self._sb_align_btns.append(btn)
+        self._sb_refresh_align()
 
         self._hint = tk.Label(sb,
             text="Click canvas to place a text box.\n"
@@ -775,6 +849,8 @@ class InteractivePDFEditor:
         self.h_scroll.config(command=self.canvas.xview)
 
         self.canvas.bind("<Button-1>",         self._on_canvas_click)
+        self.canvas.bind("<B1-Motion>",         self._on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-1>",   self._on_canvas_release)
         self.canvas.bind("<MouseWheel>",        self._on_mousewheel)
         self.canvas.bind("<Button-4>",          self._on_mousewheel)
         self.canvas.bind("<Button-5>",          self._on_mousewheel)
@@ -846,18 +922,32 @@ class InteractivePDFEditor:
 
     def _on_tool_change(self):
         tool = self.active_tool.get()
-        self._st_tool.config(text=f"Tool: {tool.title()}")
+        self._st_tool.config(text=f"Tool: {tool.replace('_', ' ').title()}")
+        # Reset any in-progress image drag
+        self._img_drag_cancel()
         if tool == "text":
             self.canvas.config(cursor="crosshair")
             self._txt_opts.pack(fill=tk.X, padx=12, pady=4)
             self._hint.config(
                 text="Click canvas to place a text box.\n"
                      "Drag the grip to move it.\n"
-                     "Ctrl+Z to undo after confirming.")
+                     "Ctrl+Z to undo after confirming.",
+                fg=PALETTE["fg_dim"],
+            )
+        elif tool == "insert_image":
+            self.canvas.config(cursor="crosshair")
+            self._txt_opts.pack_forget()
+            self._hint.config(
+                text="Click canvas to choose\nan image file, then drag\nto place it.",
+                fg=PALETTE["fg_dim"],
+            )
         else:
             self.canvas.config(cursor="arrow")
             self._txt_opts.pack_forget()
-            self._hint.config(text="Click on an image\nto extract it.")
+            self._hint.config(
+                text="Click on an image\nto extract it.",
+                fg=PALETTE["fg_dim"],
+            )
 
     def _sb_font_change(self, _=None):
         self.font_index = PDF_FONT_LABELS.index(self._sb_font_var.get())
@@ -867,6 +957,17 @@ class InteractivePDFEditor:
             self.fontsize = max(6, min(144, int(self._sb_size_var.get())))
         except (ValueError, tk.TclError):
             pass
+
+    def _sb_align_change(self, align: int):
+        self.text_align = align
+        self._sb_refresh_align()
+
+    def _sb_refresh_align(self):
+        for i, btn in enumerate(self._sb_align_btns):
+            if i == self.text_align:
+                btn.config(bg=PALETTE["accent"], fg="#FFFFFF")
+            else:
+                btn.config(bg=PALETTE["bg_hover"], fg=PALETTE["fg_secondary"])
 
     def _pick_global_color(self):
         hex_c = "#{:02x}{:02x}{:02x}".format(*self.text_color)
@@ -879,6 +980,18 @@ class InteractivePDFEditor:
     # ─────────────────────── file operations ──────────────────────────────────
 
     def _open_pdf(self):
+        # Guard against losing unsaved work
+        if self._unsaved_changes:
+            answer = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                "You have unsaved changes.\nSave before opening a new file?",
+            )
+            if answer is None:       # Cancel — abort open
+                return
+            if answer:               # Yes — save first
+                if not self._save_pdf():
+                    return           # Save was cancelled, abort open
+
         path = filedialog.askopenfilename(
             title="Open PDF", filetypes=[("PDF Files", "*.pdf"), ("All", "*.*")])
         if not path:
@@ -891,38 +1004,74 @@ class InteractivePDFEditor:
         except Exception as ex:
             messagebox.showerror("Error", f"Could not open:\n{ex}")
             return
-        self.current_page_idx = 0
-        self._history.clear()
-        self._history_idx = -1
-        self.root.title(f"PDF Editor — {os.path.basename(path)}")
+        self.current_page_idx  = 0
+        self._current_path     = path
+        self._unsaved_changes  = False
+        self._clear_history()
+        self._update_title()
         self._render()
 
-    def _save_pdf(self):
+    def _save_pdf(self) -> bool:
+        """
+        Save to the currently open file path using incremental write.
+        Falls back to Save As if no path is known yet (new/unsaved document).
+        Returns True on success, False if cancelled or failed.
+        """
         if not self.doc:
-            return
+            return False
+        if not self._current_path:
+            return self._save_pdf_as()
         self._commit_all_boxes()
-        path = filedialog.asksaveasfilename(
-            title="Save PDF As", defaultextension=".pdf",
-            filetypes=[("PDF Files", "*.pdf")])
-        if not path:
-            return
         try:
-            self.doc.save(path)
-            messagebox.showinfo("Saved", f"PDF saved to:\n{path}")
+            self.doc.save(self._current_path, incremental=True)
+            self._unsaved_changes = False
+            self._update_title()
+            return True
         except Exception as ex:
             messagebox.showerror("Save Error", str(ex))
+            return False
+
+    def _save_pdf_as(self) -> bool:
+        """
+        Prompt for a new file path and do a full (non-incremental) save.
+        Updates _current_path and title on success.
+        Returns True on success, False if cancelled or failed.
+        """
+        if not self.doc:
+            return False
+        self._commit_all_boxes()
+        path = filedialog.asksaveasfilename(
+            title="Save PDF As",
+            defaultextension=".pdf",
+            filetypes=[("PDF Files", "*.pdf")],
+            initialfile=os.path.basename(self._current_path) if self._current_path else "document.pdf",
+        )
+        if not path:
+            return False
+        try:
+            self.doc.save(path)
+            self._current_path    = path
+            self._unsaved_changes = False
+            self.doc.path         = path   # keep PDFDocument in sync
+            self._update_title()
+            return True
+        except Exception as ex:
+            messagebox.showerror("Save Error", str(ex))
+            return False
 
     # ─────────────────────── page management ──────────────────────────────────
 
     def _prev_page(self):
         if self.doc and self.current_page_idx > 0:
             self._commit_all_boxes()
+            self._img_drag_cancel()
             self.current_page_idx -= 1
             self._render()
 
     def _next_page(self):
         if self.doc and self.current_page_idx < self.doc.page_count - 1:
             self._commit_all_boxes()
+            self._img_drag_cancel()
             self.current_page_idx += 1
             self._render()
 
@@ -932,14 +1081,20 @@ class InteractivePDFEditor:
         cmd = RotatePageCommand(self.page_service, self.doc,
                                 self.current_page_idx, angle)
         cmd.execute()
-        self._push_history(cmd)
+        self._push_history(cmd)   # _push_history calls _mark_dirty
         self._render()
 
     def _add_page(self):
         if not self.doc:
             return
-        self.doc.insert_page(self.current_page_idx + 1)
+        current = self.doc.get_page(self.current_page_idx)
+        self.doc.insert_page(
+            self.current_page_idx + 1,
+            width=current.width,
+            height=current.height,
+        )
         self.current_page_idx += 1
+        self._mark_dirty()
         self._render()
 
     def _delete_page(self):
@@ -953,6 +1108,7 @@ class InteractivePDFEditor:
             return
         self.doc.delete_page(self.current_page_idx)
         self.current_page_idx = min(self.current_page_idx, self.doc.page_count - 1)
+        self._mark_dirty()
         self._render()
 
     # ─────────────────────── zoom ─────────────────────────────────────────────
@@ -1040,6 +1196,106 @@ class InteractivePDFEditor:
             self._spawn_textbox(pdf_x, pdf_y)
         elif self.active_tool.get() == "extract":
             self._handle_extract(pdf_x, pdf_y)
+        elif self.active_tool.get() == "insert_image":
+            if self._img_pending_path is None:
+                # First click: pick the file. Drag begins on the NEXT press.
+                self._img_pick_file()
+            else:
+                # Second click: start the rubber-band drag.
+                self._img_drag_start  = (cx, cy)
+                self._img_rubber_band = None
+
+    def _on_canvas_drag(self, event):
+        if self.active_tool.get() != "insert_image":
+            return
+        if self._img_drag_start is None:
+            return
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        x0, y0 = self._img_drag_start
+        if self._img_rubber_band is None:
+            self._img_rubber_band = self.canvas.create_rectangle(
+                x0, y0, cx, cy,
+                outline=PALETTE["accent_light"], width=2, dash=(5, 3),
+            )
+        else:
+            self.canvas.coords(self._img_rubber_band, x0, y0, cx, cy)
+
+    def _on_canvas_release(self, event):
+        if self.active_tool.get() != "insert_image":
+            return
+        if self._img_drag_start is None:
+            return
+
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        x0, y0 = self._img_drag_start
+        pending_path = self._img_pending_path  # capture before cancel clears it
+
+        # Remove rubber band and reset drag state (but keep pending path until used)
+        if self._img_rubber_band is not None:
+            self.canvas.delete(self._img_rubber_band)
+            self._img_rubber_band = None
+        self._img_drag_start = None
+
+        # Require a minimum drag size to avoid accidental placements
+        if abs(cx - x0) < 10 or abs(cy - y0) < 10:
+            return
+
+        if not pending_path:
+            return
+
+        self._img_pending_path = None  # consumed
+
+        px0, py0 = self._canvas_to_pdf(min(x0, cx), min(y0, cy))
+        px1, py1 = self._canvas_to_pdf(max(x0, cx), max(y0, cy))
+
+        cmd = InsertImageCommand(
+            self.image_service, self.doc,
+            self.current_page_idx,
+            (px0, py0, px1, py1),
+            pending_path,
+        )
+        try:
+            cmd.execute()
+            self._push_history(cmd)
+        except Exception as ex:
+            cmd.cleanup()
+            messagebox.showerror("Insert Image Error", str(ex))
+            return
+        self._render()
+
+    def _img_pick_file(self):
+        """Open file dialog to choose an image. Stores path for the next drag."""
+        path = filedialog.askopenfilename(
+            title="Choose Image to Insert — then drag to place it",
+            filetypes=[
+                ("Image Files", "*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.gif"),
+                ("All Files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        self._img_pending_path = path
+        # Give the user a visual cue that a file is loaded and ready to place
+        self._hint.config(
+            text=f"✓ {os.path.basename(path)}\n\nNow drag on the canvas\nto place the image.",
+            fg=PALETTE["success"],
+        )
+
+    def _img_drag_cancel(self):
+        """Remove the rubber band and fully reset insertion drag state."""
+        if self._img_rubber_band is not None:
+            self.canvas.delete(self._img_rubber_band)
+            self._img_rubber_band = None
+        self._img_drag_start   = None
+        self._img_pending_path = None
+        # Reset hint text if insert_image tool is still active
+        if self.active_tool.get() == "insert_image":
+            self._hint.config(
+                text="Click canvas to choose\nan image file, then drag\nto place it.",
+                fg=PALETTE["fg_dim"],
+            )
 
     def _on_mousewheel(self, event):
         if event.num == 4:
@@ -1070,6 +1326,10 @@ class InteractivePDFEditor:
         pdf_w = page.width * 0.42
         pdf_h = self.fontsize * 4
 
+        # Sample the pixel colour from the rendered page at the click point so
+        # the text entry background blends in — giving a "transparent" appearance.
+        bg_color = self._sample_page_color(pdf_x, pdf_y)
+
         box = TextBox(
             canvas        = self.canvas,
             pdf_x         = pdf_x,
@@ -1082,11 +1342,30 @@ class InteractivePDFEditor:
             font_index    = self.font_index,
             fontsize      = self.fontsize,
             color_rgb     = self.text_color,
+            entry_bg      = bg_color,
+            align         = self.text_align,
             on_commit     = self._on_box_confirmed,
             on_delete     = self._on_box_deleted,
             on_interact   = self._on_box_interact,
         )
         self._text_boxes.append(box)
+
+    def _sample_page_color(self, pdf_x: float, pdf_y: float) -> str:
+        """
+        Sample a pixel from the rendered tk_image at the given PDF coordinates.
+        Falls back to the canvas background if the image isn't available or the
+        point is outside the page.
+        """
+        canvas_fallback = self.canvas.cget("bg")
+        if self.tk_image is None:
+            return canvas_fallback
+        try:
+            ix = int(pdf_x * self.scale_factor)
+            iy = int(pdf_y * self.scale_factor)
+            r, g, b = self.tk_image.get(ix, iy)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except Exception:
+            return canvas_fallback
 
     def _on_box_confirmed(self, box: TextBox):
         self._text_boxes = [b for b in self._text_boxes if b is not box]
@@ -1094,23 +1373,23 @@ class InteractivePDFEditor:
         if not text:
             return
 
-        # PyMuPDF insert_text() places text at the *baseline* of the first line.
-        # The overlay box top-left is at (pdf_x, pdf_y).
-        # Baseline offset ≈ fontsize (ascender), giving roughly 1 line of padding.
-        pdf_x = box.pdf_x
-        pdf_y = box.pdf_y + box.fontsize   # baseline of first text line
+        # Use insert_textbox so text word-wraps within the box bounds and
+        # alignment is honoured. The rect maps directly from the overlay box.
+        rect = (box.pdf_x, box.pdf_y,
+                box.pdf_x + box.pdf_w, box.pdf_y + box.pdf_h)
 
-        cmd = InsertTextCommand(
+        cmd = InsertTextBoxCommand(
             self.text_service, self.doc,
-            self.current_page_idx, text,
-            (pdf_x, pdf_y),
-            box.fontsize, box.pdf_font_name, box.pdf_color,
+            self.current_page_idx, rect, text,
+            box.fontsize, box.pdf_font_name, box.pdf_color, box.align,
         )
         try:
             cmd.execute()
             self._push_history(cmd)
         except Exception as ex:
+            cmd.cleanup()
             messagebox.showerror("Insert Error", str(ex))
+            return
 
         self._render()
 
@@ -1161,10 +1440,38 @@ class InteractivePDFEditor:
 
     # ─────────────────────── history ─────────────────────────────────────────
 
+    def _update_title(self):
+        """Reflect current file name and unsaved-changes indicator in the window title."""
+        if self._current_path:
+            name = os.path.basename(self._current_path)
+            marker = " •" if self._unsaved_changes else ""
+            self.root.title(f"PDF Editor — {name}{marker}")
+        else:
+            self.root.title("PDF Editor — Untitled •" if self._unsaved_changes
+                            else "PDF Editor")
+
+    def _mark_dirty(self):
+        """Mark the document as having unsaved changes."""
+        if not self._unsaved_changes:
+            self._unsaved_changes = True
+            self._update_title()
+
     def _push_history(self, cmd):
+        # Discard (and clean up) any forward history that is now unreachable.
+        discarded = self._history[self._history_idx + 1:]
+        for old_cmd in discarded:
+            old_cmd.cleanup()
         self._history = self._history[:self._history_idx + 1]
         self._history.append(cmd)
         self._history_idx = len(self._history) - 1
+        self._mark_dirty()
+
+    def _clear_history(self):
+        """Clean up all snapshot files and reset the history stack."""
+        for cmd in self._history:
+            cmd.cleanup()
+        self._history.clear()
+        self._history_idx = -1
 
     def _undo(self):
         if self._history_idx < 0:
@@ -1173,16 +1480,41 @@ class InteractivePDFEditor:
         try:
             cmd.undo()
             self._history_idx -= 1
+            self._mark_dirty()
             self._render()
         except NotImplementedError:
             messagebox.showinfo("Undo", "This action cannot be undone.")
         except Exception as ex:
             messagebox.showerror("Undo Error", str(ex))
 
+    def _redo(self):
+        if self._history_idx >= len(self._history) - 1:
+            return
+        cmd = self._history[self._history_idx + 1]
+        try:
+            cmd.execute()
+            self._history_idx += 1
+            self._mark_dirty()
+            self._render()
+        except Exception as ex:
+            messagebox.showerror("Redo Error", str(ex))
+
     # ─────────────────────── closing ─────────────────────────────────────────
 
     def _on_closing(self):
+        if self._unsaved_changes:
+            answer = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                "You have unsaved changes.\nSave before closing?",
+            )
+            if answer is None:   # Cancel
+                return
+            if answer:           # Yes — save
+                if not self._save_pdf():
+                    return       # Save was cancelled, don't close
         self._commit_all_boxes()
+        self._img_drag_cancel()
+        self._clear_history()
         if self.doc:
             self.doc.close()
         self.root.destroy()
