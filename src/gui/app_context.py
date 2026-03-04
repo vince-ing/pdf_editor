@@ -73,6 +73,8 @@ class AppContext:
         return self._editor._page_offset_y
 
     # ── actions (tools call these to drive the window) ────────────────────────
+    def invalidate_cache(self, page_idx: int = None) -> None:
+            self._editor._cont_invalidate_cache(page_idx)
 
     def canvas_to_pdf(self, cx: float, cy: float) -> tuple[float, float]:
         return self._editor._canvas_to_pdf(cx, cy)

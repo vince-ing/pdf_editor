@@ -68,14 +68,19 @@ class SelectTextTool(BaseTool):
         self._dragging   = False
         self._last_rendered_range = None
         if had_selection:
+            if hasattr(self.ctx, "invalidate_cache"):
+                self.ctx.invalidate_cache(self.ctx.current_page)
             self.ctx.render()
 
     def reload(self) -> None:
         """Re-load after a page change or re-render (called by main_window)."""
+        had_selection = self._anchor_idx is not None
         self._anchor_idx  = None
         self._head_idx    = None
         self._dragging    = False
         self._last_rendered_range = None
+        if had_selection and hasattr(self.ctx, "invalidate_cache"):
+            self.ctx.invalidate_cache(self.ctx.current_page)
         self._load_chars()
 
     # ── public API for the render pipeline ────────────────────────────────────
@@ -170,6 +175,9 @@ class SelectTextTool(BaseTool):
         rng = self._selection_range()
         if rng != self._last_rendered_range:
             self._last_rendered_range = rng
+            # Force the continuous scroll cache to drop the old page image
+            if hasattr(self.ctx, "invalidate_cache"):
+                self.ctx.invalidate_cache(self.ctx.current_page)
             self.ctx.render()
 
     def _load_chars(self) -> None:

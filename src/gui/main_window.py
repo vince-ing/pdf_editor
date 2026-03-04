@@ -1194,10 +1194,6 @@ class InteractivePDFEditor:
             box.rescale(self.scale_factor, self._page_offset_x, self._page_offset_y)
         self._right_panel.thumb.refresh_all_borders()
         self._right_panel.thumb.scroll_to_active()
-        if self._active_tool_name == "select_text":
-            sel = self._get_tool("select_text")
-            if sel:
-                sel.reload()
 
     _CONT_GAP = 20
 
