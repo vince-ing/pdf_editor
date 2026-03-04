@@ -164,6 +164,8 @@ class TopBar:
         self._zoom_label.pack(side=tk.LEFT)
         Tooltip(self._topbar_btn(right, "+", self._cb.get("zoom_in",    lambda: None), padx=6), "Zoom in  (Ctrl+=)")
         Tooltip(self._topbar_btn(right, "⟳", self._cb.get("zoom_reset", lambda: None), padx=6), "Reset zoom  (Ctrl+0)")
+        Tooltip(self._topbar_btn(right, "↔", self._cb.get("zoom_fit_width", lambda: None), padx=6), "Fit to width  (Ctrl+1)")
+        Tooltip(self._topbar_btn(right, "⛶", self._cb.get("zoom_fit_page",  lambda: None), padx=6), "Fit page  (Ctrl+2)")
 
         self._sep(right, "v")
 

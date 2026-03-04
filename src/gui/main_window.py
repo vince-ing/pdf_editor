@@ -1,19 +1,5 @@
 """
-PDF Editor — Main Window (Refactored)
-
-Layout
-──────
-  ┌─────────────────────────────────────────────────────────┐
-  │  TOP BAR  [Logo | File actions | Title | Zoom | View]   │
-  ├──┬──────────────────────────────────────────┬───────────┤
-  │  │                                          │  Pages /  │
-  │ I│          C A N V A S                    │  Props    │
-  │ C│                                          │  (tabbed) │
-  │ O│                                          │           │
-  │ N│                                          │           │
-  ├──┴──────────────────────────────────────────┴───────────┤
-  │  STATUS BAR                                             │
-  └─────────────────────────────────────────────────────────┘
+PDF Editor — Main Window
 
 This class is now a pure orchestrator:
   • Holds all application state (document, history, tools).
@@ -234,6 +220,8 @@ class InteractivePDFEditor:
                 "zoom_in":            self._zoom_in,
                 "zoom_out":           self._zoom_out,
                 "zoom_reset":         self._zoom_reset,
+                "zoom_fit_width":     self._zoom_fit_width,
+                "zoom_fit_page":      self._zoom_fit_page,
                 "set_single_mode":    self._set_single_mode,
                 "set_continuous_mode":self._set_continuous_mode,
                 "toggle_search_bar":  self._toggle_search_bar,
@@ -328,6 +316,8 @@ class InteractivePDFEditor:
         r.bind("<Control-equal>", lambda e: self._zoom_in())
         r.bind("<Control-minus>", lambda e: self._zoom_out())
         r.bind("<Control-0>",     lambda e: self._zoom_reset())
+        r.bind("<Control-1>",     lambda e: self._zoom_fit_width())
+        r.bind("<Control-2>",     lambda e: self._zoom_fit_page())
         r.bind("<Left>",          lambda e: self._prev_page())
         r.bind("<Right>",         lambda e: self._next_page())
         r.bind("<Escape>",        lambda e: self._on_escape())
@@ -600,6 +590,8 @@ class InteractivePDFEditor:
         self._update_title()
         self._render()
         self._right_panel.thumb.reset()
+        # Fit to width on open — deferred so the canvas has been laid out
+        self.root.after(80, self._zoom_fit_width)
 
     def _open_recent(self, path: str) -> None:
         if self._unsaved_changes:
@@ -971,6 +963,47 @@ class InteractivePDFEditor:
 
     def _zoom_reset(self) -> None:
         self._set_zoom(RENDER_DPI)
+
+    def _zoom_fit_width(self) -> None:
+        """Scale so the current page fills the canvas width."""
+        if not self.doc:
+            return
+        page = self.doc.get_page(self.current_page_idx)
+        cw = self.canvas.winfo_width()
+        if cw < 10:
+            # Canvas not yet realised — retry once it is
+            self.root.after(60, self._zoom_fit_width)
+            return
+        available_w = cw - 2 * PAD_XL
+        new_scale = round(
+            max(MIN_SCALE, min(MAX_SCALE, available_w / page.width)), 3
+        )
+        self.scale_factor = new_scale
+        self._update_zoom_label()
+        self._cont_invalidate_cache()
+        self._render()
+        self._flash_status("↔ Fit width", color=PALETTE["accent_light"], duration_ms=1200)
+
+    def _zoom_fit_page(self) -> None:
+        """Scale so the current page fits entirely within the canvas."""
+        if not self.doc:
+            return
+        page = self.doc.get_page(self.current_page_idx)
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        if cw < 10 or ch < 10:
+            self.root.after(60, self._zoom_fit_page)
+            return
+        scale_w = (cw - 2 * PAD_XL) / page.width
+        scale_h = (ch - 2 * PAD_XL) / page.height
+        new_scale = round(
+            max(MIN_SCALE, min(MAX_SCALE, min(scale_w, scale_h))), 3
+        )
+        self.scale_factor = new_scale
+        self._update_zoom_label()
+        self._cont_invalidate_cache()
+        self._render()
+        self._flash_status("⛶ Fit page", color=PALETTE["accent_light"], duration_ms=1200)
 
     def _set_zoom(self, s: float) -> None:
         self.scale_factor = round(s, 3)

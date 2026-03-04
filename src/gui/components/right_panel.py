@@ -212,11 +212,42 @@ class RightPanel:
 
         _mk_btn(nav, "◀", self._thumb_cbs.get("prev_page", lambda: None),
                 padx=PAD_S).pack(side=tk.LEFT)
+
+        # Page jump: shows "3 / 12" as a label; click to enter a page number
+        self._page_jump_var   = tk.StringVar(value="—")
+        self._total_pages     = 0
+        self._page_label_mode = "label"   # "label" | "entry"
+
+        self._page_nav_frame = tk.Frame(nav, bg=PALETTE["bg_panel"])
+        self._page_nav_frame.pack(side=tk.LEFT, expand=True)
+
+        # Label shown in normal state
         self._page_label = tk.Label(
-            nav, text="—",
+            self._page_nav_frame, text="—",
             bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"], font=FONT_UI,
+            cursor="hand2",
         )
-        self._page_label.pack(side=tk.LEFT, expand=True)
+        self._page_label.pack()
+        Tooltip(self._page_label, "Click to jump to a page")
+
+        # Entry shown when editing
+        self._page_entry = tk.Entry(
+            self._page_nav_frame,
+            textvariable=self._page_jump_var,
+            bg=PALETTE["bg_hover"], fg=PALETTE["fg_primary"],
+            insertbackground=PALETTE["fg_primary"],
+            selectbackground=PALETTE["accent_dim"],
+            relief="flat", highlightthickness=1,
+            highlightbackground=PALETTE["accent"],
+            highlightcolor=PALETTE["accent"],
+            font=FONT_UI, width=5, justify="center",
+        )
+
+        self._page_label.bind("<Button-1>", lambda e: self._enter_jump_mode())
+        self._page_entry.bind("<Return>",   lambda e: self._commit_jump())
+        self._page_entry.bind("<Escape>",   lambda e: self._exit_jump_mode())
+        self._page_entry.bind("<FocusOut>", lambda e: self._exit_jump_mode())
+
         _mk_btn(nav, "▶", self._thumb_cbs.get("next_page", lambda: None),
                 padx=PAD_S).pack(side=tk.RIGHT)
 
@@ -238,8 +269,47 @@ class RightPanel:
         )
 
     def update_page_label(self, current: int, total: int) -> None:
+        self._total_pages = total
         if self._page_label:
             self._page_label.config(text=f"{current} / {total}")
+        # If the entry is currently open, close it cleanly
+        if self._page_label_mode == "entry":
+            self._exit_jump_mode()
+
+    # ── page-jump helpers ──────────────────────────────────────────────────────
+
+    def _enter_jump_mode(self) -> None:
+        if not self._total_pages:
+            return
+        # Show only the current page number in the entry for easy overwrite
+        current_text = self._page_label.cget("text")
+        try:
+            current_num = current_text.split("/")[0].strip()
+        except Exception:
+            current_num = ""
+        self._page_jump_var.set(current_num)
+        self._page_label.pack_forget()
+        self._page_entry.pack()
+        self._page_entry.focus_set()
+        self._page_entry.select_range(0, tk.END)
+        self._page_label_mode = "entry"
+
+    def _exit_jump_mode(self) -> None:
+        self._page_entry.pack_forget()
+        self._page_label.pack()
+        self._page_label_mode = "label"
+
+    def _commit_jump(self) -> None:
+        raw = self._page_jump_var.get().strip()
+        self._exit_jump_mode()
+        on_jump = self._thumb_cbs.get("on_page_jump")
+        if not on_jump or not raw:
+            return
+        try:
+            page_num = int(raw)
+        except ValueError:
+            return
+        on_jump(page_num)
 
     # ── Properties tab ────────────────────────────────────────────────────────
 
