@@ -37,6 +37,7 @@ from src.gui.tools.annot_tool import AnnotationTool
 from src.gui.tools.image_tool import ImageInsertTool, ImageExtractTool
 from src.gui.tools.select_tool import SelectTextTool
 from src.gui.tools.redact_tool import RedactTool
+from src.utils.recent_files import RecentFiles
 
 
 # ── AppContext ────────────────────────────────────────────────────────────────
@@ -139,6 +140,9 @@ class InteractivePDFEditor:
         # History
         self._history = HistoryManager(on_change=self._on_history_change)
 
+        # Recent files
+        self._recent = RecentFiles()
+
         # Search bar state
         self._search_bar_visible = False
         self._search_bar_frame   = None   # set in _build_canvas_area
@@ -239,6 +243,11 @@ class InteractivePDFEditor:
         )
         self._build_canvas_area(body)
         self._build_statusbar()
+        # Initialise startup screen state
+        self._startup_frame = None
+        # Populate the recent ▾ dropdown and show welcome screen
+        self.root.after(50, self._rebuild_recent_menu)
+        self.root.after(60, self._show_startup_screen)
 
     def _build_topbar(self):
         bar = tk.Frame(self.root, bg=PALETTE["bg_mid"], height=44)
@@ -259,6 +268,19 @@ class InteractivePDFEditor:
             ("↪  Redo",    self._redo,         "Redo last undone action  (Ctrl+Y)"),
         ]:
             Tooltip(self._topbar_btn(bar, label, cmd), tip)
+
+        # Recent files dropdown — sits immediately after Open
+        self._recent_mb = tk.Menubutton(
+            bar, text="▾",
+            bg=PALETTE["bg_mid"], fg=PALETTE["fg_secondary"],
+            activebackground=PALETTE["bg_hover"],
+            activeforeground=PALETTE["accent_light"],
+            font=("Helvetica", 9), relief="flat", bd=0,
+            padx=4, pady=0, cursor="hand2",
+            highlightthickness=0,
+        )
+        self._recent_mb.pack(side=tk.LEFT, fill=tk.Y)
+        Tooltip(self._recent_mb, "Recent files")
 
         tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
 
@@ -1054,6 +1076,10 @@ class InteractivePDFEditor:
             title="Open PDF", filetypes=[("PDF Files", "*.pdf"), ("All", "*.*")])
         if not path:
             return
+        self._open_pdf_path(path)
+
+    def _open_pdf_path(self, path: str):
+        """Open a PDF from a known path (used by dialog, recent list, startup screen)."""
         self._commit_all_boxes()
         if self.doc:
             self.doc.close()
@@ -1061,14 +1087,198 @@ class InteractivePDFEditor:
             self.doc = PDFDocument(path)
         except Exception as ex:
             messagebox.showerror("Error", f"Could not open:\n{ex}")
+            # Remove bad path from recent list
+            self._recent.remove(path)
+            self._rebuild_recent_menu()
             return
         self.current_page_idx = 0
         self._current_path    = path
         self._unsaved_changes = False
         self._history.clear()
+        self._recent.add(path)
+        self._rebuild_recent_menu()
+        self._hide_startup_screen()
         self._update_title()
         self._render()
         self._thumb.reset()
+
+    def _open_recent(self, path: str):
+        """Open a recent file, checking for unsaved changes first."""
+        if self._unsaved_changes:
+            answer = messagebox.askyesnocancel(
+                "Unsaved Changes", "You have unsaved changes.\nSave before opening a recent file?")
+            if answer is None:
+                return
+            if answer and not self._save_pdf():
+                return
+        self._open_pdf_path(path)
+
+    # ── recent files menu ─────────────────────────────────────────────────────
+
+    def _rebuild_recent_menu(self):
+        """Rebuild the ▾ dropdown menu from the current recent list."""
+        menu = tk.Menu(
+            self._recent_mb, tearoff=0,
+            bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
+            activebackground=PALETTE["accent_dim"],
+            activeforeground=PALETTE["accent_light"],
+            font=("Helvetica", 9),
+            relief="flat", bd=1,
+        )
+        recents = self._recent.get()
+        if recents:
+            for p in recents:
+                # Show just the filename, full path in tooltip via label truncation
+                label = os.path.basename(p)
+                dirname = os.path.dirname(p)
+                # Truncate long directory names
+                if len(dirname) > 40:
+                    dirname = "…" + dirname[-38:]
+                menu.add_command(
+                    label=f"  {label}\n  {dirname}",
+                    command=lambda fp=p: self._open_recent(fp),
+                )
+            menu.add_separator()
+            menu.add_command(
+                label="  Clear recent files",
+                command=self._clear_recent,
+                foreground=PALETTE["fg_dim"],
+            )
+        else:
+            menu.add_command(label="  No recent files", state="disabled")
+
+        self._recent_mb.config(menu=menu)
+
+    def _clear_recent(self):
+        self._recent.clear()
+        self._rebuild_recent_menu()
+        # Refresh startup screen if visible
+        if hasattr(self, "_startup_frame") and self._startup_frame:
+            self._show_startup_screen()
+
+    # ── startup / welcome screen ──────────────────────────────────────────────
+
+    def _show_startup_screen(self):
+        """Draw a welcome screen with recent files over the empty canvas."""
+        if self.doc:
+            return   # A document is already open — nothing to show
+
+        # Remove any existing startup frame first
+        self._hide_startup_screen()
+
+        recents = self._recent.get()
+
+        frame = tk.Frame(
+            self.canvas,
+            bg=PALETTE["bg_dark"],
+        )
+        self._startup_frame = frame
+
+        # Centre the content
+        inner = tk.Frame(frame, bg=PALETTE["bg_dark"])
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+
+        # App logo / title
+        tk.Label(
+            inner,
+            text="◼",
+            bg=PALETTE["bg_dark"], fg=PALETTE["accent"],
+            font=("Helvetica", 48),
+        ).pack(pady=(0, 4))
+        tk.Label(
+            inner,
+            text="PDF Editor",
+            bg=PALETTE["bg_dark"], fg=PALETTE["fg_primary"],
+            font=("Helvetica", 22, "bold"),
+        ).pack()
+        tk.Label(
+            inner,
+            text="Open a PDF file to get started",
+            bg=PALETTE["bg_dark"], fg=PALETTE["fg_dim"],
+            font=("Helvetica", 10),
+        ).pack(pady=(4, 20))
+
+        # Open button
+        tk.Button(
+            inner,
+            text="📂   Open PDF…",
+            command=self._open_pdf,
+            bg=PALETTE["accent"], fg="#FFFFFF",
+            activebackground=PALETTE["accent_light"],
+            activeforeground="#FFFFFF",
+            font=("Helvetica", 12, "bold"),
+            relief="flat", bd=0,
+            padx=28, pady=10,
+            cursor="hand2",
+        ).pack(pady=(0, 28))
+
+        # Recent files section
+        if recents:
+            tk.Frame(inner, bg=PALETTE["border"], height=1).pack(fill=tk.X, pady=(0, 12))
+            tk.Label(
+                inner,
+                text="RECENT FILES",
+                bg=PALETTE["bg_dark"], fg=PALETTE["fg_dim"],
+                font=("Helvetica", 8, "bold"),
+            ).pack(anchor="w", pady=(0, 6))
+
+            for p in recents:
+                row = tk.Frame(inner, bg=PALETTE["bg_dark"], cursor="hand2")
+                row.pack(fill=tk.X, pady=1)
+
+                name = os.path.basename(p)
+                directory = os.path.dirname(p)
+                if len(directory) > 48:
+                    directory = "…" + directory[-46:]
+
+                name_lbl = tk.Label(
+                    row, text=name,
+                    bg=PALETTE["bg_dark"], fg=PALETTE["fg_primary"],
+                    font=("Helvetica", 10), anchor="w", cursor="hand2",
+                )
+                name_lbl.pack(anchor="w")
+
+                path_lbl = tk.Label(
+                    row, text=directory,
+                    bg=PALETTE["bg_dark"], fg=PALETTE["fg_dim"],
+                    font=("Helvetica", 8), anchor="w", cursor="hand2",
+                )
+                path_lbl.pack(anchor="w")
+
+                # Hover highlight
+                def _enter(e, r=row, nl=name_lbl, pl=path_lbl):
+                    r.config(bg=PALETTE["bg_hover"])
+                    nl.config(bg=PALETTE["bg_hover"], fg=PALETTE["accent_light"])
+                    pl.config(bg=PALETTE["bg_hover"])
+
+                def _leave(e, r=row, nl=name_lbl, pl=path_lbl):
+                    r.config(bg=PALETTE["bg_dark"])
+                    nl.config(bg=PALETTE["bg_dark"], fg=PALETTE["fg_primary"])
+                    pl.config(bg=PALETTE["bg_dark"])
+
+                def _click(e, fp=p):
+                    self._open_pdf_path(fp)
+
+                for widget in (row, name_lbl, path_lbl):
+                    widget.bind("<Enter>", _enter)
+                    widget.bind("<Leave>", _leave)
+                    widget.bind("<Button-1>", _click)
+
+                # Divider between entries
+                tk.Frame(inner, bg=PALETTE["border"], height=1).pack(
+                    fill=tk.X, pady=(4, 0))
+
+        # Place the frame over the entire canvas
+        frame.place(x=0, y=0, relwidth=1, relheight=1)
+
+    def _hide_startup_screen(self):
+        """Remove the startup screen if it is showing."""
+        if hasattr(self, "_startup_frame") and self._startup_frame:
+            try:
+                self._startup_frame.destroy()
+            except Exception:
+                pass
+            self._startup_frame = None
 
     def _save_pdf(self) -> bool:
         if not self.doc:
