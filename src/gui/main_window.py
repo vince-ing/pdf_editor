@@ -107,6 +107,10 @@ class InteractivePDFEditor:
         self.tk_image         = None
         self._page_offset_x   = 20
         self._page_offset_y   = 20
+        self._continuous_mode = True          # default: continuous scroll
+        self._cont_images: dict = {}          # (page_idx, scale) → PhotoImage
+        self._cont_after_id    = None         # lazy render scheduling
+        self._scroll_after_id  = None         # scroll debounce
         self._current_path: str | None = None
         self._unsaved_changes = False
 
@@ -295,7 +299,17 @@ class InteractivePDFEditor:
 
         tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
 
-        # ── Search & Redact button in top bar ──────────────────────────────
+        # ── View mode toggle ──────────────────────────────────────────────
+        tk.Label(bar, text="View:", bg=PALETTE["bg_mid"],
+                 fg=PALETTE["fg_secondary"], font=FONT_LABEL, padx=8).pack(side=tk.LEFT)
+
+        self._btn_single = self._topbar_btn(bar, "□ Single", self._set_single_mode)
+        self._btn_scroll = self._topbar_btn(bar, "▤ Scroll", self._set_continuous_mode)
+        Tooltip(self._btn_single, "Single page view")
+        Tooltip(self._btn_scroll, "Continuous scroll view")
+        self._update_view_mode_buttons()
+
+        tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
         Tooltip(
             self._topbar_btn(bar, "🔍  Find & Redact", self._toggle_search_bar),
             "Search & redact text on this page  (Ctrl+F)",
@@ -1095,6 +1109,7 @@ class InteractivePDFEditor:
         self._current_path    = path
         self._unsaved_changes = False
         self._history.clear()
+        self._cont_images.clear()
         self._recent.add(path)
         self._rebuild_recent_menu()
         self._hide_startup_screen()
@@ -1335,8 +1350,19 @@ class InteractivePDFEditor:
         if self._current_tool:
             self._current_tool.deactivate()
         self.current_page_idx = idx
-        self._thumb.refresh_all_borders()
-        self._render()
+        if self._continuous_mode:
+            self._update_cont_offsets(idx)
+            self._thumb.refresh_all_borders()
+            self._thumb.scroll_to_active()
+            self._scroll_to_current_cont()
+            page = self.doc.get_page(idx)
+            self._page_label.config(
+                text=f"{idx + 1} / {self.doc.page_count}")
+            self._st_size.config(
+                text=f"{int(page.width)} × {int(page.height)} pt")
+        else:
+            self._thumb.refresh_all_borders()
+            self._render()
         if self._current_tool:
             self._current_tool.activate()
 
@@ -1380,6 +1406,7 @@ class InteractivePDFEditor:
         ) if self.current_page_idx < n else 0
 
         self._mark_dirty()
+        self._cont_images.clear()
         self._thumb.reset()
         self._render()
         self._flash_status(f"↕ Moved page {src_idx + 1} → position {insert_at + 1}")
@@ -1397,6 +1424,7 @@ class InteractivePDFEditor:
             return
         self.current_page_idx = insert_pos
         self._mark_dirty()
+        self._cont_images.clear()
         self._thumb.reset()
         self._render()
         self._flash_status(f"+ Added blank page at position {insert_pos + 1}")
@@ -1421,6 +1449,7 @@ class InteractivePDFEditor:
             return
         self.current_page_idx = min(self.current_page_idx, self.doc.page_count - 1)
         self._mark_dirty()
+        self._cont_images.clear()
         self._thumb.reset()
         self._render()
         self._flash_status(f"✕ Deleted page {idx + 1}")
@@ -1439,6 +1468,7 @@ class InteractivePDFEditor:
         self._push_history(cmd)
         self.current_page_idx = idx + 1
         self._mark_dirty()
+        self._cont_images.clear()
         self._thumb.reset()
         self._render()
         self._flash_status(f"⧉ Duplicated page {idx + 1}")
@@ -1456,6 +1486,7 @@ class InteractivePDFEditor:
             return
         self._push_history(cmd)
         self._thumb.mark_dirty(idx)
+        self._cont_invalidate_cache(idx)
         if idx == self.current_page_idx:
             self._render()
         self._flash_status(
@@ -1494,6 +1525,7 @@ class InteractivePDFEditor:
     def _set_zoom(self, s: float):
         self.scale_factor = round(s, 3)
         self._update_zoom_label()
+        self._cont_invalidate_cache()   # stale at new scale
         self._render()
 
     def _update_zoom_label(self):
@@ -1518,6 +1550,14 @@ class InteractivePDFEditor:
     def _render(self):
         if not self.doc:
             return
+        if self._continuous_mode:
+            self._render_continuous()
+        else:
+            self._render_single()
+
+    # ── single-page render ────────────────────────────────────────────────────
+
+    def _render_single(self):
         page = self.doc.get_page(self.current_page_idx)
         ppm  = page.render_to_ppm(scale=self.scale_factor)
         self.tk_image = tk.PhotoImage(data=ppm)
@@ -1532,6 +1572,7 @@ class InteractivePDFEditor:
         ox, oy = self._page_offset_x, self._page_offset_y
         self.canvas.delete("page_img")
         self.canvas.delete("page_shadow")
+        self.canvas.delete("page_bg")
         self.canvas.delete("textsel")
 
         self.canvas.create_rectangle(
@@ -1555,9 +1596,258 @@ class InteractivePDFEditor:
             if sel:
                 sel.reload()
 
+    # ── continuous scroll render ──────────────────────────────────────────────
+
+    _CONT_GAP = 20   # px gap between pages
+
+    def _cont_page_top(self, idx: int) -> int:
+        """Canvas y coordinate of the top of page slot idx in continuous mode."""
+        doc = self.doc
+        if not doc:
+            return 0
+        # All pages assumed same height for layout; individual pages may differ.
+        # We accumulate actual heights.
+        y = self._CONT_GAP
+        for i in range(idx):
+            p  = doc.get_page(i)
+            ih = int(p.height * self.scale_factor)
+            y += ih + self._CONT_GAP
+        return y
+
+    def _cont_page_at_y(self, canvas_y: float) -> int:
+        """Return the page index whose slot contains canvas_y."""
+        doc = self.doc
+        if not doc:
+            return 0
+        y = self._CONT_GAP
+        for i in range(doc.page_count):
+            p  = doc.get_page(i)
+            ih = int(p.height * self.scale_factor)
+            if canvas_y <= y + ih:
+                return i
+            y += ih + self._CONT_GAP
+        return doc.page_count - 1
+
+    def _render_continuous(self):
+        """
+        Layout all pages stacked vertically.  Renders the current page
+        immediately, then schedules adjacent pages lazily.
+        """
+        if self._cont_after_id:
+            self.root.after_cancel(self._cont_after_id)
+            self._cont_after_id = None
+
+        doc = self.doc
+        n   = doc.page_count
+        cw  = self.canvas.winfo_width()
+
+        # Compute total canvas dimensions
+        total_h = self._CONT_GAP
+        max_iw  = 0
+        heights = []
+        widths  = []
+        for i in range(n):
+            p  = doc.get_page(i)
+            iw = int(p.width  * self.scale_factor)
+            ih = int(p.height * self.scale_factor)
+            heights.append(ih)
+            widths.append(iw)
+            max_iw   = max(max_iw, iw)
+            total_h += ih + self._CONT_GAP
+
+        self.canvas.delete("page_img")
+        self.canvas.delete("page_shadow")
+        self.canvas.delete("page_bg")
+        self.canvas.delete("textsel")
+        self.canvas.config(scrollregion=(0, 0, max(cw, max_iw + 80), total_h))
+
+        # Draw placeholder backgrounds for all pages first
+        y = self._CONT_GAP
+        for i in range(n):
+            iw, ih = widths[i], heights[i]
+            ox = max(40, (cw - iw) // 2)
+            self.canvas.create_rectangle(
+                ox, y, ox + iw, y + ih,
+                fill=PALETTE.get("page_bg", "#FFFFFF"), outline="",
+                tags=(f"page_bg", f"page_bg_{i}"),
+            )
+            self.canvas.create_rectangle(
+                ox + 5, y + 5, ox + iw + 5, y + ih + 5,
+                fill="#000000", outline="", stipple="gray25",
+                tags=(f"page_shadow", f"page_shadow_{i}"),
+            )
+            # Raise shadow below placeholder
+            self.canvas.tag_lower(f"page_shadow_{i}", f"page_bg_{i}")
+            y += ih + self._CONT_GAP
+
+        # Update page offset for current page (used by tools)
+        self._update_cont_offsets(self.current_page_idx)
+
+        # Render priority order: current page first, then outward
+        cur = self.current_page_idx
+        order = [cur]
+        for delta in range(1, n):
+            if cur - delta >= 0:
+                order.append(cur - delta)
+            if cur + delta < n:
+                order.append(cur + delta)
+
+        def _render_one(remaining):
+            if not remaining or not self.doc:
+                self._cont_after_id = None
+                return
+            idx  = remaining[0]
+            rest = remaining[1:]
+            self._render_cont_page(idx, widths[idx], heights[idx], cw)
+            self._cont_after_id = self.root.after_idle(lambda: _render_one(rest))
+
+        _render_one(order)
+
+        cur_page = doc.get_page(self.current_page_idx)
+        self._page_label.config(
+            text=f"{self.current_page_idx + 1} / {n}")
+        self._st_size.config(
+            text=f"{int(cur_page.width)} × {int(cur_page.height)} pt")
+
+        self._thumb.refresh_all_borders()
+        self._thumb.scroll_to_active()
+
+    def _render_cont_page(self, idx: int, iw: int, ih: int, cw: int):
+        """Render a single page slot in continuous mode, using cache."""
+        doc = self.doc
+        if not doc or idx >= doc.page_count:
+            return
+
+        cache_key = (idx, self.scale_factor)
+        if cache_key not in self._cont_images:
+            try:
+                page = doc.get_page(idx)
+                ppm  = page.render_to_ppm(scale=self.scale_factor)
+                self._cont_images[cache_key] = tk.PhotoImage(data=ppm)
+            except Exception:
+                return
+
+        img = self._cont_images[cache_key]
+        y   = self._cont_page_top(idx)
+        ox  = max(40, (cw - iw) // 2)
+
+        self.canvas.delete(f"page_img_{idx}")
+        self.canvas.create_image(
+            ox, y, anchor=tk.NW, image=img,
+            tags=("page_img", f"page_img_{idx}"),
+        )
+        # Keep shadow and placeholder below image
+        self.canvas.tag_lower(f"page_bg_{idx}", f"page_img_{idx}")
+
+    def _update_cont_offsets(self, idx: int):
+        """Update _page_offset_x/_y to point at page idx in continuous mode."""
+        doc = self.doc
+        if not doc:
+            return
+        p   = doc.get_page(idx)
+        iw  = int(p.width  * self.scale_factor)
+        cw  = self.canvas.winfo_width()
+        self._page_offset_x = max(40, (cw - iw) // 2)
+        self._page_offset_y = self._cont_page_top(idx)
+
+    def _cont_invalidate_cache(self, page_idx: int | None = None):
+        """Clear render cache for one page (or all if None)."""
+        if page_idx is None:
+            self._cont_images.clear()
+        else:
+            keys = [k for k in self._cont_images if k[0] == page_idx]
+            for k in keys:
+                del self._cont_images[k]
+
+    def _on_cont_scroll(self):
+        """Called (debounced) after scrolling in continuous mode to update current page."""
+        self._scroll_after_id = None
+        if not self.doc or not self._continuous_mode:
+            return
+        # Find which page is most visible in the viewport
+        top    = self.canvas.canvasy(0)
+        bottom = self.canvas.canvasy(self.canvas.winfo_height())
+        mid    = (top + bottom) / 2
+        idx    = self._cont_page_at_y(mid)
+        if idx != self.current_page_idx:
+            self.current_page_idx = idx
+            self._update_cont_offsets(idx)
+            page = self.doc.get_page(idx)
+            self._page_label.config(
+                text=f"{idx + 1} / {self.doc.page_count}")
+            self._st_size.config(
+                text=f"{int(page.width)} × {int(page.height)} pt")
+            self._thumb.refresh_all_borders()
+            self._thumb.scroll_to_active()
+
+    # ── view mode switching ────────────────────────────────────────────────────
+
+    def _set_single_mode(self):
+        if not self._continuous_mode:
+            return
+        self._commit_all_boxes()
+        self._continuous_mode = False
+        self._cont_images.clear()
+        self._update_view_mode_buttons()
+        self._render()
+
+    def _set_continuous_mode(self):
+        if self._continuous_mode:
+            return
+        self._commit_all_boxes()
+        self._continuous_mode = True
+        self._update_view_mode_buttons()
+        self._render()
+        # Scroll to current page after layout
+        self.root.after(80, self._scroll_to_current_cont)
+
+    def _update_view_mode_buttons(self):
+        """Highlight whichever mode button is active."""
+        if not hasattr(self, "_btn_single"):
+            return
+        if self._continuous_mode:
+            self._btn_single.config(
+                fg=PALETTE["fg_secondary"],
+                bg=PALETTE["bg_mid"],
+            )
+            self._btn_scroll.config(
+                fg=PALETTE["accent_light"],
+                bg=PALETTE["bg_hover"],
+            )
+        else:
+            self._btn_single.config(
+                fg=PALETTE["accent_light"],
+                bg=PALETTE["bg_hover"],
+            )
+            self._btn_scroll.config(
+                fg=PALETTE["fg_secondary"],
+                bg=PALETTE["bg_mid"],
+            )
+
+    def _scroll_to_current_cont(self):
+        """In continuous mode, scroll canvas so current page is in view."""
+        if not self.doc:
+            return
+        y_top    = self._cont_page_top(self.current_page_idx)
+        total_h  = self._cont_page_top(self.doc.page_count)  # past-end y
+        if total_h > 0:
+            frac = max(0.0, (y_top - self._CONT_GAP) / total_h)
+            self.canvas.yview_moveto(frac)
+
     # ── canvas events ─────────────────────────────────────────────────────────
 
     def _canvas_to_pdf(self, cx: float, cy: float) -> tuple[float, float]:
+        if self._continuous_mode:
+            # Determine which page was clicked and update current page
+            idx = self._cont_page_at_y(cy)
+            if idx != self.current_page_idx:
+                self.current_page_idx = idx
+                self._update_cont_offsets(idx)
+                self._thumb.refresh_all_borders()
+                self._thumb.scroll_to_active()
+                page = self.doc.get_page(idx)
+                self._page_label.config(
+                    text=f"{idx + 1} / {self.doc.page_count}")
         return (
             (cx - self._page_offset_x) / self.scale_factor,
             (cy - self._page_offset_y) / self.scale_factor,
@@ -1602,6 +1892,12 @@ class InteractivePDFEditor:
             self.canvas.yview_scroll(1, "units")
         else:
             self.canvas.yview_scroll(-1 * (event.delta // 120), "units")
+
+        # In continuous mode, debounce a check for which page is now in view
+        if self._continuous_mode:
+            if self._scroll_after_id:
+                self.root.after_cancel(self._scroll_after_id)
+            self._scroll_after_id = self.root.after(80, self._on_cont_scroll)
 
     def _on_ctrl_scroll(self, event):
         if event.num == 4 or (hasattr(event, "delta") and event.delta > 0):
@@ -1706,6 +2002,7 @@ class InteractivePDFEditor:
     def _push_history(self, cmd):
         self._history.push(cmd)
         self._thumb.mark_dirty(self.current_page_idx)
+        self._cont_invalidate_cache(self.current_page_idx)
 
     def _on_history_change(self):
         self._mark_dirty()
@@ -1717,6 +2014,7 @@ class InteractivePDFEditor:
         try:
             label = self._history.undo()
             self._thumb.mark_dirty(self.current_page_idx)
+            self._cont_invalidate_cache(self.current_page_idx)
             self._render()
             self._flash_status(f"↩ Undid {label}")
         except Exception as ex:
@@ -1729,6 +2027,7 @@ class InteractivePDFEditor:
         try:
             label = self._history.redo()
             self._thumb.mark_dirty(self.current_page_idx)
+            self._cont_invalidate_cache(self.current_page_idx)
             self._render()
             self._flash_status(f"↪ Redid {label}")
         except Exception as ex:
