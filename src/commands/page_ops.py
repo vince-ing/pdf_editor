@@ -6,10 +6,13 @@ DuplicatePageCommand — uses insert_pdf() via a temp document (safe fitz API),
                        with DocumentSnapshot for undo.
 """
 
+from __future__ import annotations
+
 import fitz
 
 from src.commands.base import Command
 from src.commands.snapshot import DocumentSnapshot
+from src.core.document import PDFDocument
 
 
 class ReorderPagesCommand(Command):
@@ -23,22 +26,22 @@ class ReorderPagesCommand(Command):
     All indices in new_order must be unique (no duplication).
     """
 
-    def __init__(self, document, new_order: list[int]):
+    def __init__(self, document: PDFDocument, new_order: list[int]) -> None:
         self.document  = document
         self.new_order = list(new_order)
         n = len(new_order)
         # Build inverse permutation for undo
-        self._inv_order = [0] * n
+        self._inv_order: list[int] = [0] * n
         for dest, src in enumerate(new_order):
             self._inv_order[src] = dest
 
-    def execute(self):
+    def execute(self) -> None:
         self.document.reorder(self.new_order)
 
-    def undo(self):
+    def undo(self) -> None:
         self.document.reorder(self._inv_order)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         pass  # no resources to free
 
 
@@ -53,13 +56,13 @@ class DuplicatePageCommand(Command):
     Undo restores the full document from a pre-execute snapshot.
     """
 
-    def __init__(self, document, src_index: int):
+    def __init__(self, document: PDFDocument, src_index: int) -> None:
         self.document   = document
         self.src_index  = src_index
         # Snapshot taken before execute so undo can restore exactly
         self._snapshot  = DocumentSnapshot(document)
 
-    def execute(self):
+    def execute(self) -> None:
         """
         Copy src_index to a temporary fitz document, then insert that
         single-page doc back into the source document right after src_index.
@@ -76,8 +79,8 @@ class DuplicatePageCommand(Command):
         finally:
             tmp.close()
 
-    def undo(self):
+    def undo(self) -> None:
         self._snapshot.restore(self.document)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self._snapshot.cleanup()

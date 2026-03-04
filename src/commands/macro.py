@@ -23,6 +23,8 @@ Cleanup
 cleanup() delegates to every child so all snapshot temp files are released.
 """
 
+from __future__ import annotations
+
 from src.commands.base import Command
 
 
@@ -38,10 +40,10 @@ class MacroCommand(Command):
         Human-readable description used by HistoryManager._label() fallback.
     """
 
-    def __init__(self, commands: list, label: str = "Macro"):
+    def __init__(self, commands: list[Command], label: str = "Macro") -> None:
         if not commands:
             raise ValueError("MacroCommand requires at least one child command.")
-        self._commands = list(commands)
+        self._commands: list[Command] = list(commands)
         self._label    = label
 
     def execute(self) -> None:
@@ -51,7 +53,7 @@ class MacroCommand(Command):
         If a child raises, already-executed children are undone in reverse
         order before re-raising so the document is left clean.
         """
-        executed = []
+        executed: list[Command] = []
         try:
             for cmd in self._commands:
                 cmd.execute()

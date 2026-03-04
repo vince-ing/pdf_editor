@@ -21,7 +21,7 @@ class AnnotationService:
         self,
         document: PDFDocument,
         page_index: int,
-        rect: tuple,
+        rect: tuple[float, float, float, float],
     ) -> None:
         """
         Adds a yellow highlight annotation over the given rect.
@@ -39,9 +39,9 @@ class AnnotationService:
         self,
         document: PDFDocument,
         page_index: int,
-        rect: tuple,
-        color: tuple = (1, 0, 0),
-        fill: tuple | None = None,
+        rect: tuple[float, float, float, float],
+        color: tuple[float, float, float] = (1, 0, 0),
+        fill: tuple[float, float, float] | None = None,
         width: float = 1.5,
     ) -> None:
         """
@@ -154,7 +154,7 @@ class AnnotationService:
         """
         fitz_page = document.get_page(page_index)._page
         annot     = fitz_page.add_circle_annot(rect)
-        colors    = {"stroke": stroke}
+        colors: dict = {"stroke": stroke}
         if fill is not None:
             colors["fill"] = fill
         annot.set_colors(**colors)

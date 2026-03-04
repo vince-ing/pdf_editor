@@ -7,9 +7,17 @@ needed (eager cleanup), with a __del__ safety net for anything that slips
 through.
 """
 
+from __future__ import annotations
+
 import os
 import tempfile
+
 import fitz
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.core.document import PDFDocument
 
 
 class DocumentSnapshot:
@@ -29,8 +37,9 @@ class DocumentSnapshot:
         cleanup() having been called (e.g. on unexpected exit).
     """
 
-    def __init__(self, doc):
+    def __init__(self, doc: PDFDocument) -> None:
         # NamedTemporaryFile with delete=False so we control the lifetime.
+        self._path: str | None
         fd, self._path = tempfile.mkstemp(suffix=".snap.pdf", prefix="pdfed_")
         os.close(fd)
         try:
@@ -39,7 +48,7 @@ class DocumentSnapshot:
             self._safe_delete()
             raise
 
-    def restore(self, doc):
+    def restore(self, doc: PDFDocument) -> None:
         """Replace doc._doc with the snapshotted document, in place."""
         if self._path is None or not os.path.exists(self._path):
             raise FileNotFoundError("Snapshot file missing — cannot undo.")
@@ -48,11 +57,11 @@ class DocumentSnapshot:
         if not old.is_closed:
             old.close()
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Delete the temporary file. Safe to call multiple times."""
         self._safe_delete()
 
-    def _safe_delete(self):
+    def _safe_delete(self) -> None:
         if self._path and os.path.exists(self._path):
             try:
                 os.remove(self._path)
@@ -60,5 +69,5 @@ class DocumentSnapshot:
                 pass
         self._path = None
 
-    def __del__(self):
+    def __del__(self) -> None:
         self._safe_delete()

@@ -8,16 +8,16 @@ class Command(ABC):
     """
 
     @abstractmethod
-    def execute(self):
+    def execute(self) -> None:
         """Executes the command logic."""
         pass
 
     @abstractmethod
-    def undo(self):
+    def undo(self) -> None:
         """Reverses the command logic."""
         pass
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Release any resources held by this command (e.g. temp snapshot files).
         Called by the history manager when this command is permanently discarded

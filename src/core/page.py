@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import fitz
 
 # ── version-safe redaction constants ─────────────────────────────────────────
@@ -11,8 +13,8 @@ class PDFPage:
     Handles operations specific to a single page.
     """
 
-    def __init__(self, page: fitz.Page):
-        self._page = page
+    def __init__(self, page: fitz.Page) -> None:
+        self._page: fitz.Page = page
 
     @property
     def width(self) -> float:
@@ -26,19 +28,19 @@ class PDFPage:
     def rotation(self) -> int:
         return self._page.rotation
 
-    def rotate(self, angle: int):
+    def rotate(self, angle: int) -> None:
         """Rotates the page by the specified angle (must be a multiple of 90)."""
         current = self._page.rotation
         self._page.set_rotation((current + angle) % 360)
 
     def insert_text(
         self,
-        position: tuple,
+        position: tuple[float, float],
         text: str,
         fontsize: int = 12,
         fontname: str = "helv",
-        color: tuple = (0, 0, 0),
-    ):
+        color: tuple[float, float, float] = (0, 0, 0),
+    ) -> None:
         """
         Inserts text at the given (x, y) coordinates.
         color: RGB tuple with values 0.0–1.0.
@@ -53,11 +55,11 @@ class PDFPage:
 
     def insert_textbox(
         self,
-        rect: tuple,
+        rect: tuple[float, float, float, float],
         text: str,
         fontsize: int = 12,
         fontname: str = "helv",
-        color: tuple = (0, 0, 0),
+        color: tuple[float, float, float] = (0, 0, 0),
         align: int = 0,
     ) -> float:
         """
@@ -75,10 +77,15 @@ class PDFPage:
             align=align,
         )
 
-    def insert_image(self, rect_coords: tuple, image_path: str = None, stream: bytes = None):
+    def insert_image(
+        self,
+        rect_coords: tuple[float, float, float, float],
+        image_path: str | None = None,
+        stream: bytes | None = None,
+    ) -> None:
         """Inserts an image into the defined rectangle boundary."""
         rect = fitz.Rect(*rect_coords)
-        kwargs = {}
+        kwargs: dict = {}
         if image_path:
             kwargs["filename"] = image_path
         elif stream:
@@ -103,22 +110,28 @@ class PDFPage:
     def get_image_info(self) -> list:
         return self._page.get_image_info(xrefs=True)
 
-    def get_text_blocks(self) -> list:
+    def get_text_blocks(self) -> list[tuple]:
         """Returns text blocks as (x0, y0, x1, y1, text, block_no, block_type)."""
         return self._page.get_text("blocks")
 
-    def get_links(self) -> list:
+    def get_links(self) -> list[dict]:
         return self._page.get_links()
 
-    def search_text(self, query: str) -> list:
+    def search_text(self, query: str) -> list[fitz.Rect]:
         """Returns a list of fitz.Rect instances where the query text is found."""
         return self._page.search_for(query)
 
-    def add_highlight(self, quads):
+    def add_highlight(self, quads: fitz.Quad | fitz.Rect) -> fitz.Annot:
         """Adds a highlight annotation over the given quads/rects."""
         return self._page.add_highlight_annot(quads)
 
-    def add_rect_annotation(self, rect: tuple, color=(1, 0, 0), fill=None, width: float = 1.5):
+    def add_rect_annotation(
+        self,
+        rect: tuple[float, float, float, float],
+        color: tuple[float, float, float] = (1, 0, 0),
+        fill: tuple[float, float, float] | None = None,
+        width: float = 1.5,
+    ) -> fitz.Annot:
         rect_obj = fitz.Rect(*rect)
         annot = self._page.add_rect_annot(rect_obj)
         annot.set_border(width=width)
@@ -126,13 +139,13 @@ class PDFPage:
         annot.update()
         return annot
 
-    def get_annotations(self) -> list:
+    def get_annotations(self) -> list[fitz.Annot]:
         return list(self._page.annots())
 
-    def delete_annotation(self, annot):
+    def delete_annotation(self, annot: fitz.Annot) -> None:
         self._page.delete_annot(annot)
 
-    def crop(self, rect: tuple):
+    def crop(self, rect: tuple[float, float, float, float]) -> None:
         """Crops the page's visible area to the given rect."""
         self._page.set_cropbox(fitz.Rect(*rect))
 
@@ -140,8 +153,8 @@ class PDFPage:
 
     def add_redact_annot(
         self,
-        rect: tuple,
-        fill_color: tuple = (0.0, 0.0, 0.0),
+        rect: tuple[float, float, float, float],
+        fill_color: tuple[float, float, float] = (0.0, 0.0, 0.0),
         replacement_text: str = "",
     ) -> None:
         """
@@ -186,7 +199,11 @@ class PDFPage:
             # PyMuPDF < 1.21 — apply_redactions() takes no keyword arguments
             self._page.apply_redactions()
 
-    def search_text_quads(self, query: str, case_sensitive: bool = False) -> list[tuple]:
+    def search_text_quads(
+        self,
+        query: str,
+        case_sensitive: bool = False,
+    ) -> list[tuple[float, float, float, float]]:
         """
         Search for *query* and return bounding rects for every hit.
 

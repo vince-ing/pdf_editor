@@ -14,20 +14,22 @@ All fitz-level operations are delegated to PDFPage methods so this
 service never touches document._doc directly.
 """
 
+from __future__ import annotations
+
 from src.core.document import PDFDocument
 
 
 class RedactionService:
     """Applies permanent content redactions to a PDF page."""
 
-    DEFAULT_FILL = (0.0, 0.0, 0.0)   # black
+    DEFAULT_FILL: tuple[float, float, float] = (0.0, 0.0, 0.0)   # black
 
     def add_redaction(
         self,
         document: PDFDocument,
         page_index: int,
-        rect: tuple,
-        fill_color: tuple = DEFAULT_FILL,
+        rect: tuple[float, float, float, float],
+        fill_color: tuple[float, float, float] = DEFAULT_FILL,
         replacement_text: str = "",
     ) -> None:
         """
@@ -59,8 +61,8 @@ class RedactionService:
         self,
         document: PDFDocument,
         page_index: int,
-        rects: list[tuple],
-        fill_color: tuple = DEFAULT_FILL,
+        rects: list[tuple[float, float, float, float]],
+        fill_color: tuple[float, float, float] = DEFAULT_FILL,
         replacement_text: str = "",
     ) -> None:
         """
@@ -93,7 +95,7 @@ class RedactionService:
         page_index: int,
         query: str,
         case_sensitive: bool = False,
-    ) -> list[tuple]:
+    ) -> list[tuple[float, float, float, float]]:
         """
         Search for *query* on a page and return bounding rects for every hit.
 

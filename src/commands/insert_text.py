@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from src.commands.base import Command
 from src.commands.snapshot import DocumentSnapshot
+from src.core.document import PDFDocument
+from src.services.text_service import TextService
 
 
 class InsertTextCommand(Command):
@@ -12,15 +16,15 @@ class InsertTextCommand(Command):
 
     def __init__(
         self,
-        text_service,
-        document,
+        text_service: TextService,
+        document: PDFDocument,
         page_index: int,
         text: str,
-        position: tuple,
+        position: tuple[float, float],
         fontsize: int = 12,
         fontname: str = "helv",
-        color: tuple = (0, 0, 0),
-    ):
+        color: tuple[float, float, float] = (0, 0, 0),
+    ) -> None:
         self.text_service = text_service
         self.document     = document
         self.page_index   = page_index
@@ -31,16 +35,16 @@ class InsertTextCommand(Command):
         self.color        = color
         self._snapshot    = DocumentSnapshot(document)
 
-    def execute(self):
+    def execute(self) -> None:
         self.text_service.insert_text(
             self.document, self.page_index, self.text,
             self.position, self.fontsize, self.fontname, self.color,
         )
 
-    def undo(self):
+    def undo(self) -> None:
         self._snapshot.restore(self.document)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self._snapshot.cleanup()
 
 
@@ -49,16 +53,16 @@ class InsertTextBoxCommand(Command):
 
     def __init__(
         self,
-        text_service,
-        document,
+        text_service: TextService,
+        document: PDFDocument,
         page_index: int,
-        rect: tuple,
+        rect: tuple[float, float, float, float],
         text: str,
         fontsize: int = 12,
         fontname: str = "helv",
-        color: tuple = (0, 0, 0),
+        color: tuple[float, float, float] = (0, 0, 0),
         align: int = 0,
-    ):
+    ) -> None:
         self.text_service = text_service
         self.document     = document
         self.page_index   = page_index
@@ -76,8 +80,8 @@ class InsertTextBoxCommand(Command):
             self.fontsize, self.fontname, self.color, self.align,
         )
 
-    def undo(self):
+    def undo(self) -> None:
         self._snapshot.restore(self.document)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self._snapshot.cleanup()

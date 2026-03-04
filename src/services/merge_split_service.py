@@ -6,7 +6,12 @@ All fitz operations are self-contained here so commands stay thin wrappers.
 """
 
 from __future__ import annotations
+
+import math
+import os
+
 import fitz
+
 from src.core.document import PDFDocument
 
 
@@ -61,7 +66,7 @@ class MergeSplitService:
         if len(page_ranges) != len(output_paths):
             raise ValueError("page_ranges and output_paths must have the same length.")
 
-        counts = []
+        counts: list[int] = []
         for (first, last), out_path in zip(page_ranges, output_paths):
             out = fitz.open()
             try:
@@ -85,16 +90,15 @@ class MergeSplitService:
         Files are written as ``<output_dir>/<base_name>_001.pdf``, etc.
         Returns the list of output paths created.
         """
-        import os, math
         if n < 1:
             raise ValueError("n must be >= 1.")
         total     = document.page_count
         num_parts = math.ceil(total / n)
         os.makedirs(output_dir, exist_ok=True)
-        paths = []
+        paths: list[str] = []
         for i in range(num_parts):
-            first = i * n
-            last  = min(first + n - 1, total - 1)
+            first    = i * n
+            last     = min(first + n - 1, total - 1)
             part_num = str(i + 1).zfill(len(str(num_parts)))
             out_path = os.path.join(output_dir, f"{base_name}_{part_num}.pdf")
             out = fitz.open()
@@ -117,13 +121,14 @@ class MergeSplitService:
 
         Returns the list of output paths created.
         """
-        import os
         total = document.page_count
         os.makedirs(output_dir, exist_ok=True)
-        paths = []
+        paths: list[str] = []
         pad = len(str(total))
         for i in range(total):
-            out_path = os.path.join(output_dir, f"{base_name}_{str(i + 1).zfill(pad)}.pdf")
+            out_path = os.path.join(
+                output_dir, f"{base_name}_{str(i + 1).zfill(pad)}.pdf"
+            )
             out = fitz.open()
             try:
                 out.insert_pdf(document._doc, from_page=i, to_page=i)

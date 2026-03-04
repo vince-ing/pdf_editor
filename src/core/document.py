@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import fitz
 from .page import PDFPage
 
@@ -8,17 +10,18 @@ class PDFDocument:
     Isolates PDF interaction from the rest of the application.
     """
 
-    def __init__(self, path: str = None):
-        self.path = path
+    def __init__(self, path: str | None = None) -> None:
+        self.path: str | None = path
+        self._doc: fitz.Document
         if path:
             self._doc = fitz.open(path)
         else:
             self._doc = fitz.open()  # new blank document
 
-    def __enter__(self):
+    def __enter__(self) -> PDFDocument:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
     def can_save_incrementally(self) -> bool:
@@ -44,7 +47,12 @@ class PDFDocument:
         # fitz raise if the save actually fails — the caller catches that.
         return True
 
-    def save(self, output_path: str, incremental: bool = False, deflate: bool = True):
+    def save(
+        self,
+        output_path: str,
+        incremental: bool = False,
+        deflate: bool = True,
+    ) -> None:
         """
         Save the document to *output_path*.
 
@@ -60,7 +68,7 @@ class PDFDocument:
             # Full save: garbage=4 removes dead objects, deflate compresses streams.
             self._doc.save(output_path, deflate=deflate, garbage=4)
 
-    def close(self):
+    def close(self) -> None:
         """Frees the PDF file from memory."""
         if self._doc and not self._doc.is_closed:
             self._doc.close()
@@ -77,18 +85,23 @@ class PDFDocument:
     def extract_image_by_xref(self, xref: int) -> dict:
         return self._doc.extract_image(xref)
 
-    def reorder(self, new_order: list):
+    def reorder(self, new_order: list[int]) -> None:
         self._doc.select(new_order)
 
-    def delete_page(self, page_index: int):
+    def delete_page(self, page_index: int) -> None:
         self._doc.delete_page(page_index)
 
-    def insert_page(self, index: int = -1, width: float = 595, height: float = 842):
+    def insert_page(
+        self,
+        index: int = -1,
+        width: float = 595,
+        height: float = 842,
+    ) -> None:
         """Inserts a blank A4-sized page at the given index."""
         self._doc.new_page(index, width=width, height=height)
 
-    def get_metadata(self) -> dict:
+    def get_metadata(self) -> dict[str, str]:
         return self._doc.metadata
 
-    def get_toc(self) -> list:
+    def get_toc(self) -> list[list]:
         return self._doc.get_toc()

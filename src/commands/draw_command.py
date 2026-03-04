@@ -11,7 +11,14 @@ is silently a no-op.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from src.commands.base import Command
+from src.commands.snapshot import DocumentSnapshot
+
+if TYPE_CHECKING:
+    from src.core.document import PDFDocument
 
 
 class DrawAnnotationCommand(Command):
@@ -26,12 +33,11 @@ class DrawAnnotationCommand(Command):
     redo just restores from a minimal snapshot of the single page.
     """
 
-    def __init__(self, document, page_idx: int, xref: int):
+    def __init__(self, document: PDFDocument, page_idx: int, xref: int) -> None:
         self.document  = document
         self.page_idx  = page_idx
         self.xref      = xref
         # Take a page-level snapshot for redo (fitz has no clone-annotation API)
-        from src.commands.snapshot import DocumentSnapshot
         self._snap = DocumentSnapshot(document)
 
     # ── Command interface ─────────────────────────────────────────────────────
@@ -40,12 +46,12 @@ class DrawAnnotationCommand(Command):
     def label(self) -> str:
         return "Draw"
 
-    def execute(self):
+    def execute(self) -> None:
         # The annotation was already written to the PDF by DrawTool before this
         # command object was created — execute() is a no-op.
         pass
 
-    def undo(self):
+    def undo(self) -> None:
         """Delete the annotation by xref."""
         doc = self.document
         if not doc:
@@ -57,9 +63,9 @@ class DrawAnnotationCommand(Command):
                 return
         # Already gone — silently ignore
 
-    def redo(self):
+    def redo(self) -> None:
         """Restore from the snapshot taken right after the annotation was drawn."""
         self._snap.restore(self.document)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self._snap.cleanup()

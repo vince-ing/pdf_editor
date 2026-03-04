@@ -10,8 +10,12 @@ BulkRedactCommand wraps multiple rects into a single undoable step so
 that "Redact All Matches" produces one history entry.
 """
 
+from __future__ import annotations
+
 from src.commands.base import Command
 from src.commands.snapshot import DocumentSnapshot
+from src.core.document import PDFDocument
+from src.services.redaction_service import RedactionService
 
 
 class RedactCommand(Command):
@@ -24,13 +28,13 @@ class RedactCommand(Command):
 
     def __init__(
         self,
-        redaction_service,
-        document,
+        redaction_service: RedactionService,
+        document: PDFDocument,
         page_index: int,
-        rect: tuple,
-        fill_color: tuple = (0.0, 0.0, 0.0),
+        rect: tuple[float, float, float, float],
+        fill_color: tuple[float, float, float] = (0.0, 0.0, 0.0),
         replacement_text: str = "",
-    ):
+    ) -> None:
         self.redaction_service  = redaction_service
         self.document           = document
         self.page_index         = page_index
@@ -39,7 +43,7 @@ class RedactCommand(Command):
         self.replacement_text   = replacement_text
         self._snapshot          = DocumentSnapshot(document)
 
-    def execute(self):
+    def execute(self) -> None:
         self.redaction_service.add_redaction(
             self.document,
             self.page_index,
@@ -48,10 +52,10 @@ class RedactCommand(Command):
             replacement_text=self.replacement_text,
         )
 
-    def undo(self):
+    def undo(self) -> None:
         self._snapshot.restore(self.document)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self._snapshot.cleanup()
 
 
@@ -70,13 +74,13 @@ class BulkRedactCommand(Command):
 
     def __init__(
         self,
-        redaction_service,
-        document,
+        redaction_service: RedactionService,
+        document: PDFDocument,
         page_index: int,
-        rects: list[tuple],
-        fill_color: tuple = (0.0, 0.0, 0.0),
+        rects: list[tuple[float, float, float, float]],
+        fill_color: tuple[float, float, float] = (0.0, 0.0, 0.0),
         replacement_text: str = "",
-    ):
+    ) -> None:
         self.redaction_service  = redaction_service
         self.document           = document
         self.page_index         = page_index
@@ -85,7 +89,7 @@ class BulkRedactCommand(Command):
         self.replacement_text   = replacement_text
         self._snapshot          = DocumentSnapshot(document)
 
-    def execute(self):
+    def execute(self) -> None:
         self.redaction_service.add_redactions_bulk(
             self.document,
             self.page_index,
@@ -94,8 +98,8 @@ class BulkRedactCommand(Command):
             replacement_text=self.replacement_text,
         )
 
-    def undo(self):
+    def undo(self) -> None:
         self._snapshot.restore(self.document)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         self._snapshot.cleanup()
