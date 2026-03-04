@@ -43,6 +43,8 @@ from src.utils.recent_files import RecentFiles
 from src.services.image_conversion import ImageConversionService
 from src.commands.convert_images import ConvertImagesToPdfCommand
 from src.commands.ocr_page import OcrPageCommand
+from src.services.merge_split_service import MergeSplitService
+from src.gui.panels.merge_split_dialog import MergeSplitDialog
 
 
 # ── AppContext ────────────────────────────────────────────────────────────────
@@ -129,6 +131,7 @@ class InteractivePDFEditor:
         self.image_service      = ImageService()
         self.annotation_service = AnnotationService()
         self.redaction_service  = RedactionService()
+        self.merge_split_service = MergeSplitService()
 
         # Annotation style state (used by AnnotationTool via getters)
         self.annot_stroke_rgb: tuple       = (220, 50, 50)
@@ -345,6 +348,12 @@ class InteractivePDFEditor:
         Tooltip(
             self._topbar_btn(bar, "🖼️  Images to PDF", self._start_image_staging),
             "Create a new PDF from a selection of images"
+        )
+
+        tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
+        Tooltip(
+            self._topbar_btn(bar, "⊕  Merge / Split", self._open_merge_split_dialog),
+            "Merge multiple PDFs into one, or split a PDF into parts"
         )
 
         tk.Frame(bar, bg=PALETTE["border"], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
@@ -593,6 +602,15 @@ class InteractivePDFEditor:
             messagebox.showerror("OCR Error", f"Failed to run OCR:\n{str(ex)}")
         finally:
             self.root.config(cursor="")
+    
+    def _open_merge_split_dialog(self):
+        """Open the Merge / Split dialog."""
+        MergeSplitDialog(
+            root=self.root,
+            service=self.merge_split_service,
+            current_doc=self.doc,
+            on_open_path=self._open_pdf_path,
+        )
 
     def _preview_staging_image(self, idx: int):
         """Modified to add an OCR Checkbox when in staging mode."""
