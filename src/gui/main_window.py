@@ -42,6 +42,7 @@ from src.commands.draw_command import DrawAnnotationCommand
 from src.utils.recent_files import RecentFiles
 from src.services.image_conversion import ImageConversionService
 from src.commands.convert_images import ConvertImagesToPdfCommand
+from src.commands.ocr_page import OcrPageCommand
 
 
 # ── AppContext ────────────────────────────────────────────────────────────────
@@ -106,6 +107,7 @@ class InteractivePDFEditor:
         self.image_conversion_service = ImageConversionService()
         self._is_staging_mode = False
         self._staging_images: list[str] = []
+        self._staging_ocr_var = tk.BooleanVar(value=False)
 
         # Document state
         self.doc: PDFDocument | None = None
@@ -399,6 +401,7 @@ class InteractivePDFEditor:
         self._sb_btn(sb, "↻  Rotate Right", lambda: self._rotate(90))
         self._sb_btn(sb, "+  Add Page",      self._add_page)
         self._sb_btn(sb, "✕  Delete Page",  self._delete_page)
+        self._sb_btn(sb, "👁  OCR Page", self._ocr_current_page)
 
         self._section(sb, "ACTIVE TOOL")
         for label, val, tip in [
@@ -565,8 +568,34 @@ class InteractivePDFEditor:
         self._flash_status("Staging Mode: Drag thumbnails to reorder, then click Save.")
         self._preview_staging_image(0)
 
+    def _ocr_current_page(self):
+        """Runs OCR on the current page."""
+        if not self.doc:
+            return
+        
+        self.root.config(cursor="watch")
+        self.root.update()
+        
+        cmd = OcrPageCommand(self.doc, self.current_page_idx)
+        try:
+            cmd.execute()
+            self._push_history(cmd)
+            self._flash_status("✓ OCR completed. Text is now selectable.")
+            
+            # If the user is on the Select tool, reload the blocks immediately
+            sel_tool = self._get_tool("select_text")
+            if sel_tool and self.active_tool.get() == "select_text":
+                sel_tool.reload()
+                
+            self._render()
+        except Exception as ex:
+            cmd.cleanup()
+            messagebox.showerror("OCR Error", f"Failed to run OCR:\n{str(ex)}")
+        finally:
+            self.root.config(cursor="")
+
     def _preview_staging_image(self, idx: int):
-        """Render a high-res preview of the selected staging image."""
+        """Modified to add an OCR Checkbox when in staging mode."""
         if not self._is_staging_mode or idx >= len(self._staging_images): return
         
         self.current_page_idx = idx
@@ -581,6 +610,16 @@ class InteractivePDFEditor:
             self.canvas.create_image(canvas_w//2, 40, anchor=tk.N, image=self.tk_image, tags="page_img")
             self._page_label.config(text=f"{idx + 1} / {len(self._staging_images)}")
             self._st_size.config(text=f"Image Preview")
+            
+            # Add an OCR Checkbox directly onto the canvas in Staging Mode
+            cb = tk.Checkbutton(
+                self.canvas, text="Run OCR (Make text selectable)", 
+                variable=self._staging_ocr_var,
+                bg=PALETTE["bg_dark"], fg=PALETTE["fg_primary"],
+                selectcolor=PALETTE["accent_dim"], activebackground=PALETTE["bg_hover"]
+            )
+            self.canvas.create_window(canvas_w//2, 15, window=cb, tags="page_img")
+            
             self._thumb.refresh_all_borders()
             self._thumb.scroll_to_active()
 
@@ -1628,22 +1667,32 @@ class InteractivePDFEditor:
         if not out_path:
             return False
 
+        # Show busy cursor since OCR takes a moment
+        self.root.config(cursor="watch")
+        self.root.update()
+
+        # Pass the OCR boolean
         cmd = ConvertImagesToPdfCommand(
             self.image_conversion_service, 
             self._staging_images, 
-            out_path
+            out_path,
+            apply_ocr=self._staging_ocr_var.get()
         )
-        cmd.execute()
         
-        if cmd.success:
-            self._flash_status(f"✓ PDF created successfully")
-            self._is_staging_mode = False
-            self._staging_images.clear()
-            self._open_pdf_path(out_path)
-            return True
-        else:
-            messagebox.showerror("Error", "Failed to create PDF from images.")
-            return False
+        try:
+            cmd.execute()
+            if cmd.success:
+                self._flash_status(f"✓ PDF created successfully")
+                self._is_staging_mode = False
+                self._staging_images.clear()
+                self._staging_ocr_var.set(False) # Reset
+                self._open_pdf_path(out_path)
+                return True
+            else:
+                messagebox.showerror("Error", "Failed to create PDF from images.")
+                return False
+        finally:
+            self.root.config(cursor="")
 
     # ── page management ───────────────────────────────────────────────────────
 
