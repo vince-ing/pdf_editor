@@ -6,6 +6,7 @@ PDF Editor — Modern GUI
   • Smooth zoom, page centering, dark theme
   • Highlight and Rectangle annotation tools
   • Collapsible page-thumbnail panel (right side, lazy rendering)
+  • Text-select tool — hover/click/drag to copy existing PDF text to clipboard
 """
 
 import tkinter as tk
@@ -674,6 +675,19 @@ class InteractivePDFEditor:
         self._thumb_canvas: tk.Canvas | None     = None
         self._thumb_after_id                     = None   # pending after() job
 
+        # Text-select tool state
+        # _textsel_blocks: list of (x0,y0,x1,y1,text) in PDF space for current page
+        self._textsel_blocks: list       = []
+        # canvas item IDs for the invisible hit-targets drawn over each block
+        self._textsel_hit_ids: list[int] = []
+        # canvas item IDs for the blue selection-highlight overlays
+        self._textsel_hl_ids: list[int]  = []
+        # set of selected block indices
+        self._textsel_selected: set[int] = set()
+        # rubber-band drag state  (canvas coords)
+        self._textsel_drag_start: tuple | None = None
+        self._textsel_rubber_band: int | None  = None
+
         self._build_ui()
         self._apply_ttk_style()
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -768,6 +782,7 @@ class InteractivePDFEditor:
         self.root.bind("<Left>",  lambda e: self._prev_page())
         self.root.bind("<Right>", lambda e: self._next_page())
         self.root.bind("<Escape>", lambda e: self._dismiss_boxes())
+        self.root.bind("<Control-c>", lambda e: self._textsel_copy())
 
     def _topbar_btn(self, parent, text, cmd) -> tk.Button:
         btn = tk.Button(parent, text=text, command=cmd,
@@ -804,8 +819,9 @@ class InteractivePDFEditor:
             ("📝  Text",          "text",         "Click canvas to add a text box"),
             ("🖼  Extract Image", "extract",      "Click an image to save it"),
             ("📌  Insert Image",  "insert_image", "Choose a file then drag to place it"),
-            ("🖍  Highlight",     "highlight",    "Drag to highlight a region"),     # NEW
-            ("▭  Rectangle",     "rect_annot",   "Drag to draw a rectangle annotation"),  # NEW
+            ("🖍  Highlight",     "highlight",    "Drag to highlight a region"),
+            ("▭  Rectangle",     "rect_annot",   "Drag to draw a rectangle annotation"),
+            ("⬚  Select Text",   "select_text",  "Click or drag to select & copy text"),
         ]:
             rb = tk.Radiobutton(sb, text=label, variable=self.active_tool, value=val,
                                 bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
@@ -1377,6 +1393,7 @@ class InteractivePDFEditor:
         # Reset any in-progress drag
         self._img_drag_cancel()
         self._annot_drag_cancel()
+        self._textsel_clear()           # always wipe text-select overlays on switch
 
         # Hide both option panels; show the appropriate one
         self._txt_opts.pack_forget()
@@ -1411,6 +1428,15 @@ class InteractivePDFEditor:
                 text="Drag to draw a\nrectangle annotation.\nCtrl+Z to undo.",
                 fg=PALETTE["fg_dim"],
             )
+        elif tool == "select_text":
+            self.canvas.config(cursor="ibeam")
+            self._hint.config(
+                text="Click a text block\nor drag to select multiple.\n"
+                     "Ctrl+C copies the selection.",
+                fg=PALETTE["fg_dim"],
+            )
+            # Load text blocks for the current page immediately
+            self._textsel_load_blocks()
         else:   # extract
             self.canvas.config(cursor="arrow")
             self._hint.config(
@@ -1528,6 +1554,7 @@ class InteractivePDFEditor:
             self._commit_all_boxes()
             self._img_drag_cancel()
             self._annot_drag_cancel()
+            self._textsel_clear()
             self.current_page_idx -= 1
             self._render()
 
@@ -1536,6 +1563,7 @@ class InteractivePDFEditor:
             self._commit_all_boxes()
             self._img_drag_cancel()
             self._annot_drag_cancel()
+            self._textsel_clear()
             self.current_page_idx += 1
             self._render()
 
@@ -1620,6 +1648,7 @@ class InteractivePDFEditor:
 
         self.canvas.delete("page_img")
         self.canvas.delete("page_shadow")
+        self.canvas.delete("textsel")     # clear any text-select overlays before redraw
 
         self.canvas.create_rectangle(
             ox + 5, oy + 5, ox + iw + 5, oy + ih + 5,
@@ -1639,6 +1668,14 @@ class InteractivePDFEditor:
         # Keep thumbnail borders in sync with active page
         self._thumb_refresh_all_borders()
         self._thumb_scroll_to_active()
+
+        # Reload text blocks if the select tool is active (page or content changed)
+        if self.active_tool.get() == "select_text":
+            self._textsel_blocks    = []
+            self._textsel_hit_ids   = []
+            self._textsel_hl_ids    = []
+            self._textsel_selected  = set()
+            self._textsel_load_blocks()
 
     # ─────────────────────── canvas events ────────────────────────────────────
 
@@ -1672,6 +1709,11 @@ class InteractivePDFEditor:
             # Start rubber-band drag for annotation tools
             self._annot_drag_start  = (cx, cy)
             self._annot_rubber_band = None
+        elif tool == "select_text":
+            # Clear previous selection and start a fresh drag/click
+            self._textsel_clear_selection()
+            self._textsel_drag_start  = (cx, cy)
+            self._textsel_rubber_band = None
 
     def _on_canvas_drag(self, event):
         cx = self.canvas.canvasx(event.x)
@@ -1705,6 +1747,22 @@ class InteractivePDFEditor:
             else:
                 self.canvas.coords(self._annot_rubber_band, x0, y0, cx, cy)
 
+        elif tool == "select_text":
+            if self._textsel_drag_start is None:
+                return
+            x0, y0 = self._textsel_drag_start
+            if self._textsel_rubber_band is None:
+                self._textsel_rubber_band = self.canvas.create_rectangle(
+                    x0, y0, cx, cy,
+                    outline=PALETTE["accent_light"], fill=PALETTE["accent_dim"],
+                    width=1, stipple="gray25",
+                )
+            else:
+                self.canvas.coords(self._textsel_rubber_band, x0, y0, cx, cy)
+            # Live-update which blocks are inside the drag rect
+            self._textsel_update_from_drag(min(x0, cx), min(y0, cy),
+                                           max(x0, cx), max(y0, cy))
+
     def _on_canvas_release(self, event):
         cx = self.canvas.canvasx(event.x)
         cy = self.canvas.canvasy(event.y)
@@ -1713,7 +1771,9 @@ class InteractivePDFEditor:
         if tool == "insert_image":
             self._handle_image_release(cx, cy)
         elif tool in ("highlight", "rect_annot"):
-            self._handle_annot_release(cx, cy, tool)   # NEW
+            self._handle_annot_release(cx, cy, tool)
+        elif tool == "select_text":
+            self._handle_textsel_release(cx, cy)
 
     # ── NEW: annotation drag commit ───────────────────────────────────────────
 
@@ -1863,6 +1923,10 @@ class InteractivePDFEditor:
         px, py = self._canvas_to_pdf(cx, cy)
         self._st_coords.config(text=f"x: {px:6.1f}   y: {py:6.1f}")
 
+        # Hover highlight for select_text tool
+        if self.active_tool.get() == "select_text" and self._textsel_drag_start is None:
+            self._textsel_hover(px, py)
+
     # ─────────────────────── text box lifecycle ───────────────────────────────
 
     def _spawn_textbox(self, pdf_x: float, pdf_y: float):
@@ -1943,6 +2007,197 @@ class InteractivePDFEditor:
         for box in list(self._text_boxes):
             box._delete()
         self._text_boxes.clear()
+
+    # ─────────────────────── text-select tool ────────────────────────────────
+
+    def _textsel_load_blocks(self):
+        """
+        Read text blocks from the current page and draw invisible hit-target
+        rectangles on the canvas for each one.  Also draws a faint dashed
+        outline so the user can see what regions are selectable.
+
+        Block format from PyMuPDF get_text("blocks"):
+            (x0, y0, x1, y1, text, block_no, block_type)
+        block_type == 0 → text block (skip type 1 = image block).
+        """
+        if not self.doc:
+            return
+        page   = self.doc.get_page(self.current_page_idx)
+        raw    = page.get_text_blocks()
+
+        # Keep only non-empty text blocks
+        self._textsel_blocks  = [
+            (x0, y0, x1, y1, txt.strip())
+            for x0, y0, x1, y1, txt, _bno, btype in raw
+            if btype == 0 and txt.strip()
+        ]
+        self._textsel_hit_ids  = []
+        self._textsel_hl_ids   = []
+        self._textsel_selected = set()
+
+        ox = self._page_offset_x
+        oy = self._page_offset_y
+        s  = self.scale_factor
+
+        for i, (x0, y0, x1, y1, _txt) in enumerate(self._textsel_blocks):
+            # Canvas coordinates
+            cx0, cy0 = ox + x0 * s, oy + y0 * s
+            cx1, cy1 = ox + x1 * s, oy + y1 * s
+
+            # Faint dashed outline so selectable areas are subtly visible
+            outline_id = self.canvas.create_rectangle(
+                cx0, cy0, cx1, cy1,
+                outline=PALETTE["fg_dim"], width=1, dash=(3, 6),
+                fill="", tags=("textsel", f"textsel_outline_{i}"),
+            )
+
+            # Transparent selection highlight (initially hidden)
+            hl_id = self.canvas.create_rectangle(
+                cx0, cy0, cx1, cy1,
+                fill=PALETTE["accent"], outline=PALETTE["accent_light"],
+                width=1, stipple="gray25",
+                tags=("textsel", f"textsel_hl_{i}"),
+            )
+            self.canvas.itemconfig(hl_id, state="hidden")
+
+            # Invisible click/hover target on top
+            hit_id = self.canvas.create_rectangle(
+                cx0, cy0, cx1, cy1,
+                fill="", outline="",
+                tags=("textsel", f"textsel_hit_{i}"),
+            )
+            self._textsel_hit_ids.append(hit_id)
+            self._textsel_hl_ids.append(hl_id)
+
+    def _textsel_hover(self, pdf_x: float, pdf_y: float):
+        """Show a faint hover tint on whichever block the cursor is over."""
+        for i, (x0, y0, x1, y1, _txt) in enumerate(self._textsel_blocks):
+            inside = x0 <= pdf_x <= x1 and y0 <= pdf_y <= y1
+            if i in self._textsel_selected:
+                continue   # already selected — don't override selection colour
+            if self._textsel_hl_ids and i < len(self._textsel_hl_ids):
+                hl = self._textsel_hl_ids[i]
+                if inside:
+                    self.canvas.itemconfig(hl, state="normal",
+                                          fill=PALETTE["fg_dim"], stipple="gray50")
+                else:
+                    self.canvas.itemconfig(hl, state="hidden")
+
+    def _textsel_clear_selection(self):
+        """Deselect all blocks without removing the hit-target overlays."""
+        for i in list(self._textsel_selected):
+            if i < len(self._textsel_hl_ids):
+                self.canvas.itemconfig(self._textsel_hl_ids[i], state="hidden")
+        self._textsel_selected = set()
+
+    def _textsel_select_block(self, idx: int):
+        """Toggle selection state of one block."""
+        if idx in self._textsel_selected:
+            self._textsel_selected.discard(idx)
+            if idx < len(self._textsel_hl_ids):
+                self.canvas.itemconfig(self._textsel_hl_ids[idx], state="hidden")
+        else:
+            self._textsel_selected.add(idx)
+            if idx < len(self._textsel_hl_ids):
+                self.canvas.itemconfig(
+                    self._textsel_hl_ids[idx], state="normal",
+                    fill=PALETTE["accent"], stipple="gray25",
+                )
+
+    def _textsel_update_from_drag(self, cx0: float, cy0: float,
+                                  cx1: float, cy1: float):
+        """
+        During a rubber-band drag, select all blocks whose canvas rect
+        overlaps the current drag rectangle.
+        cx0/cy0/cx1/cy1 are canvas coordinates (already normalised min/max).
+        """
+        ox = self._page_offset_x
+        oy = self._page_offset_y
+        s  = self.scale_factor
+
+        for i, (bx0, by0, bx1, by1, _txt) in enumerate(self._textsel_blocks):
+            bcx0 = ox + bx0 * s
+            bcy0 = oy + by0 * s
+            bcx1 = ox + bx1 * s
+            bcy1 = oy + by1 * s
+            # AABB overlap test
+            overlaps = not (bcx1 < cx0 or bcx0 > cx1 or bcy1 < cy0 or bcy0 > cy1)
+            hl = self._textsel_hl_ids[i] if i < len(self._textsel_hl_ids) else None
+            if overlaps:
+                self._textsel_selected.add(i)
+                if hl:
+                    self.canvas.itemconfig(hl, state="normal",
+                                           fill=PALETTE["accent"], stipple="gray25")
+            else:
+                self._textsel_selected.discard(i)
+                if hl:
+                    self.canvas.itemconfig(hl, state="hidden")
+
+    def _handle_textsel_release(self, cx: float, cy: float):
+        """
+        On mouse release:
+        • If the drag was very short (essentially a click), select whichever
+          single block contains the click point.
+        • If it was a genuine drag, the selection was already built live in
+          _textsel_update_from_drag; just clean up the rubber band.
+        Then auto-copy if anything is selected.
+        """
+        if self._textsel_rubber_band is not None:
+            self.canvas.delete(self._textsel_rubber_band)
+            self._textsel_rubber_band = None
+
+        if self._textsel_drag_start is None:
+            return
+
+        x0, y0 = self._textsel_drag_start
+        self._textsel_drag_start = None
+
+        is_click = abs(cx - x0) < 5 and abs(cy - y0) < 5
+        if is_click:
+            # Find the block under the cursor
+            pdf_x, pdf_y = self._canvas_to_pdf(cx, cy)
+            for i, (bx0, by0, bx1, by1, _txt) in enumerate(self._textsel_blocks):
+                if bx0 <= pdf_x <= bx1 and by0 <= pdf_y <= by1:
+                    self._textsel_select_block(i)
+                    break
+
+        # Auto-copy whenever we have a selection
+        if self._textsel_selected:
+            self._textsel_copy()
+
+    def _textsel_copy(self):
+        """Copy all selected block text to the system clipboard in reading order."""
+        if not self._textsel_selected or not self._textsel_blocks:
+            return
+        # Sort selected blocks by their top-left position (top-to-bottom, left-to-right)
+        selected_sorted = sorted(
+            self._textsel_selected,
+            key=lambda i: (self._textsel_blocks[i][1], self._textsel_blocks[i][0]),
+        )
+        combined = "\n\n".join(self._textsel_blocks[i][4] for i in selected_sorted)
+        if not combined:
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(combined)
+            self.root.update()   # required on some platforms to flush the clipboard
+        except Exception:
+            pass
+        count = len(self._textsel_selected)
+        label = "block" if count == 1 else "blocks"
+        self._flash_status(f"✓ Copied {count} text {label} to clipboard")
+
+    def _textsel_clear(self):
+        """Remove all text-select canvas overlays and reset state completely."""
+        self.canvas.delete("textsel")
+        self._textsel_blocks    = []
+        self._textsel_hit_ids   = []
+        self._textsel_hl_ids    = []
+        self._textsel_selected  = set()
+        if self._textsel_rubber_band is not None:
+            self.canvas.delete(self._textsel_rubber_band)
+            self._textsel_rubber_band = None
+        self._textsel_drag_start = None
 
     # ─────────────────────── image extraction ────────────────────────────────
 
@@ -2062,6 +2317,7 @@ class InteractivePDFEditor:
         self._commit_all_boxes()
         self._img_drag_cancel()
         self._annot_drag_cancel()
+        self._textsel_clear()
         if self._thumb_after_id:
             self.root.after_cancel(self._thumb_after_id)
         self._clear_history()
