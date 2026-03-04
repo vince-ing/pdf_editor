@@ -66,6 +66,7 @@ GRIP_H      = 20   # canvas px tall
 GRIP_RADIUS = 4    # corner rounding (not available in tk, used for visual ref)
 
 MIN_BOX_PX  = 60   # minimum box width/height in canvas pixels
+MAX_UNDO_STEPS = 20  # maximum number of undoable actions kept in history
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -883,10 +884,34 @@ class InteractivePDFEditor:
                                  bg=PALETTE["shadow"], fg=PALETTE["fg_dim"],
                                  font=FONT_MONO, padx=10)
         self._st_size.pack(side=tk.LEFT)
+        sep()
+        # ── NEW: action feedback label ────────────────────────────────────────
+        self._st_action = tk.Label(bar, text="",
+                                   bg=PALETTE["shadow"], fg=PALETTE["success"],
+                                   font=FONT_MONO, padx=10)
+        self._st_action.pack(side=tk.LEFT)
+        # ─────────────────────────────────────────────────────────────────────
         self._st_zoom = tk.Label(bar, text="",
                                  bg=PALETTE["shadow"], fg=PALETTE["fg_dim"],
                                  font=FONT_MONO, padx=10)
         self._st_zoom.pack(side=tk.RIGHT)
+
+    # ─────────────────────── status bar feedback ──────────────────────────────
+
+    def _flash_status(self, message: str, color: str = None, duration_ms: int = 3000):
+        """
+        Display a transient message in the status bar action label.
+        The message fades out after `duration_ms` milliseconds.
+        Cancels any previously scheduled clear so rapid actions don't stack.
+        """
+        if color is None:
+            color = PALETTE["success"]
+        self._st_action.config(text=message, fg=color)
+        # Cancel any previous scheduled clear
+        if hasattr(self, "_flash_after_id") and self._flash_after_id:
+            self.root.after_cancel(self._flash_after_id)
+        self._flash_after_id = self.root.after(
+            duration_ms, lambda: self._st_action.config(text=""))
 
     # ─────────────────────── sidebar helpers ──────────────────────────────────
 
@@ -1026,6 +1051,7 @@ class InteractivePDFEditor:
             self.doc.save(self._current_path, incremental=True)
             self._unsaved_changes = False
             self._update_title()
+            self._flash_status("✓ Saved")   # ← NEW: success feedback
             return True
         except Exception as ex:
             messagebox.showerror("Save Error", str(ex))
@@ -1047,6 +1073,8 @@ class InteractivePDFEditor:
             initialfile=os.path.basename(self._current_path) if self._current_path else "document.pdf",
         )
         if not path:
+            # ← NEW: explicit feedback so user knows the save did NOT happen
+            self._flash_status("Save cancelled", color=PALETTE["fg_secondary"])
             return False
         try:
             self.doc.save(path)
@@ -1054,6 +1082,7 @@ class InteractivePDFEditor:
             self._unsaved_changes = False
             self.doc.path         = path   # keep PDFDocument in sync
             self._update_title()
+            self._flash_status(f"✓ Saved as {os.path.basename(path)}")   # ← NEW
             return True
         except Exception as ex:
             messagebox.showerror("Save Error", str(ex))
@@ -1457,11 +1486,26 @@ class InteractivePDFEditor:
             self._update_title()
 
     def _push_history(self, cmd):
+        """
+        Append cmd to the history stack, respecting MAX_UNDO_STEPS.
+
+        When the stack is full, the oldest entry is popped and its snapshot
+        file is deleted before the new command is appended. This prevents
+        unbounded temporary-file accumulation on large PDFs.
+        """
         # Discard (and clean up) any forward history that is now unreachable.
         discarded = self._history[self._history_idx + 1:]
         for old_cmd in discarded:
             old_cmd.cleanup()
         self._history = self._history[:self._history_idx + 1]
+
+        # Enforce the undo depth limit — evict the oldest entry if needed.
+        if len(self._history) >= MAX_UNDO_STEPS:
+            evicted = self._history.pop(0)
+            evicted.cleanup()
+            # history_idx shifts left by one because we removed from the front.
+            self._history_idx = max(-1, self._history_idx - 1)
+
         self._history.append(cmd)
         self._history_idx = len(self._history) - 1
         self._mark_dirty()
@@ -1475,13 +1519,17 @@ class InteractivePDFEditor:
 
     def _undo(self):
         if self._history_idx < 0:
+            self._flash_status("Nothing to undo", color=PALETTE["fg_secondary"])
             return
         cmd = self._history[self._history_idx]
+        # Derive a human-readable label from the command class name
+        label = type(cmd).__name__.replace("Command", "").replace("Insert", "Insert ")
         try:
             cmd.undo()
             self._history_idx -= 1
             self._mark_dirty()
             self._render()
+            self._flash_status(f"↩ Undid {label}")   # ← NEW: undo feedback
         except NotImplementedError:
             messagebox.showinfo("Undo", "This action cannot be undone.")
         except Exception as ex:
@@ -1489,13 +1537,16 @@ class InteractivePDFEditor:
 
     def _redo(self):
         if self._history_idx >= len(self._history) - 1:
+            self._flash_status("Nothing to redo", color=PALETTE["fg_secondary"])
             return
         cmd = self._history[self._history_idx + 1]
+        label = type(cmd).__name__.replace("Command", "").replace("Insert", "Insert ")
         try:
             cmd.execute()
             self._history_idx += 1
             self._mark_dirty()
             self._render()
+            self._flash_status(f"↪ Redid {label}")   # ← NEW: redo feedback
         except Exception as ex:
             messagebox.showerror("Redo Error", str(ex))
 
