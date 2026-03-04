@@ -434,7 +434,17 @@ class InteractivePDFEditor:
             self._redact_confirm()
         elif key == "redact.cancel":
             self._redact_cancel_hits()
-        # All other keys are already written directly into self._style by RightPanel.
+            
+        # Route live property updates to the currently active text box
+        if key in ("font_index", "fontsize", "text_color", "text_align"):
+            if self._text_boxes and self._active_tool_name == "text":
+                active_box = self._text_boxes[-1]
+                active_box.update_style(
+                    font_index=self._style["font_index"],
+                    fontsize=self._style["fontsize"],
+                    color_rgb=self._style["text_color"],
+                    align=self._style["text_align"],
+                )
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Startup / welcome screen
@@ -1509,23 +1519,39 @@ class InteractivePDFEditor:
         self._text_boxes.append(box)
 
     def _sample_page_color(self, pdf_x: float, pdf_y: float) -> str:
-        if self.tk_image is None:
-            return self.canvas.cget("bg")
+        img = None
+        # Safely extract the active image based on the current view mode
+        if self._continuous_mode:
+            key = (self.current_page_idx, self.scale_factor)
+            img = self._cont_images.get(key)
+        else:
+            img = self.tk_image
+            
+        if img is None:
+            return "#FFFFFF" # Fallback to white, NOT the dark canvas background
+            
         try:
             ix = int(pdf_x * self.scale_factor)
             iy = int(pdf_y * self.scale_factor)
-            r, g, b = self.tk_image.get(ix, iy)
+            r, g, b = img.get(ix, iy)
             return f"#{r:02x}{g:02x}{b:02x}"
         except Exception:
-            return self.canvas.cget("bg")
+            return "#FFFFFF"
 
     def _on_box_confirmed(self, box: TextBox) -> None:
         self._text_boxes = [b for b in self._text_boxes if b is not box]
         text = box.get_text()
         if not text:
             return
-        rect = (box.pdf_x, box.pdf_y,
-                box.pdf_x + box.pdf_w, box.pdf_y + box.pdf_h)
+            
+        # Give PyMuPDF a padded bounding box. If the box is exactly tight to Tkinter's
+        # font metrics, PyMuPDF will often refuse to draw the text, causing it to vanish.
+        rect = (
+            box.pdf_x, 
+            box.pdf_y,
+            box.pdf_x + box.pdf_w + 5, 
+            box.pdf_y + box.pdf_h + 10
+        )
         cmd  = InsertTextBoxCommand(
             self.text_service, self.doc,
             self.current_page_idx, rect, text,
