@@ -1,5 +1,4 @@
 pdf_editor
-├── doesthisshowup.txt
 └── src
     ├── commands
     │   ├── annotate.py
