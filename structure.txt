@@ -1,4 +1,8 @@
 pdf_editor
+├── models
+│   └── kokoro
+│       ├── kokoro-v1.0.onnx
+│       └── voices-v1.0.bin
 └── src
     ├── commands
     │   ├── annotate.py
@@ -48,7 +52,8 @@ pdf_editor
     │       ├── __init__.py
     │       ├── find_bar.py
     │       ├── text_box.py
-    │       └── tooltip.py
+    │       ├── tooltip.py
+    │       └── tts_bar.py
     ├── imaging
     │   ├── filters.py
     │   └── image_processor.py
@@ -59,7 +64,8 @@ pdf_editor
     │   ├── merge_split_service.py
     │   ├── page_service.py
     │   ├── redaction_service.py
-    │   └── text_service.py
+    │   ├── text_service.py
+    │   └── tts_service.py
     └── utils
         ├── file_utils.py
         ├── recent_files.py

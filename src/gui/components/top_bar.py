@@ -162,6 +162,18 @@ class TopBar:
             label="All Pages",
             command=self._cb.get("ocr_all_pages", lambda: None))
         actions_menu.add_cascade(label="OCR", menu=ocr_menu)
+
+        tts_menu = _mk_menu(actions_mb)
+        tts_menu.add_command(
+            label="Current Page",
+            command=self._cb.get("tts_page", lambda: None))
+        tts_menu.add_command(
+            label="All Pages",
+            command=self._cb.get("tts_all", lambda: None))
+        tts_menu.add_command(
+            label="Selected Text",
+            command=self._cb.get("tts_selection", lambda: None))
+        actions_menu.add_cascade(label="Read Aloud", menu=tts_menu)
         actions_menu.add_command(
             label="Images → PDF…",
             command=self._cb.get("start_image_staging", lambda: None))

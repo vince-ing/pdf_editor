@@ -67,6 +67,8 @@ from src.gui.tools.redact_tool import RedactTool
 from src.gui.tools.draw_tool   import DrawTool
 
 from src.utils.recent_files import RecentFiles
+from src.services.tts_service import TtsService
+from src.gui.widgets.tts_bar import TtsBar
 from src.utils.selection_compositor import composite_selection
 
 try:
@@ -100,6 +102,11 @@ class InteractivePDFEditor:
         self.image_conversion_service = ImageConversionService()
         if _HAS_MERGE_SPLIT:
             self.merge_split_service = MergeSplitService()
+        self.tts_service = TtsService(
+            on_start=self._on_tts_start,
+            on_stop=self._on_tts_stop,
+            on_error=self._on_tts_error,
+        )
 
         # ── Document / view state ──────────────────────────────────────────────
         self.doc: PDFDocument | None = None
@@ -228,6 +235,9 @@ class InteractivePDFEditor:
                 "save_as":             self._save_pdf_as,
                 "ocr_page":            self._ocr_current_page,
                 "ocr_all_pages":       self._ocr_all_pages,
+                "tts_page":            self._tts_read_page,
+                "tts_all":             self._tts_read_all,
+                "tts_selection":       self._tts_read_selection,
                 "start_image_staging": self._start_image_staging,
                 "open_merge_split":    self._open_merge_split_dialog,
                 "rotate_left":         lambda: self._rotate(-90),
@@ -313,6 +323,15 @@ class InteractivePDFEditor:
                 "on_close":      self._toggle_search_bar,
             },
         )
+
+        # TTS bar (hidden until reading starts)
+        self._tts_bar = TtsBar(
+            self.root,
+            on_stop=self._tts_stop,
+            on_pause_resume=self._tts_pause_resume,
+            on_speed_change=self._tts_set_speed,
+        )
+        self._canvas_area.mount_tts_bar(self._tts_bar._bar)
 
         # Convenience aliases used throughout
         self.canvas = self._canvas_area.canvas
@@ -815,6 +834,90 @@ class InteractivePDFEditor:
             messagebox.showerror("OCR Error", str(ex))
         finally:
             self.root.config(cursor="")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Text-to-Speech
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _tts_extract_page_text(self, page_idx: int) -> str:
+        """Extract plain text from a single page via PyMuPDF."""
+        if not self.doc:
+            return ""
+        page = self.doc._doc[page_idx]
+        return page.get_text("text").strip()
+
+    def _tts_read_page(self) -> None:
+        if not self.doc:
+            messagebox.showinfo("Read Aloud", "Please open a PDF document first.")
+            return
+        text = self._tts_extract_page_text(self.current_page_idx)
+        if not text:
+            messagebox.showinfo("Read Aloud", "No readable text found on this page.\nTry running OCR first.")
+            return
+        label = "Reading page " + str(self.current_page_idx + 1) + "…"
+        self._canvas_area.show_tts_bar(label)
+        self._tts_bar.set_status(label)
+        self.tts_service.speak(text)
+
+    def _tts_read_all(self) -> None:
+        if not self.doc:
+            messagebox.showinfo("Read Aloud", "Please open a PDF document first.")
+            return
+        pages = []
+        for i in range(self.doc.page_count):
+            t = self._tts_extract_page_text(i)
+            if t:
+                pages.append(t)
+        if not pages:
+            messagebox.showinfo("Read Aloud", "No readable text found.\nTry running OCR first.")
+            return
+        full_text = "\n\n".join(pages)
+        label = "Reading all " + str(self.doc.page_count) + " pages…"
+        self._canvas_area.show_tts_bar(label)
+        self._tts_bar.set_status(label)
+        self.tts_service.speak(full_text)
+
+    def _tts_read_selection(self) -> None:
+        if not self.doc:
+            messagebox.showinfo("Read Aloud", "Please open a PDF document first.")
+            return
+        # Try to get selected text from the select tool
+        sel_tool = self._tools.get("text")
+        text = ""
+        if sel_tool and hasattr(sel_tool, "get_selected_text"):
+            text = sel_tool.get_selected_text() or ""
+        if not text.strip():
+            messagebox.showinfo("Read Aloud", "No text selected.\nUse the Select Text tool to highlight text first.")
+            return
+        self._canvas_area.show_tts_bar("Reading selection…")
+        self._tts_bar.set_status("Reading selection…")
+        self.tts_service.speak(text.strip())
+
+    def _tts_stop(self) -> None:
+        self.tts_service.stop()
+        self._canvas_area.hide_tts_bar()
+
+    def _tts_pause_resume(self) -> None:
+        self.tts_service.toggle_pause()
+        self._tts_bar.set_paused(self.tts_service.is_paused)
+
+    def _tts_set_speed(self, speed: float) -> None:
+        self.tts_service.speed = speed
+
+    def _on_tts_start(self) -> None:
+        """Called from TTS worker thread — schedule UI update on main thread."""
+        self.root.after(0, lambda: self._tts_bar.set_paused(False))
+
+    def _on_tts_stop(self) -> None:
+        """Called from TTS worker thread when speech ends naturally (not user stop)."""
+        self.root.after(0, self._canvas_area.hide_tts_bar)
+
+    def _on_tts_error(self, msg: str) -> None:
+        """Called from TTS worker thread on error — show in status bar, keep bar open."""
+        self.root.after(0, lambda: (
+            self._flash_status("TTS error: " + msg, color=PALETTE["danger"], duration_ms=6000),
+            self._canvas_area.hide_tts_bar(),
+        ))
 
     def _ocr_all_pages(self) -> None:
         if not self.doc:
@@ -1809,6 +1912,8 @@ class InteractivePDFEditor:
                     try: self.root.after_cancel(aid)
                     except Exception: pass
         # Close doc and quit — use quit() not destroy() to exit the mainloop cleanly
+        try: self.tts_service.stop()
+        except Exception: pass
         if self.doc:
             try: self.doc.close()
             except Exception: pass

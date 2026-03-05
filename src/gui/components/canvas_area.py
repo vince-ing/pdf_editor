@@ -60,6 +60,8 @@ class CanvasArea:
         self._sb_redact_all_btn: tk.Button
         self._search_bar_frame: tk.Frame
         self._search_bar_visible = False
+        self._tts_bar_frame: tk.Frame | None = None
+        self._tts_bar_visible = False
 
         self.frame = self._build(parent)
 
@@ -263,3 +265,27 @@ class CanvasArea:
         for b in (self._sb_prev_btn, self._sb_next_btn,
                   self._sb_redact_one_btn, self._sb_redact_all_btn):
             b.config(state=tk.DISABLED)
+
+    # ── TTS bar public API ────────────────────────────────────────────────────
+
+    def mount_tts_bar(self, bar_frame: tk.Frame) -> None:
+        """Register the TtsBar frame so we can show/hide it."""
+        self._tts_bar_frame = bar_frame
+
+    def show_tts_bar(self, status: str = "Reading…") -> None:
+        if self._tts_bar_frame and not self._tts_bar_visible:
+            self._tts_bar_frame.pack(
+                side=tk.TOP, fill=tk.X,
+                before=self.canvas if not self._search_bar_visible
+                       else self._search_bar_frame,
+            )
+            self._tts_bar_visible = True
+
+    def hide_tts_bar(self) -> None:
+        if self._tts_bar_frame and self._tts_bar_visible:
+            self._tts_bar_frame.pack_forget()
+            self._tts_bar_visible = False
+
+    @property
+    def tts_bar_visible(self) -> bool:
+        return self._tts_bar_visible
