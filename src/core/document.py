@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import fitz
 from .page import PDFPage
 
@@ -54,13 +56,39 @@ class PDFDocument:
         """
         Save the document to *output_path*.
 
-        When *incremental* is True the caller is requesting an in-place update,
-        but we honour that only when ``can_save_incrementally()`` agrees it is
-        safe.
+        If saving over the currently open file (and incremental is not possible),
+        uses a temporary file and atomic swap to prevent file corruption and 
+        handle OS locks safely.
         """
+        # Attempt a fast, in-place append if PyMuPDF says it's safe
         if incremental and output_path == self.path and self.can_save_incrementally():
             self._doc.save(output_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+            return
+
+        # If we are overwriting the currently open file with a full rewrite
+        if output_path == self.path:
+            # 1. Save to a temporary file first
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
+            os.close(temp_fd)  # Close the OS descriptor so PyMuPDF can write to it
+            
+            try:
+                self._doc.save(temp_path, deflate=deflate, garbage=4)
+                
+                # 2. Release the Windows/OS lock on the original file
+                self._doc.close()
+                
+                # 3. Atomic swap: replace original file with the new temporary file
+                os.replace(temp_path, output_path)
+                
+                # 4. Seamless reload: re-open the file so the app can keep using it
+                self._doc = fitz.open(output_path)
+            except Exception as e:
+                # Cleanup the orphaned temporary file if anything crashes
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise e
         else:
+            # Normal "Save As" to a completely new file path
             self._doc.save(output_path, deflate=deflate, garbage=4)
 
     def close(self) -> None:

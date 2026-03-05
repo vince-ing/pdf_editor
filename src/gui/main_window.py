@@ -1527,6 +1527,8 @@ class InteractivePDFEditor:
         total_h = self._CONT_GAP
         max_iw  = 0
         heights, widths = [], []
+        
+        # 1. Quickly calculate geometries to layout the skeleton of the scroll view
         for i in range(n):
             p  = doc.get_page(i)
             iw = int(p.width  * self.scale_factor)
@@ -1535,12 +1537,14 @@ class InteractivePDFEditor:
             widths.append(iw)
             max_iw = max(max_iw, iw)
             total_h += ih + self._CONT_GAP
+            
         self.canvas.delete("page_img")
         self.canvas.delete("page_shadow")
         self.canvas.delete("page_bg")
         self.canvas.delete("textsel")
-        self.canvas.config(
-            scrollregion=(0, 0, max(cw, max_iw + 80), total_h))
+        self.canvas.config(scrollregion=(0, 0, max(cw, max_iw + 80), total_h))
+        
+        # 2. Draw lightweight gray placeholder rectangles to maintain layout
         y = self._CONT_GAP
         for i in range(n):
             iw, ih = widths[i], heights[i]
@@ -1555,30 +1559,17 @@ class InteractivePDFEditor:
                 tags=("page_shadow", f"page_shadow_{i}"))
             self.canvas.tag_lower(f"page_shadow_{i}", f"page_bg_{i}")
             y += ih + self._CONT_GAP
+            
         self._update_cont_offsets(self.current_page_idx)
-        cur   = self.current_page_idx
-        order = [cur]
-        for delta in range(1, n):
-            if cur - delta >= 0: order.append(cur - delta)
-            if cur + delta < n:  order.append(cur + delta)
-
-        def _render_one(remaining):
-            if not remaining or not self.doc:
-                self._cont_after_id = None
-                return
-            idx  = remaining[0]
-            rest = remaining[1:]
-            self._render_cont_page(idx, widths[idx], heights[idx], cw)
-            self._cont_after_id = self.root.after_idle(
-                lambda: _render_one(rest))
-
-        _render_one(order)
         cur_page = doc.get_page(self.current_page_idx)
         self._right_panel.update_page_label(self.current_page_idx + 1, n)
-        self._status_bar.set_page_size(
-            f"{int(cur_page.width)} × {int(cur_page.height)} pt")
+        self._status_bar.set_page_size(f"{int(cur_page.width)} × {int(cur_page.height)} pt")
         self._right_panel.thumb.refresh_all_borders()
         self._right_panel.thumb.scroll_to_active()
+
+        # 3. Fire up the lazy background loading for only the visible slice
+        self._prune_cont_cache(self.current_page_idx)
+        self._schedule_cont_render(self.current_page_idx)
 
     def _render_cont_page(self, idx: int, iw: int, ih: int, cw: int) -> None:
         doc = self.doc
@@ -1664,19 +1655,82 @@ class InteractivePDFEditor:
         self._scroll_after_id = None
         if not self.doc or not self._continuous_mode:
             return
+            
         top    = self.canvas.canvasy(0)
         bottom = self.canvas.canvasy(self.canvas.winfo_height())
         mid    = (top + bottom) / 2
         idx    = self._cont_page_at_y(mid)
+        
         if idx != self.current_page_idx:
             self.current_page_idx = idx
             self._update_cont_offsets(idx)
             page = self.doc.get_page(idx)
             self._right_panel.update_page_label(idx + 1, self.doc.page_count)
-            self._status_bar.set_page_size(
-                f"{int(page.width)} × {int(page.height)} pt")
+            self._status_bar.set_page_size(f"{int(page.width)} × {int(page.height)} pt")
             self._right_panel.thumb.refresh_all_borders()
             self._right_panel.thumb.scroll_to_active()
+            
+        # Vital Step: Every time we settle a scroll, sweep garbage and load new ones
+        self._prune_cont_cache(idx)
+        self._schedule_cont_render(idx)
+    
+    def _schedule_cont_render(self, active_idx: int) -> None:
+        """Background thread queue that ONLY renders visible pages (±3 buffer)."""
+        if self._cont_after_id:
+            self.root.after_cancel(self._cont_after_id)
+            self._cont_after_id = None
+        if not self.doc or not self._continuous_mode:
+            return
+
+        n = self.doc.page_count
+        cw = self.canvas.winfo_width()
+        
+        # Build queue: priority to active page, then buffer pages outward
+        order = [active_idx]
+        for delta in range(1, 4):  # Buffer size of 3
+            if active_idx - delta >= 0: order.append(active_idx - delta)
+            if active_idx + delta < n:  order.append(active_idx + delta)
+
+        def _render_one(remaining):
+            if not remaining or not self.doc or not self._continuous_mode:
+                self._cont_after_id = None
+                return
+            idx = remaining[0]
+            rest = remaining[1:]
+            
+            key = (idx, self.scale_factor)
+            if key not in self._cont_images:
+                p = self.doc.get_page(idx)
+                iw = int(p.width * self.scale_factor)
+                ih = int(p.height * self.scale_factor)
+                self._render_cont_page(idx, iw, ih, cw)
+                
+            self._cont_after_id = self.root.after_idle(lambda: _render_one(rest))
+
+        _render_one(order)
+    
+    def _prune_cont_cache(self, active_idx: int) -> None:
+        """Destroys high-res photo objects that scroll out of view to save RAM."""
+        if not self._continuous_mode or not self.doc:
+            return
+        BUFFER = 3
+        keep_indices = set(range(active_idx - BUFFER, active_idx + BUFFER + 1))
+        # Identify pages way outside the viewport buffer
+        keys_to_delete = [k for k in list(self._cont_images.keys()) if k[0] not in keep_indices]
+        for k in keys_to_delete:
+            self.canvas.delete(f"page_img_{k[0]}")  # remove the physical canvas binding
+            del self._cont_images[k]                # destroy the pixel array in memory
+
+    def _cont_invalidate_cache(self, page_idx: int | None = None) -> None:
+        """Force flush the continuous cache (used on rotation, scaling, etc)."""
+        if page_idx is None:
+            for k in list(self._cont_images.keys()):
+                self.canvas.delete(f"page_img_{k[0]}")
+            self._cont_images.clear()
+        else:
+            for k in [k for k in list(self._cont_images.keys()) if k[0] == page_idx]:
+                self.canvas.delete(f"page_img_{k[0]}")
+                del self._cont_images[k]
 
     def _scroll_to_current_cont(self) -> None:
         if not self.doc:
