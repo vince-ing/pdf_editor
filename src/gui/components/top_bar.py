@@ -154,9 +154,14 @@ class TopBar:
         actions_mb.pack(side=tk.LEFT, fill=tk.Y)
 
         actions_menu = _mk_menu(actions_mb)
-        actions_menu.add_command(
-            label="OCR Current Page",
+        ocr_menu = _mk_menu(actions_mb)
+        ocr_menu.add_command(
+            label="Current Page",
             command=self._cb.get("ocr_page", lambda: None))
+        ocr_menu.add_command(
+            label="All Pages",
+            command=self._cb.get("ocr_all_pages", lambda: None))
+        actions_menu.add_cascade(label="OCR", menu=ocr_menu)
         actions_menu.add_command(
             label="Images → PDF…",
             command=self._cb.get("start_image_staging", lambda: None))

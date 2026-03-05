@@ -227,6 +227,7 @@ class InteractivePDFEditor:
                 "save":                self._save_pdf,
                 "save_as":             self._save_pdf_as,
                 "ocr_page":            self._ocr_current_page,
+                "ocr_all_pages":       self._ocr_all_pages,
                 "start_image_staging": self._start_image_staging,
                 "open_merge_split":    self._open_merge_split_dialog,
                 "rotate_left":         lambda: self._rotate(-90),
@@ -814,6 +815,34 @@ class InteractivePDFEditor:
             messagebox.showerror("OCR Error", str(ex))
         finally:
             self.root.config(cursor="")
+
+    def _ocr_all_pages(self) -> None:
+        if not self.doc:
+            messagebox.showinfo("OCR", "Please open a PDF document first.")
+            return
+        msg = f"Run OCR on all {self.doc.page_count} pages? This may take a while for large documents."
+        if not messagebox.askyesno("OCR All Pages", msg):
+            return
+        self.root.config(cursor="watch")
+        self.root.update()
+        errors = []
+        for idx in range(self.doc.page_count):
+            cmd = OcrPageCommand(self.doc, idx)
+            try:
+                cmd.execute()
+                self._push_history(cmd)
+            except Exception as ex:
+                cmd.cleanup()
+                errors.append("Page " + str(idx + 1) + ": " + str(ex))
+        self.root.config(cursor="")
+        self._cont_invalidate_cache()
+        self._render()
+        if errors:
+            err_msg = "OCR finished with " + str(len(errors)) + " error(s):\n" + "\n".join(errors[:5])
+            messagebox.showwarning("OCR Complete (with errors)", err_msg)
+        else:
+            page_count = self.doc.page_count
+            self._flash_status("✓ OCR complete on all " + str(page_count) + " pages — text is now selectable.")
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Merge / Split
