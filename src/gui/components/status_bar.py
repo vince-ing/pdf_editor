@@ -8,6 +8,7 @@ Extracted from ``InteractivePDFEditor._build_statusbar``.
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 
 from src.gui.theme import PALETTE, FONT_MONO
 
@@ -69,6 +70,11 @@ class StatusBar:
         )
         self._st_action.pack(side=tk.LEFT)
 
+        # ADDED: Progress Bar (hidden by default)
+        self._progress_bar = ttk.Progressbar(
+            bar, orient=tk.HORIZONTAL, length=150, mode='indeterminate'
+        )
+
         self._st_zoom = tk.Label(
             bar, text="",
             bg=PALETTE["shadow"], fg=PALETTE["fg_dim"],
@@ -106,3 +112,16 @@ class StatusBar:
             self._parent.after_cancel(self._flash_after_id)
         self._flash_after_id = self._parent.after(
             duration_ms, lambda: self._st_action.config(text=""))
+
+    # ADDED: Background task UI methods
+    def show_progress(self, message: str = "Processing...") -> None:
+        if self._flash_after_id:
+            self._parent.after_cancel(self._flash_after_id)
+        self._st_action.config(text=message, fg=PALETTE["accent_light"])
+        self._progress_bar.pack(side=tk.RIGHT, padx=10)
+        self._progress_bar.start(10)
+
+    def hide_progress(self, finish_message: str = "Done") -> None:
+        self._progress_bar.stop()
+        self._progress_bar.pack_forget()
+        self.flash(finish_message)

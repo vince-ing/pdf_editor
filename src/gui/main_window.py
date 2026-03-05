@@ -40,7 +40,7 @@ from src.commands.rotate_page   import RotatePageCommand
 from src.commands.page_ops      import ReorderPagesCommand, DuplicatePageCommand
 from src.commands.draw_command  import DrawAnnotationCommand
 from src.commands.convert_images import ConvertImagesToPdfCommand
-from src.commands.ocr_page      import OcrPageCommand
+from src.commands.ocr_page      import OcrPageCommand, generate_ocr_pdf_bytes
 
 from src.gui.theme import (
     PALETTE, FONT_MONO, FONT_UI,
@@ -70,7 +70,8 @@ from src.utils.recent_files import RecentFiles
 from src.services.tts_service import TtsService
 from src.gui.widgets.tts_bar import TtsBar
 from src.utils.selection_compositor import composite_selection
-from src.services.toc_service        import TocService           # NEW
+from src.utils.task_manager import BackgroundTaskManager
+from src.services.toc_service        import TocService           
 from src.commands.toc_commands       import ModifyTocCommand 
 
 try:
@@ -94,6 +95,7 @@ class InteractivePDFEditor:
         self.root.minsize(900, 640)
         self.root.configure(bg=PALETTE["bg_dark"])
         self.root.overrideredirect(True)  # remove native title bar
+        self.task_manager = BackgroundTaskManager(self.root)
 
         # ── Services ──────────────────────────────────────────────────────────
         self.page_service             = PageService()
@@ -865,26 +867,31 @@ class InteractivePDFEditor:
 
     def _ocr_current_page(self) -> None:
         if not self.doc:
-            messagebox.showinfo(
-                "OCR", "Please open a PDF document first.")
             return
-        self.root.config(cursor="watch")
-        self.root.update()
-        cmd = OcrPageCommand(self.doc, self.current_page_idx)
-        try:
+
+        page_idx = self.current_page_idx
+        self._status_bar.show_progress("Running Tesseract OCR...")
+
+        # 1. Define the success callback (runs on Main Thread)
+        def on_complete(pdf_bytes: bytes):
+            cmd = OcrPageCommand(self.doc, page_idx, pdf_bytes)
             cmd.execute()
             self._push_history(cmd)
-            self._flash_status(
-                f"✓ OCR complete on page {self.current_page_idx + 1} — text is now selectable.")
-            sel = self._get_tool("select_text")
-            if sel and self._active_tool_name == "select_text":
-                sel.reload()
+            self._mark_dirty()
             self._render()
-        except Exception as ex:
-            cmd.cleanup()
-            messagebox.showerror("OCR Error", str(ex))
-        finally:
-            self.root.config(cursor="")
+            self._status_bar.hide_progress("OCR Complete")
+
+        # 2. Define the error callback (runs on Main Thread)
+        def on_error(err: Exception):
+            messagebox.showerror("OCR Error", str(err))
+            self._status_bar.hide_progress("OCR Failed")
+
+        # 3. Ship the heavy lifting to the background worker!
+        self.task_manager.run_task(
+            worker_func=lambda: generate_ocr_pdf_bytes(self.doc, page_idx),
+            on_complete=on_complete,
+            on_error=on_error
+        )
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Text-to-Speech
@@ -986,29 +993,65 @@ class InteractivePDFEditor:
         if not self.doc:
             messagebox.showinfo("OCR", "Please open a PDF document first.")
             return
-        msg = f"Run OCR on all {self.doc.page_count} pages? This may take a while for large documents."
+
+        page_count = self.doc.page_count
+        msg = f"Run OCR on all {page_count} pages? This may take a while for large documents."
         if not messagebox.askyesno("OCR All Pages", msg):
             return
+
+        self._status_bar.show_progress(f"Running OCR on all {page_count} pages...")
+        
+        # We set the cursor to a watch so the user knows they shouldn't edit 
+        # the document while the background thread is mapping the pages.
         self.root.config(cursor="watch")
-        self.root.update()
-        errors = []
-        for idx in range(self.doc.page_count):
-            cmd = OcrPageCommand(self.doc, idx)
-            try:
-                cmd.execute()
-                self._push_history(cmd)
-            except Exception as ex:
-                cmd.cleanup()
-                errors.append("Page " + str(idx + 1) + ": " + str(ex))
-        self.root.config(cursor="")
-        self._cont_invalidate_cache()
-        self._render()
-        if errors:
-            err_msg = "OCR finished with " + str(len(errors)) + " error(s):\n" + "\n".join(errors[:5])
-            messagebox.showwarning("OCR Complete (with errors)", err_msg)
-        else:
-            page_count = self.doc.page_count
-            self._flash_status("✓ OCR complete on all " + str(page_count) + " pages — text is now selectable.")
+
+        # 1. Define the Heavy Worker (Runs on Background Thread)
+        def worker():
+            results = []
+            for idx in range(page_count):
+                # We reuse the same heavy function we built for the single page
+                pdf_bytes = generate_ocr_pdf_bytes(self.doc, idx)
+                results.append((idx, pdf_bytes))
+            return results
+
+        # 2. Define the Success Callback (Runs on Main Thread)
+        def on_complete(results: list[tuple[int, bytes]]):
+            self.root.config(cursor="")  # Restore cursor
+            errors = []
+            
+            # Now safely execute the mutations in the Tkinter main loop
+            for idx, pdf_bytes in results:
+                cmd = OcrPageCommand(self.doc, idx, pdf_bytes)
+                try:
+                    cmd.execute()
+                    self._push_history(cmd)
+                except Exception as ex:
+                    cmd.cleanup()
+                    errors.append(f"Page {idx + 1}: {ex}")
+            
+            self._mark_dirty()
+            self._cont_invalidate_cache()
+            self._render()
+            self._status_bar.hide_progress("Batch OCR Complete")
+
+            if errors:
+                err_msg = f"OCR finished with {len(errors)} error(s):\n" + "\n".join(errors[:5])
+                messagebox.showwarning("OCR Complete (with errors)", err_msg)
+            else:
+                self._flash_status(f"✓ OCR complete on all {page_count} pages — text is now selectable.")
+
+        # 3. Define the Error Callback (Runs on Main Thread)
+        def on_error(err: Exception):
+            self.root.config(cursor="")
+            messagebox.showerror("Batch OCR Error", str(err))
+            self._status_bar.hide_progress("OCR Failed")
+
+        # 4. Ship it to the Task Manager!
+        self.task_manager.run_task(
+            worker_func=worker,
+            on_complete=on_complete,
+            on_error=on_error
+        )
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Merge / Split
