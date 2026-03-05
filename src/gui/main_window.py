@@ -5,6 +5,14 @@ This class is now a pure orchestrator:
   • Holds all application state (document, history, tools).
   • Instantiates the five UI components and wires their callbacks.
   • Never builds Tkinter widgets directly.
+
+Changes vs previous version:
+  • Native tk.Menu bar added: File, Edit, Tools, View.
+  • TopBar no longer holds Merge/Split or Images→PDF buttons.
+  • Inspector panel can be shown/hidden from both Ctrl+T and the View menu,
+    with the TopBar inspector toggle button kept in sync.
+  • OCR is now available from Tools → OCR Current Page (and still wired to
+    the page_action_callbacks for any other callers).
 """
 
 from __future__ import annotations
@@ -81,6 +89,7 @@ class InteractivePDFEditor:
         self.root.geometry("1280x860")
         self.root.minsize(900, 640)
         self.root.configure(bg=PALETTE["bg_dark"])
+        self.root.overrideredirect(True)  # remove native title bar
 
         # ── Services ──────────────────────────────────────────────────────────
         self.page_service             = PageService()
@@ -201,6 +210,7 @@ class InteractivePDFEditor:
               background=[("selected", PALETTE["bg_card"])],
               foreground=[("selected", PALETTE["fg_primary"])])
 
+
     # ══════════════════════════════════════════════════════════════════════════
     #  UI construction (delegates to components)
     # ══════════════════════════════════════════════════════════════════════════
@@ -213,24 +223,30 @@ class InteractivePDFEditor:
         self._top_bar = TopBar(
             self.root,
             callbacks={
-                "open":               self._open_pdf,
-                "save":               self._save_pdf,
-                "save_as":            self._save_pdf_as,
-                "undo":               self._undo,
-                "redo":               self._redo,
-                "zoom_in":            self._zoom_in,
-                "zoom_out":           self._zoom_out,
-                "zoom_reset":         self._zoom_reset,
-                "zoom_fit_width":     self._zoom_fit_width,
-                "zoom_fit_page":      self._zoom_fit_page,
-                "set_single_mode":    self._set_single_mode,
-                "set_continuous_mode":self._set_continuous_mode,
-                "toggle_search_bar":  self._toggle_search_bar,
-                "open_merge_split":   self._open_merge_split_dialog,
-                "start_image_staging":self._start_image_staging,
-                "wc_close":           self._wc_close,
-                "wc_minimize":        self._wc_minimize,
-                "wc_maximize":        self._wc_maximize,
+                "open":                self._open_pdf,
+                "save":                self._save_pdf,
+                "save_as":             self._save_pdf_as,
+                "ocr_page":            self._ocr_current_page,
+                "start_image_staging": self._start_image_staging,
+                "open_merge_split":    self._open_merge_split_dialog,
+                "rotate_left":         lambda: self._rotate(-90),
+                "rotate_right":        lambda: self._rotate(90),
+                "add_page":            self._add_page,
+                "delete_page":         self._delete_page,
+                "undo":                self._undo,
+                "redo":                self._redo,
+                "zoom_in":             self._zoom_in,
+                "zoom_out":            self._zoom_out,
+                "zoom_reset":          self._zoom_reset,
+                "zoom_fit_width":      self._zoom_fit_width,
+                "zoom_fit_page":       self._zoom_fit_page,
+                "set_single_mode":     self._set_single_mode,
+                "set_continuous_mode": self._set_continuous_mode,
+                "toggle_search_bar":   self._toggle_search_bar,
+                "toggle_inspector":    self._toggle_inspector,
+                "wc_close":            self._wc_close,
+                "wc_minimize":         self._wc_minimize,
+                "wc_maximize":         self._wc_maximize,
             },
             has_merge_split=_HAS_MERGE_SPLIT,
         )
@@ -239,10 +255,11 @@ class InteractivePDFEditor:
         self._body = tk.Frame(self.root, bg=PALETTE["bg_dark"])
         self._body.pack(fill=tk.BOTH, expand=True)
 
-        # 4. Icon toolbar (left)
+        # 4. Icon toolbar (left) — canvas tools only
         self._icon_toolbar = IconToolbar(
             self._body,
             on_tool_select=self._select_tool,
+            # page_action_callbacks kept for API compat but ignored by the new toolbar
             page_action_callbacks={
                 "rotate_left":  lambda: self._rotate(-90),
                 "rotate_right": lambda: self._rotate(90),
@@ -268,6 +285,7 @@ class InteractivePDFEditor:
                 "on_duplicate_page":  self._thumb_duplicate_page,
                 "on_rotate_page":     self._thumb_rotate_page,
                 "get_image_thumbnail":self._get_image_thumbnail,
+                "on_page_jump":       self._on_page_jump,
             },
             tool_style_state=self._style,
             on_tool_style_change=self._on_tool_style_change,
@@ -303,6 +321,9 @@ class InteractivePDFEditor:
         self._update_view_mode_buttons()
         self._update_zoom_label()
 
+        # Sync inspector toggle button to initial visible state
+        self._top_bar.set_inspector_active(True)
+
     # ══════════════════════════════════════════════════════════════════════════
     #  Key bindings
     # ══════════════════════════════════════════════════════════════════════════
@@ -326,7 +347,7 @@ class InteractivePDFEditor:
         r.bind("<Control-f>",     lambda e: self._toggle_search_bar())
         r.bind("<F3>",            lambda e: self._search_bar_next())
         r.bind("<Shift-F3>",      lambda e: self._search_bar_prev())
-        r.bind("<Control-t>",     lambda e: self._right_panel.toggle_visibility())
+        r.bind("<Control-t>",     lambda e: self._toggle_inspector())
         r.bind("<KeyPress>",      self._on_key_press)
 
     def _on_key_press(self, event: tk.Event) -> None:
@@ -421,7 +442,7 @@ class InteractivePDFEditor:
     def _on_tool_state_change(self, key: str, value) -> None:
         """Route tool-state events (currently used by RedactTool)."""
         if key == "redact.hits_found":
-            pass  # handled via on_hit_changed callback
+            pass
 
     def _on_tool_style_change(self, key: str, value) -> None:
         """
@@ -434,7 +455,7 @@ class InteractivePDFEditor:
             self._redact_confirm()
         elif key == "redact.cancel":
             self._redact_cancel_hits()
-            
+
         # Route live property updates to the currently active text box
         if key in ("font_index", "fontsize", "text_color", "text_align"):
             if self._text_boxes and self._active_tool_name == "text":
@@ -445,6 +466,17 @@ class InteractivePDFEditor:
                     color_rgb=self._style["text_color"],
                     align=self._style["text_align"],
                 )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Inspector toggle
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _toggle_inspector(self) -> None:
+        """Show or hide the right-panel inspector; keep the toolbar button in sync."""
+        self._right_panel.toggle_visibility()
+        # Determine new state by reading the internal flag on RightPanel
+        is_visible = getattr(self._right_panel, "_visible", True)
+        self._top_bar.set_inspector_active(is_visible)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Startup / welcome screen
@@ -528,17 +560,18 @@ class InteractivePDFEditor:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _rebuild_recent_menu(self) -> None:
-        menu = tk.Menu(
-            self.root, tearoff=0,
+        menu_kw = dict(
+            tearoff=0,
             bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"],
             activebackground=PALETTE["accent_dim"],
             activeforeground=PALETTE["accent_light"],
             font=("Helvetica Neue", 9), relief="flat", bd=1,
         )
+        menu = tk.Menu(self.root, **menu_kw)
         recents = self._recent.get()
         if recents:
             for p in recents:
-                label = os.path.basename(p)
+                label   = os.path.basename(p)
                 dirname = os.path.dirname(p)
                 if len(dirname) > 40:
                     dirname = "…" + dirname[-38:]
@@ -601,7 +634,6 @@ class InteractivePDFEditor:
         self._update_title()
         self._render()
         self._right_panel.thumb.reset()
-        # Fit to width on open — deferred so the canvas has been laid out
         self.root.after(80, self._zoom_fit_width)
 
     def _open_recent(self, path: str) -> None:
@@ -762,6 +794,8 @@ class InteractivePDFEditor:
 
     def _ocr_current_page(self) -> None:
         if not self.doc:
+            messagebox.showinfo(
+                "OCR", "Please open a PDF document first.")
             return
         self.root.config(cursor="watch")
         self.root.update()
@@ -769,7 +803,8 @@ class InteractivePDFEditor:
         try:
             cmd.execute()
             self._push_history(cmd)
-            self._flash_status("✓ OCR complete — text is now selectable.")
+            self._flash_status(
+                f"✓ OCR complete on page {self.current_page_idx + 1} — text is now selectable.")
             sel = self._get_tool("select_text")
             if sel and self._active_tool_name == "select_text":
                 sel.reload()
@@ -803,6 +838,18 @@ class InteractivePDFEditor:
     def _next_page(self) -> None:
         if self.doc and self.current_page_idx < self.doc.page_count - 1:
             self._navigate_to(self.current_page_idx + 1)
+
+    def _on_page_jump(self, page_num: int) -> None:
+        """Jump to a 1-based page number entered in the right panel."""
+        if not self.doc:
+            return
+        idx = page_num - 1
+        if 0 <= idx < self.doc.page_count:
+            self._navigate_to(idx)
+        else:
+            self._flash_status(
+                f"Page {page_num} out of range (1–{self.doc.page_count})",
+                color=PALETTE["warning"])
 
     def _navigate_to(self, idx: int) -> None:
         self._commit_all_boxes()
@@ -976,13 +1023,11 @@ class InteractivePDFEditor:
         self._set_zoom(RENDER_DPI)
 
     def _zoom_fit_width(self) -> None:
-        """Scale so the current page fills the canvas width."""
         if not self.doc:
             return
         page = self.doc.get_page(self.current_page_idx)
         cw = self.canvas.winfo_width()
         if cw < 10:
-            # Canvas not yet realised — retry once it is
             self.root.after(60, self._zoom_fit_width)
             return
         available_w = cw - 2 * PAD_XL
@@ -996,7 +1041,6 @@ class InteractivePDFEditor:
         self._flash_status("↔ Fit width", color=PALETTE["accent_light"], duration_ms=1200)
 
     def _zoom_fit_page(self) -> None:
-        """Scale so the current page fits entirely within the canvas."""
         if not self.doc:
             return
         page = self.doc.get_page(self.current_page_idx)
@@ -1149,8 +1193,7 @@ class InteractivePDFEditor:
             rt.cancel_search()
         self._right_panel.hide_redact_confirm()
         self._canvas_area.clear_hit_display()
-        self._flash_status("Redaction cancelled",
-                           color=PALETTE["fg_secondary"])
+        self._flash_status("Redaction cancelled", color=PALETTE["fg_secondary"])
 
     def _on_draw_committed(self, page_idx: int, xref: int) -> None:
         cmd = DrawAnnotationCommand(self.doc, page_idx, xref)
@@ -1288,8 +1331,7 @@ class InteractivePDFEditor:
 
         _render_one(order)
         cur_page = doc.get_page(self.current_page_idx)
-        self._right_panel.update_page_label(
-            self.current_page_idx + 1, n)
+        self._right_panel.update_page_label(self.current_page_idx + 1, n)
         self._status_bar.set_page_size(
             f"{int(cur_page.width)} × {int(cur_page.height)} pt")
         self._right_panel.thumb.refresh_all_borders()
@@ -1315,43 +1357,34 @@ class InteractivePDFEditor:
             ox, y, anchor=tk.NW, image=img,
             tags=("page_img", f"page_img_{idx}"))
         self.canvas.tag_lower(f"page_bg_{idx}", f"page_img_{idx}")
-    
+
     def _make_page_image(self, ppm: bytes, page_idx: int) -> tk.PhotoImage:
-        """
-        Convert raw PPM bytes to a tk.PhotoImage, compositing both 
-        text-selection and search hit highlight rectangles into the pixel data.
-        """
         layers = []
-        
-        # 1. Text selection tool
         sel = self._get_tool("select_text")
         if sel:
             sel_rects = sel.get_highlight_rects_for_page(page_idx)
             if sel_rects:
                 layers.append({
-                    "rects": sel_rects, 
-                    "color": (74, 144, 217), 
+                    "rects": sel_rects,
+                    "color": (74, 144, 217),
                     "alpha": 0.35
                 })
-
-        # 2. Search / Find / Redact tool hits
         rt = self._get_tool("redact")
         if rt and getattr(rt, "has_search_hits", False):
             if hasattr(rt, "get_highlight_rects_for_page"):
                 active, inactive = rt.get_highlight_rects_for_page(page_idx)
                 if inactive:
                     layers.append({
-                        "rects": inactive, 
-                        "color": (123, 63, 191), # Purple for inactive hits
+                        "rects": inactive,
+                        "color": (123, 63, 191),
                         "alpha": 0.45
                     })
                 if active:
                     layers.append({
-                        "rects": active, 
-                        "color": (255, 184, 0), # Yellow/Orange for the current hit
+                        "rects": active,
+                        "color": (255, 184, 0),
                         "alpha": 0.65
                     })
-
         return composite_selection(
             ppm_bytes=ppm,
             scale=self.scale_factor,
@@ -1520,16 +1553,13 @@ class InteractivePDFEditor:
 
     def _sample_page_color(self, pdf_x: float, pdf_y: float) -> str:
         img = None
-        # Safely extract the active image based on the current view mode
         if self._continuous_mode:
             key = (self.current_page_idx, self.scale_factor)
             img = self._cont_images.get(key)
         else:
             img = self.tk_image
-            
         if img is None:
-            return "#FFFFFF" # Fallback to white, NOT the dark canvas background
-            
+            return "#FFFFFF"
         try:
             ix = int(pdf_x * self.scale_factor)
             iy = int(pdf_y * self.scale_factor)
@@ -1543,13 +1573,10 @@ class InteractivePDFEditor:
         text = box.get_text()
         if not text:
             return
-            
-        # Give PyMuPDF a padded bounding box. If the box is exactly tight to Tkinter's
-        # font metrics, PyMuPDF will often refuse to draw the text, causing it to vanish.
         rect = (
-            box.pdf_x, 
+            box.pdf_x,
             box.pdf_y,
-            box.pdf_x + box.pdf_w + 5, 
+            box.pdf_x + box.pdf_w + 5,
             box.pdf_y + box.pdf_h + 10
         )
         cmd  = InsertTextBoxCommand(
@@ -1673,8 +1700,52 @@ class InteractivePDFEditor:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _wc_close(self) -> None:    self._on_closing()
-    def _wc_minimize(self) -> None: self.root.iconify()
-    def _wc_maximize(self) -> None: self.root.state("zoomed")
+    def _wc_minimize(self) -> None:
+        # On Windows, overrideredirect windows can't iconify normally.
+        # Withdraw (hide) the window and show a taskbar button via a hidden
+        # helper toplevel, then restore on click.
+        self.root.withdraw()
+
+        # Create a small hidden window that appears in the taskbar
+        self._min_helper = tk.Toplevel(self.root)
+        self._min_helper.title("PDF Editor")
+        self._min_helper.geometry("1x1+-10000+-10000")
+        self._min_helper.iconify()
+        self._min_helper.protocol("WM_DELETE_WINDOW", self._wc_restore)
+        self._min_helper.bind("<Map>", lambda e: self._wc_restore())
+
+    def _wc_restore(self) -> None:
+        if hasattr(self, "_min_helper") and self._min_helper:
+            try:
+                self._min_helper.destroy()
+            except Exception:
+                pass
+            self._min_helper = None
+        self.root.deiconify()
+
+    def _wc_maximize(self) -> None:
+        if getattr(self, "_maximized", False):
+            geo = getattr(self, "_pre_max_geometry", "1280x860+0+0")
+            self.root.geometry(geo)
+            self._maximized = False
+        else:
+            self._pre_max_geometry = self.root.geometry()
+            try:
+                import ctypes
+                class RECT(ctypes.Structure):
+                    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                                 ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+                r = RECT()
+                ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
+                w = r.right - r.left
+                h = r.bottom - r.top
+                x, y = r.left, r.top
+            except Exception:
+                w = self.root.winfo_screenwidth()
+                h = self.root.winfo_screenheight()
+                x, y = 0, 0
+            self.root.geometry(f"{w}x{h}+{x}+{y}")
+            self._maximized = True
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Escape / closing
@@ -1696,17 +1767,23 @@ class InteractivePDFEditor:
                 return
             if ans and not self._save_pdf():
                 return
-        self._commit_all_boxes()
-        if self._current_tool:
-            self._current_tool.deactivate()
-        if (self._right_panel.thumb and
-                hasattr(self._right_panel.thumb, "_after_id") and
-                self._right_panel.thumb._after_id):
-            self.root.after_cancel(self._right_panel.thumb._after_id)
-        self._history.clear()
+        # Cancel all pending callbacks
+        for after_id in [self._cont_after_id, self._scroll_after_id]:
+            if after_id:
+                try: self.root.after_cancel(after_id)
+                except Exception: pass
+        thumb = getattr(self._right_panel, "thumb", None)
+        if thumb:
+            for attr in ("_after_id", "_render_after_id"):
+                aid = getattr(thumb, attr, None)
+                if aid:
+                    try: self.root.after_cancel(aid)
+                    except Exception: pass
+        # Close doc and quit — use quit() not destroy() to exit the mainloop cleanly
         if self.doc:
-            self.doc.close()
-        self.root.destroy()
+            try: self.doc.close()
+            except Exception: pass
+        self.root.quit()
 
     # ══════════════════════════════════════════════════════════════════════════
     #  AppContext properties (read by tools via ctx)
@@ -1735,3 +1812,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     InteractivePDFEditor(root)
     root.mainloop()
+    try:
+        root.destroy()
+    except Exception:
+        pass

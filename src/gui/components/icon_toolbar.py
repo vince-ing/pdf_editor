@@ -1,8 +1,9 @@
 """
-IconToolbar — thin vertical tool-selection strip on the left edge of the window,
-plus bottom page-action buttons (rotate, add, delete, OCR).
+IconToolbar — thin vertical tool-selection strip on the left edge of the window.
 
-Extracted from ``InteractivePDFEditor._build_icon_toolbar``.
+Strictly canvas interaction tools only.  Page-level actions (rotate, add,
+delete, OCR) have been removed — they live in the native Tools menu and in
+the thumbnail right-click context menu.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ TOOL_KEY_MAP: dict[str, str] = {
 
 class IconToolbar:
     """
-    Left vertical icon strip.
+    Left vertical icon strip — canvas tools only.
 
     Parameters
     ----------
@@ -59,19 +60,16 @@ class IconToolbar:
     on_tool_select : callable(tool_name: str)
         Called when the user clicks a tool button.
     page_action_callbacks : dict
-        Mapping of page-action name → callable.  Expected keys:
-        ``rotate_left``, ``rotate_right``, ``add_page``,
-        ``delete_page``, ``ocr_page``.
+        Kept for API compatibility; ignored (actions moved to menus).
     """
 
     def __init__(
         self,
         parent: tk.Widget,
         on_tool_select,
-        page_action_callbacks: dict,
+        page_action_callbacks: dict | None = None,
     ) -> None:
         self._on_tool_select = on_tool_select
-        self._cb             = page_action_callbacks
         self._icon_btns: dict[str, tk.Button] = {}
         self._active_tool    = ""
 
@@ -124,36 +122,10 @@ class IconToolbar:
             self._icon_btns[name] = btn
             Tooltip(btn, full_tip)
 
-        # ── Bottom page-action strip ──────────────────────────────────────────
+        # Bottom spacer (no page-action strip)
         tk.Frame(bar, bg=PALETTE["bg_panel"]).pack(fill=tk.BOTH, expand=True)
-        tk.Frame(bar, bg=PALETTE["border"], height=1).pack(fill=tk.X, padx=8, pady=(PAD_S, 2))
-
-        page_actions = [
-            ("↺", "rotate_left",  "Rotate Left"),
-            ("↻", "rotate_right", "Rotate Right"),
-            ("+", "add_page",     "Add Page"),
-            ("✕", "delete_page",  "Delete Page"),
-            ("👁", "ocr_page",    "OCR Page"),
-        ]
-        for icon_char, key, tip in page_actions:
-            b = tk.Button(
-                bar, text=icon_char,
-                command=self._cb.get(key, lambda: None),
-                bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"],
-                activebackground=PALETTE["bg_hover"],
-                activeforeground=PALETTE["fg_primary"],
-                font=("Helvetica Neue", 11),
-                relief="flat", bd=0, width=2, pady=4,
-                cursor="hand2", highlightthickness=0,
-            )
-            b.pack(fill=tk.X, padx=4, pady=1)
-            b.bind("<Enter>", lambda e, b=b: b.config(
-                bg=PALETTE["bg_hover"], fg=PALETTE["fg_primary"]))
-            b.bind("<Leave>", lambda e, b=b: b.config(
-                bg=PALETTE["bg_panel"], fg=PALETTE["fg_dim"]))
-            Tooltip(b, tip)
-
         tk.Frame(bar, bg=PALETTE["bg_panel"], height=PAD_M).pack()
+
         return bar
 
     # ── public helpers ────────────────────────────────────────────────────────
