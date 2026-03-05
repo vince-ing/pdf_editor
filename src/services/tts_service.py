@@ -30,6 +30,8 @@ Install: pip install kokoro-onnx soundfile sounddevice
 
 from __future__ import annotations
 
+import collections
+import hashlib
 import os
 import queue
 import re
@@ -57,6 +59,11 @@ _CHUNK_FRAMES = 2048
 # Maximum number of pre-generated sentence arrays waiting in the queue.
 # 3 gives a comfortable buffer without wasting memory on long documents.
 _QUEUE_MAXSIZE = 3
+
+# Audio chunk LRU cache — maximum number of (text, voice, speed) → array
+# entries to keep in memory.  Each entry is roughly 24 kHz × duration × 4 bytes;
+# a typical 40-word chunk at 1× speed is ~3 s ≈ 288 KB.  50 entries ≈ 14 MB.
+_CACHE_MAXSIZE = 50
 
 # Sentinel pushed by the generator to tell the player it is done.
 _SENTINEL = object()
@@ -264,7 +271,9 @@ class TtsService:
         self._on_stop           = on_stop
         self._on_error          = on_error
 
-        self._kokoro    = None
+        self._kokoro      = None
+        self._kokoro_lock = threading.Lock()   # guards _kokoro initialisation
+
         self._stop_evt  = threading.Event()
         self._pause_evt = threading.Event()
         self._pause_evt.set()          # clear = paused, set = playing
@@ -274,10 +283,39 @@ class TtsService:
         self._gen_thread:  threading.Thread | None = None
         self._play_thread: threading.Thread | None = None
 
-        self.voice = "af_alloy"
-        self.speed = 1.0              # read live by the player every chunk tick
+        self._voice = "af_alloy"
+        self._speed = 1.0
+
+        # LRU audio cache: OrderedDict used as an ordered map so we can
+        # cheaply evict the oldest entry when the cache is full.
+        # Key: (chunk_hash, voice, speed_str)  Value: (numpy_array, sample_rate)
+        self._cache: collections.OrderedDict = collections.OrderedDict()
+        self._cache_lock = threading.Lock()
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def prewarm(self) -> None:
+        """
+        Load the kokoro model in a background thread so the first call to
+        speak() has no model-load latency.  Safe to call multiple times —
+        subsequent calls are no-ops if the model is already loaded.
+        Call this as early as possible after creating TtsService, e.g. at
+        app startup right after the main window is shown.
+        """
+        if self._kokoro is not None:
+            return
+        t = threading.Thread(
+            target=self._prewarm_worker, daemon=True, name="tts-prewarm"
+        )
+        t.start()
+
+    def _prewarm_worker(self) -> None:
+        try:
+            self._load_kokoro()
+            print("[TTS] Model pre-warmed and ready.")
+        except Exception as exc:
+            # Non-fatal — speak() will try again and surface the error properly
+            print(f"[TTS] Pre-warm failed (will retry on first speak): {exc}")
 
     def speak(self, text: str) -> None:
         """Start speaking *text*.  Stops any ongoing speech first.  Non-blocking."""
@@ -331,6 +369,24 @@ class TtsService:
     def is_paused(self) -> bool:
         return not self._pause_evt.is_set()
 
+    @property
+    def voice(self) -> str:
+        return self._voice
+
+    @voice.setter
+    def voice(self, value: str) -> None:
+        if value != self._voice:
+            self._voice = value
+            self.clear_cache()   # cached audio is voice-specific
+
+    @property
+    def speed(self) -> float:
+        return self._speed
+
+    @speed.setter
+    def speed(self, value: float) -> None:
+        self._speed = float(value)
+
     # ── Model helpers ─────────────────────────────────────────────────────────
 
     def _ensure_models(self) -> None:
@@ -340,18 +396,54 @@ class TtsService:
             _download(_VOICES_URL, _VOICES_PATH, "Kokoro voices (~10 MB)")
 
     def _load_kokoro(self):
+        # Fast path — already loaded
         if self._kokoro is not None:
             return self._kokoro
-        try:
-            from kokoro_onnx import Kokoro
-        except ImportError:
-            raise RuntimeError(
-                "kokoro-onnx not installed.\n"
-                "Run: pip install kokoro-onnx soundfile sounddevice"
-            )
-        self._ensure_models()
-        self._kokoro = Kokoro(_MODEL_PATH, _VOICES_PATH)
-        return self._kokoro
+        with self._kokoro_lock:
+            # Re-check inside lock in case another thread loaded it first
+            if self._kokoro is not None:
+                return self._kokoro
+            try:
+                from kokoro_onnx import Kokoro
+            except ImportError:
+                raise RuntimeError(
+                    "kokoro-onnx not installed.\n"
+                    "Run: pip install kokoro-onnx soundfile sounddevice"
+                )
+            self._ensure_models()
+            self._kokoro = Kokoro(_MODEL_PATH, _VOICES_PATH)
+            return self._kokoro
+
+    # ── Audio cache ───────────────────────────────────────────────────────────
+
+    def _cache_key(self, text: str, voice: str, speed: float) -> str:
+        """Stable string key for a (text, voice, speed) triple."""
+        h = hashlib.md5(text.encode()).hexdigest()
+        return f"{h}|{voice}|{speed:.3f}"
+
+    def _cache_get(self, key: str):
+        """Return cached (array, sr) and promote to MRU, or None if missing."""
+        with self._cache_lock:
+            if key not in self._cache:
+                return None
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+    def _cache_put(self, key: str, value) -> None:
+        """Store value, evicting the LRU entry if the cache is full."""
+        with self._cache_lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            else:
+                if len(self._cache) >= _CACHE_MAXSIZE:
+                    self._cache.popitem(last=False)   # evict oldest
+            self._cache[key] = value
+
+    def clear_cache(self) -> None:
+        """Discard all cached audio (e.g. after a voice or language change)."""
+        with self._cache_lock:
+            self._cache.clear()
+        print("[TTS] Audio cache cleared.")
 
     # ── Text cleaning ─────────────────────────────────────────────────────────
 
@@ -627,16 +719,23 @@ class TtsService:
                 # Speed changes take effect at the next chunk boundary.
                 speed = max(0.25, min(4.0, float(self.speed)))
 
-                samples, sr = kokoro.create(
-                    sentence,
-                    voice=self.voice,
-                    speed=speed,
-                    lang="en-us",
-                )
-
-                arr = np.asarray(samples, dtype=np.float32)
-                if arr.ndim == 1:
-                    arr = arr.reshape(-1, 1)
+                # ── Cache lookup ──────────────────────────────────────────────
+                cache_key = self._cache_key(sentence, self.voice, speed)
+                cached    = self._cache_get(cache_key)
+                if cached is not None:
+                    arr, sr = cached
+                    print(f"[TTS-gen] Cache hit for chunk {idx + 1}/{total}")
+                else:
+                    samples, sr = kokoro.create(
+                        sentence,
+                        voice=self.voice,
+                        speed=speed,
+                        lang="en-us",
+                    )
+                    arr = np.asarray(samples, dtype=np.float32)
+                    if arr.ndim == 1:
+                        arr = arr.reshape(-1, 1)
+                    self._cache_put(cache_key, (arr, sr))
 
                 # Block until the player has room, but wake up on stop
                 while True:

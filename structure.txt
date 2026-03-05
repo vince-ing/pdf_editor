@@ -1,8 +1,4 @@
 pdf_editor
-├── models
-│   └── kokoro
-│       ├── kokoro-v1.0.onnx
-│       └── voices-v1.0.bin
 └── src
     ├── commands
     │   ├── annotate.py
