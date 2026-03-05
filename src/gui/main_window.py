@@ -104,6 +104,8 @@ class InteractivePDFEditor:
             self.merge_split_service = MergeSplitService()
         self.tts_service = TtsService(
             on_start=self._on_tts_start,
+            on_playback_start=self._on_tts_playback_start,
+            on_progress=self._on_tts_progress,
             on_stop=self._on_tts_stop,
             on_error=self._on_tts_error,
         )
@@ -905,8 +907,19 @@ class InteractivePDFEditor:
         self.tts_service.speed = speed
 
     def _on_tts_start(self) -> None:
-        """Called from TTS worker thread — schedule UI update on main thread."""
-        self.root.after(0, lambda: self._tts_bar.set_paused(False))
+        """Called from TTS worker thread when generation begins."""
+        self.root.after(0, self._tts_bar.show_loading)
+
+    def _on_tts_progress(self, current: int, total: int, eta: int) -> None:
+        """Called from TTS worker thread as chunks are generated."""
+        self.root.after(0, lambda c=current, t=total, e=eta: self._tts_bar.update_progress(c, t, e))
+
+    def _on_tts_playback_start(self) -> None:
+        """Called from TTS worker thread right before audio plays."""
+        self.root.after(0, lambda: [
+            self._tts_bar.show_playback_controls(),
+            self._tts_bar.set_paused(False)
+        ])
 
     def _on_tts_stop(self) -> None:
         """Called from TTS worker thread when speech ends naturally (not user stop)."""
