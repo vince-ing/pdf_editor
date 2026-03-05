@@ -25,7 +25,8 @@ class TtsBar:
     parent : tk.Widget
         The root window.
     on_stop : callable
-        Called when the user clicks ◼ Stop or ✕.
+        Called when the user clicks ◼ Stop or ✕.  The caller is responsible
+        for stopping the TTS engine *and* hiding this bar.
     on_pause_resume : callable
         Called when the user clicks ⏸ / ▶.
     on_speed_change : callable(float)
@@ -56,7 +57,7 @@ class TtsBar:
         self._speed_var = tk.DoubleVar(value=1.0)
         self._pause_btn: tk.Button
         self._status_lbl: tk.Label
-        
+
         self._playback_frame: tk.Frame
         self._loading_frame: tk.Frame
         self._progress: ttk.Progressbar
@@ -67,7 +68,7 @@ class TtsBar:
     # ── public API ────────────────────────────────────────────────────────────
 
     def show(self, status: str = "Reading…") -> None:
-        """Slide the bar in."""
+        """Show the bar."""
         if not self._visible:
             self._bar.pack(side=tk.BOTTOM, fill=tk.X)
             self._visible = True
@@ -76,7 +77,7 @@ class TtsBar:
         self.set_paused(False)
 
     def hide(self) -> None:
-        """Slide the bar out."""
+        """Hide the bar (safe to call even when already hidden)."""
         if self._visible:
             self._bar.pack_forget()
             self._visible = False
@@ -130,10 +131,12 @@ class TtsBar:
             tk.Frame(parent_frame, bg=PALETTE["border"], width=1).pack(
                 side=tk.LEFT, fill=tk.Y, pady=6, padx=4)
 
-        # Leftmost fixed section: Close + Status
+        # ── Leftmost fixed section: Close (✕) + Status ────────────────────────
+        # The ✕ button is a *dismiss* button: it calls on_stop, which is
+        # responsible for stopping the engine AND hiding the bar.
         fixed_frame = tk.Frame(bar, bg=PALETTE["bg_mid"])
         fixed_frame.pack(side=tk.LEFT, fill=tk.Y)
-        
+
         _btn(fixed_frame, "✕", self._on_stop,
              fg=PALETTE["fg_dim"], bg=PALETTE["bg_mid"]).pack(side=tk.LEFT)
         _sep(fixed_frame)
@@ -146,23 +149,27 @@ class TtsBar:
         self._status_lbl.pack(side=tk.LEFT)
         _sep(fixed_frame)
 
-        # Loading Frame
+        # ── Loading frame (shown while audio is being generated) ──────────────
         self._loading_frame = tk.Frame(bar, bg=PALETTE["bg_mid"])
-        self._progress = ttk.Progressbar(self._loading_frame, orient="horizontal", length=150, mode="determinate")
+        self._progress = ttk.Progressbar(
+            self._loading_frame, orient="horizontal",
+            length=150, mode="determinate")
         self._progress.pack(side=tk.LEFT, padx=(4, 8), fill=tk.Y, pady=8)
-        
+
         self._eta_lbl = tk.Label(
             self._loading_frame, text="ETA: --s",
-            bg=PALETTE["bg_mid"], fg=PALETTE["fg_dim"], font=FONT_LABEL
+            bg=PALETTE["bg_mid"], fg=PALETTE["fg_dim"], font=FONT_LABEL,
         )
         self._eta_lbl.pack(side=tk.LEFT, padx=(0, 8))
 
-        # Playback Frame
+        # ── Playback frame (shown during playback) ────────────────────────────
         self._playback_frame = tk.Frame(bar, bg=PALETTE["bg_mid"])
-        
-        self._pause_btn = _btn(self._playback_frame, "⏸ Pause", self._on_pause_resume)
+
+        self._pause_btn = _btn(
+            self._playback_frame, "⏸ Pause", self._on_pause_resume)
         self._pause_btn.pack(side=tk.LEFT, padx=(0, 4))
 
+        # ◼ Stop — stops the engine AND hides the bar (same as ✕)
         _btn(self._playback_frame, "◼ Stop", self._on_stop,
              fg="#FFCCCC", bg="#7B2020").pack(side=tk.LEFT, padx=(0, 4))
         _sep(self._playback_frame)
@@ -172,7 +179,7 @@ class TtsBar:
             bg=PALETTE["bg_mid"], fg=PALETTE["fg_dim"], font=FONT_LABEL,
         ).pack(side=tk.LEFT, padx=(4, 2))
 
-        speed_slider = tk.Scale(
+        tk.Scale(
             self._playback_frame,
             variable=self._speed_var,
             from_=0.5, to=2.0, resolution=0.1,
@@ -184,8 +191,7 @@ class TtsBar:
             highlightthickness=0, bd=0,
             sliderrelief="flat", showvalue=True,
             font=("Helvetica Neue", 7),
-        )
-        speed_slider.pack(side=tk.LEFT, padx=(0, 8))
-        
-        # Default to playback controls
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        # Default to showing playback controls
         self.show_playback_controls()
