@@ -13,7 +13,8 @@ pdf_editor
     │   ├── page_ops.py
     │   ├── redact.py
     │   ├── rotate_page.py
-    │   └── snapshot.py
+    │   ├── snapshot.py
+    │   └── toc_commands.py
     ├── core
     │   ├── document.py
     │   └── page.py
@@ -33,7 +34,8 @@ pdf_editor
     │   │   ├── __init__.py
     │   │   ├── merge_split_dialog.py
     │   │   ├── sidebar.py
-    │   │   └── thumbnail.py
+    │   │   ├── thumbnail.py
+    │   │   └── toc_panel.py
     │   ├── theme.py
     │   ├── tools
     │   │   ├── __init__.py
@@ -61,6 +63,7 @@ pdf_editor
     │   ├── page_service.py
     │   ├── redaction_service.py
     │   ├── text_service.py
+    │   ├── toc_service.py
     │   └── tts_service.py
     └── utils
         ├── file_utils.py

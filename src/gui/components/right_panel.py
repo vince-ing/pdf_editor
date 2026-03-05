@@ -1,14 +1,14 @@
 """
-RightPanel — tabbed inspector panel (Pages + Properties) on the right edge
-of the window.
+RightPanel — tabbed inspector panel on the right edge of the window.
 
 Contains:
-  • Pages tab  — navigation controls + ThumbnailPanel
+  • Pages tab  — sub-tabbed:
+      – Thumbnails  (ThumbnailPanel, drag-to-reorder, context menus)
+      – Bookmarks   (TocPanel, full outline editor)
   • Properties tab — context-sensitive tool options
 
-Extracted from ``InteractivePDFEditor._build_right_panel``,
-``_build_pages_tab``, ``_build_props_tab_placeholder``, and all
-``_props_*`` methods.
+The TOC sub-tab uses a nested ttk.Notebook inside the Pages outer tab so the
+canvas area is not squeezed by a third full-height panel.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from src.gui.theme import (
 )
 from src.gui.widgets.tooltip import Tooltip
 from src.gui.panels.thumbnail import ThumbnailPanel
+from src.gui.panels.toc_panel import TocPanel
 
 if TYPE_CHECKING:
     from src.core.document import PDFDocument
@@ -82,32 +83,28 @@ class RightPanel:
     get_current_page : callable → int
     thumbnail_callbacks : dict
         Forwarded to ``ThumbnailPanel``.
+    toc_callbacks : dict
+        Expected keys:
+          ``on_navigate``      callable(page_idx: int)
+          ``on_toc_changed``   callable(new_toc: list)
     tool_style_state : dict
-        Mutable dict that holds current tool style values so property-panel
-        widgets can read and write them without coupling to the editor class.
-        Expected keys listed in ``_STYLE_DEFAULTS``.
-    on_tool_style_change : callable(key: str, value) | None
-        Called when a property-panel widget mutates a style value, so the
-        editor can propagate the change.
+        Mutable dict of current tool style values.
+    on_tool_style_change : callable(key, value) | None
     """
 
     _STYLE_DEFAULTS: dict = {
-        # annotation
         "annot_stroke_rgb":    (92, 138, 110),
         "annot_fill_rgb":      None,
         "annot_width":         1.5,
-        # draw
         "draw_mode":           "pen",
         "draw_stroke_rgb":     (92, 138, 110),
         "draw_fill_rgb":       None,
         "draw_width":          2.0,
         "draw_opacity":        1.0,
-        # text
         "font_index":          0,
         "fontsize":            14,
         "text_color":          (0, 0, 0),
         "text_align":          0,
-        # redact
         "redact_fill_color":   (0.0, 0.0, 0.0),
         "redact_label":        "",
     }
@@ -120,10 +117,12 @@ class RightPanel:
         thumbnail_callbacks: dict,
         tool_style_state: dict,
         on_tool_style_change=None,
+        toc_callbacks: dict | None = None,
     ) -> None:
         self._get_doc          = get_doc
         self._get_current_page = get_current_page
         self._thumb_cbs        = thumbnail_callbacks
+        self._toc_cbs          = toc_callbacks or {}
         self._style            = tool_style_state
         self._on_style_change  = on_tool_style_change
 
@@ -133,6 +132,7 @@ class RightPanel:
         self._props_content_frame: tk.Frame | None = None
         self._page_label: tk.Label | None = None
         self.thumb: ThumbnailPanel | None = None
+        self.toc_panel: TocPanel | None = None
 
         # Per-panel widget refs (populated lazily by props builders)
         self._sb_font_var:  tk.StringVar | None = None
@@ -188,7 +188,7 @@ class RightPanel:
             padx=8, cursor="hand2", highlightthickness=0,
         ).pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Notebook
+        # Outer notebook: Pages | Properties
         nb = ttk.Notebook(panel, style="Right.TNotebook")
         nb.pack(fill=tk.BOTH, expand=True)
         self._nb = nb
@@ -204,24 +204,23 @@ class RightPanel:
 
         return panel
 
-    # ── Pages tab ─────────────────────────────────────────────────────────────
+    # ── Pages tab (inner notebook: Thumbnails | Bookmarks) ────────────────────
 
     def _build_pages_tab(self, parent: tk.Widget) -> None:
+        # ── Navigation row ────────────────────────────────────────────────────
         nav = tk.Frame(parent, bg=PALETTE["bg_panel"])
         nav.pack(fill=tk.X, padx=PAD_M, pady=(PAD_M, PAD_S))
 
         _mk_btn(nav, "◀", self._thumb_cbs.get("prev_page", lambda: None),
                 padx=PAD_S).pack(side=tk.LEFT)
 
-        # Page jump: shows "3 / 12" as a label; click to enter a page number
         self._page_jump_var   = tk.StringVar(value="—")
         self._total_pages     = 0
-        self._page_label_mode = "label"   # "label" | "entry"
+        self._page_label_mode = "label"
 
         self._page_nav_frame = tk.Frame(nav, bg=PALETTE["bg_panel"])
         self._page_nav_frame.pack(side=tk.LEFT, expand=True)
 
-        # Label shown in normal state
         self._page_label = tk.Label(
             self._page_nav_frame, text="—",
             bg=PALETTE["bg_panel"], fg=PALETTE["fg_primary"], font=FONT_UI,
@@ -230,7 +229,6 @@ class RightPanel:
         self._page_label.pack()
         Tooltip(self._page_label, "Click to jump to a page")
 
-        # Entry shown when editing
         self._page_entry = tk.Entry(
             self._page_nav_frame,
             textvariable=self._page_jump_var,
@@ -254,34 +252,52 @@ class RightPanel:
         tk.Frame(parent, bg=PALETTE["border"], height=1).pack(
             fill=tk.X, padx=PAD_M, pady=2)
 
+        # ── Inner notebook: Thumbnails | Bookmarks ────────────────────────────
+        inner_nb = ttk.Notebook(parent, style="Right.TNotebook")
+        inner_nb.pack(fill=tk.BOTH, expand=True)
+
+        thumb_tab = tk.Frame(inner_nb, bg=PALETTE["bg_panel"])
+        inner_nb.add(thumb_tab, text=" Thumbnails ")
+
+        toc_tab = tk.Frame(inner_nb, bg=PALETTE["bg_panel"])
+        inner_nb.add(toc_tab, text=" Bookmarks ")
+
+        # ── Thumbnail panel ───────────────────────────────────────────────────
         self.thumb = ThumbnailPanel(
-            parent=parent,
+            parent=thumb_tab,
             get_doc=self._get_doc,
             get_current_page=self._get_current_page,
-            on_page_click=self._thumb_cbs.get("on_page_click", lambda i: None),
+            # FIX: removed the "on_" prefix from the dictionary keys
+            on_page_click=self._thumb_cbs.get("page_click", lambda i: None),
             root=self._thumb_cbs["root"],
-            on_reorder=self._thumb_cbs.get("on_reorder"),
-            on_add_page=self._thumb_cbs.get("on_add_page"),
-            on_delete_page=self._thumb_cbs.get("on_delete_page"),
-            on_duplicate_page=self._thumb_cbs.get("on_duplicate_page"),
-            on_rotate_page=self._thumb_cbs.get("on_rotate_page"),
+            on_reorder=self._thumb_cbs.get("reorder"),
+            on_add_page=self._thumb_cbs.get("add_page"),
+            on_delete_page=self._thumb_cbs.get("delete_page"),
+            on_duplicate_page=self._thumb_cbs.get("duplicate_page"),
+            on_rotate_page=self._thumb_cbs.get("rotate_page"),
             get_image_thumbnail=self._thumb_cbs.get("get_image_thumbnail"),
         )
+
+        # ── TOC panel ─────────────────────────────────────────────────────────
+        self.toc_panel = TocPanel(
+            parent=toc_tab,
+            on_navigate=self._toc_cbs.get("on_navigate", lambda i: None),
+            on_toc_changed=self._toc_cbs.get("on_toc_changed", lambda t: None),
+            get_page_count=self._toc_cbs.get("get_page_count", lambda: 0),
+        )
+
+    # ── Page label / jump ─────────────────────────────────────────────────────
 
     def update_page_label(self, current: int, total: int) -> None:
         self._total_pages = total
         if self._page_label:
             self._page_label.config(text=f"{current} / {total}")
-        # If the entry is currently open, close it cleanly
         if self._page_label_mode == "entry":
             self._exit_jump_mode()
-
-    # ── page-jump helpers ──────────────────────────────────────────────────────
 
     def _enter_jump_mode(self) -> None:
         if not self._total_pages:
             return
-        # Show only the current page number in the entry for easy overwrite
         current_text = self._page_label.cget("text")
         try:
             current_num = current_text.split("/")[0].strip()
@@ -311,6 +327,13 @@ class RightPanel:
             return
         on_jump(page_num)
 
+    # ── TOC public helpers (called by main_window) ────────────────────────────
+
+    def refresh_toc(self, toc: list[list]) -> None:
+        """Repopulate the Bookmarks tab with *toc*."""
+        if self.toc_panel:
+            self.toc_panel.reset(toc)
+
     # ── Properties tab ────────────────────────────────────────────────────────
 
     def _build_props_placeholder(self, parent: tk.Widget) -> None:
@@ -329,10 +352,8 @@ class RightPanel:
         ).place(relx=0.5, rely=0.4, anchor="center")
 
     def render_tool_props(self, tool_name: str) -> None:
-        """Swap the Properties tab content for *tool_name*."""
         for w in self._props_content_frame.winfo_children():
             w.destroy()
-
         builders = {
             "text":         self._props_text,
             "highlight":    self._props_annot,
@@ -353,7 +374,7 @@ class RightPanel:
         if self._nb:
             self._nb.select(1)
 
-    # ── visibility toggle ──────────────────────────────────────────────────────
+    # ── visibility toggle ─────────────────────────────────────────────────────
 
     def toggle_visibility(self) -> None:
         if self._visible:
@@ -363,7 +384,7 @@ class RightPanel:
             self.frame.pack(side=tk.RIGHT, fill=tk.Y)
             self._visible = True
 
-    # ── section helpers ────────────────────────────────────────────────────────
+    # ── section helpers ───────────────────────────────────────────────────────
 
     def _section(self, parent: tk.Widget, title: str) -> None:
         tk.Label(
@@ -386,7 +407,6 @@ class RightPanel:
 
     def _props_text(self, parent: tk.Widget) -> None:
         self._section(parent, "Font")
-
         row = tk.Frame(parent, bg=PALETTE["bg_panel"])
         row.pack(fill=tk.X, padx=PAD_L, pady=2)
         _mk_label(row, "Family").pack(side=tk.LEFT)
@@ -680,14 +700,13 @@ class RightPanel:
             font=FONT_LABEL, justify="left",
         ).pack(padx=PAD_L, anchor="w")
 
-    # ── widget change callbacks (mutate style dict + notify) ──────────────────
+    # ── widget change callbacks ───────────────────────────────────────────────
 
     def _notify(self, key: str, value) -> None:
         self._style[key] = value
         if self._on_style_change:
             self._on_style_change(key, value)
 
-    # text
     def _on_font_change(self) -> None:
         idx = PDF_FONT_LABELS.index(self._sb_font_var.get())
         self._notify("font_index", idx)
@@ -720,7 +739,6 @@ class RightPanel:
             if self._text_color_swatch:
                 self._text_color_swatch.config(bg=_rgb255_to_hex(rgb))
 
-    # annotation
     def _pick_annot_stroke(self) -> None:
         result = colorchooser.askcolor(
             color=_rgb255_to_hex(self._style.get("annot_stroke_rgb", (92,138,110))),
@@ -761,7 +779,6 @@ class RightPanel:
         except (ValueError, tk.TclError):
             pass
 
-    # draw
     def _on_draw_mode(self, mode: str) -> None:
         self._notify("draw_mode", mode)
         self._refresh_draw_mode_btns()
@@ -821,7 +838,6 @@ class RightPanel:
         except (ValueError, tk.TclError):
             pass
 
-    # redact
     def _pick_redact_fill(self) -> None:
         r, g, b = [int(v * 255) for v in self._style.get(
             "redact_fill_color", (0.0, 0.0, 0.0))]
@@ -837,7 +853,6 @@ class RightPanel:
     def _on_redact_label_change(self) -> None:
         self._notify("redact_label", self._redact_label_var.get())
 
-    # These three delegate up to the orchestrator via the style-change callback
     def _cb_redact_find(self) -> None:
         if self._on_style_change:
             self._on_style_change("redact.find", {
@@ -856,8 +871,6 @@ class RightPanel:
             self._on_style_change("redact.cancel", None)
         if self._redact_confirm_frame:
             self._redact_confirm_frame.pack_forget()
-
-    # ── redact confirm-panel public helpers (called by orchestrator) ──────────
 
     def show_redact_confirm(self, hit_count: int) -> None:
         if self._redact_hit_label:

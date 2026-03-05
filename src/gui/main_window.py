@@ -70,6 +70,8 @@ from src.utils.recent_files import RecentFiles
 from src.services.tts_service import TtsService
 from src.gui.widgets.tts_bar import TtsBar
 from src.utils.selection_compositor import composite_selection
+from src.services.toc_service        import TocService           # NEW
+from src.commands.toc_commands       import ModifyTocCommand 
 
 try:
     from src.services.merge_split_service  import MergeSplitService
@@ -100,6 +102,7 @@ class InteractivePDFEditor:
         self.annotation_service       = AnnotationService()
         self.redaction_service        = RedactionService()
         self.image_conversion_service = ImageConversionService()
+        self.toc_service = TocService()
         if _HAS_MERGE_SPLIT:
             self.merge_split_service = MergeSplitService()
         self.tts_service = TtsService(
@@ -272,7 +275,6 @@ class InteractivePDFEditor:
         self._icon_toolbar = IconToolbar(
             self._body,
             on_tool_select=self._select_tool,
-            # page_action_callbacks kept for API compat but ignored by the new toolbar
             page_action_callbacks={
                 "rotate_left":  lambda: self._rotate(-90),
                 "rotate_right": lambda: self._rotate(90),
@@ -288,20 +290,24 @@ class InteractivePDFEditor:
             get_doc=lambda: self.doc,
             get_current_page=lambda: self.current_page_idx,
             thumbnail_callbacks={
-                "root":               self.root,
-                "prev_page":          self._prev_page,
-                "next_page":          self._next_page,
-                "on_page_click":      self._thumb_page_click,
-                "on_reorder":         self._thumb_reorder,
-                "on_add_page":        self._thumb_add_page,
-                "on_delete_page":     self._thumb_delete_page,
-                "on_duplicate_page":  self._thumb_duplicate_page,
-                "on_rotate_page":     self._thumb_rotate_page,
-                "get_image_thumbnail":self._get_image_thumbnail,
-                "on_page_jump":       self._on_page_jump,
+                "root":           self.root,             # ADDED: Passed the main Tk root
+                "page_click":     self._thumb_page_click,
+                "reorder":        self._thumb_reorder,
+                "add_page":       self._thumb_add_page,
+                "delete_page":    self._thumb_delete_page,
+                "duplicate_page": self._thumb_duplicate_page,
+                "rotate_page":    self._thumb_rotate_page,
+                "prev_page":      self._prev_page,
+                "next_page":      self._next_page,
+                "on_page_jump":   self._on_page_jump,
             },
             tool_style_state=self._style,
             on_tool_style_change=self._on_tool_style_change,
+            toc_callbacks={
+                "on_navigate":    self._toc_navigate,
+                "on_toc_changed": self._toc_changed,
+                "get_page_count": lambda: self.doc.page_count if self.doc else 0,
+            },
         )
 
         # 6. Canvas area (centre, expands)
@@ -656,6 +662,7 @@ class InteractivePDFEditor:
         self._update_title()
         self._render()
         self._right_panel.thumb.reset()
+        self._refresh_toc() 
         self.root.after(80, self._zoom_fit_width)
 
     def _open_recent(self, path: str) -> None:
@@ -712,6 +719,48 @@ class InteractivePDFEditor:
         except Exception as ex:
             messagebox.showerror("Save Error", str(ex))
             return False
+
+    def _refresh_toc(self) -> None:
+        """Re-read the document outline and push it to the TOC panel."""
+        if not self.doc:
+            self._right_panel.refresh_toc([])
+            return
+        toc = self.toc_service.get_toc(self.doc)
+        self._right_panel.refresh_toc(toc)
+
+
+    def _toc_navigate(self, page_idx: int) -> None:
+        """Called by TocPanel when the user clicks a bookmark entry."""
+        # FIX: Added a guard to prevent redundant navigation rendering
+        if not self.doc or page_idx == self.current_page_idx:
+            return
+        if 0 <= page_idx < self.doc.page_count:
+            self._navigate_to(page_idx)
+
+    def _toc_changed(self, new_toc: list) -> None:
+        """
+        Called by TocPanel after every user edit (add / delete / rename / move).
+        Wraps the change in an undoable command and marks the document dirty.
+        """
+        if not self.doc:
+            return
+        cmd = ModifyTocCommand(self.doc, self.toc_service, new_toc)
+        try:
+            cmd.execute()
+            self._push_history(cmd)
+            self._mark_dirty()
+            
+            # FIX: _push_history clears the page cache. We must immediately
+            # re-render the current page so it doesn't turn blank.
+            if self._continuous_mode:
+                self._render_cont_page_refresh(self.current_page_idx)
+            else:
+                self._render()
+                
+            self._flash_status("Bookmarks updated", duration_ms=2000)
+        except Exception as ex:
+            messagebox.showerror("Bookmark Error", str(ex))
+            self._refresh_toc()
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Staging mode (Images → PDF)
@@ -1006,6 +1055,11 @@ class InteractivePDFEditor:
             self._update_cont_offsets(idx)
             self._right_panel.thumb.refresh_all_borders()
             self._right_panel.thumb.scroll_to_active()
+            
+            # Force the target page to render immediately
+            # Prevents jumping to unrendered gray rectangles.
+            self._render_cont_page_refresh(idx)
+            
             self._scroll_to_current_cont()
             page = self.doc.get_page(idx)
             self._right_panel.update_page_label(idx + 1, self.doc.page_count)

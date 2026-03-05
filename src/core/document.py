@@ -43,8 +43,6 @@ class PDFDocument:
             return False
         if hasattr(self._doc, "can_save_incrementally"):
             return self._doc.can_save_incrementally()
-        # Fallback for PyMuPDF builds that lack the method: allow it and let
-        # fitz raise if the save actually fails — the caller catches that.
         return True
 
     def save(
@@ -58,14 +56,11 @@ class PDFDocument:
 
         When *incremental* is True the caller is requesting an in-place update,
         but we honour that only when ``can_save_incrementally()`` agrees it is
-        safe. If the document has been restructured (pages added/deleted/
-        reordered) we automatically fall back to a full garbage-collected save
-        so the file is never left in a corrupt state.
+        safe.
         """
         if incremental and output_path == self.path and self.can_save_incrementally():
             self._doc.save(output_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
         else:
-            # Full save: garbage=4 removes dead objects, deflate compresses streams.
             self._doc.save(output_path, deflate=deflate, garbage=4)
 
     def close(self) -> None:
@@ -104,4 +99,22 @@ class PDFDocument:
         return self._doc.metadata
 
     def get_toc(self) -> list[list]:
+        """
+        Return the document's table of contents as a list of
+        [level, title, page_number] entries (1-based page numbers).
+
+        Returns an empty list if the document has no outline.
+        """
         return self._doc.get_toc()
+
+    def set_toc(self, toc: list[list]) -> None:
+        """
+        Replace the document's table of contents.
+
+        Parameters
+        ----------
+        toc : list of [level, title, page_number]
+            PyMuPDF-compatible TOC list.  Level is 1-based (1 = top level).
+            Page numbers are 1-based.  Pass an empty list to clear the TOC.
+        """
+        self._doc.set_toc(toc)
