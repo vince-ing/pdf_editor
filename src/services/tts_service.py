@@ -8,17 +8,22 @@ Architecture: producer / consumer pipeline
                        bounded to 3 items so the generator
                        doesn't race too far ahead of playback
 
-The generator splits the text into sentences, calls kokoro.create() for
-each one, and pushes the resulting audio array into the queue.  The player
-pulls arrays out of the queue one at a time and streams them through a
-single persistent OutputStream using the speed-resampling chunk loop from
-before.  Because kokoro typically generates each sentence 3-5× faster than
-realtime, playback starts after the very first sentence is ready (~0.3 s
-for a short sentence) and subsequent sentences are waiting in the queue
-before the current one finishes.
+Text pipeline before synthesis:
+  raw PDF text  →  _clean_text()  →  _split_text()  →  kokoro chunks
 
-Pause / stop events are checked in the player's inner chunk loop (≤85 ms
-latency) and in the generator's sentence loop (stops generation immediately).
+_clean_text normalises ligatures, curly quotes, hyphens, URLs, emails,
+bullet markers, common abbreviations, all-caps headings, and stray symbols
+so kokoro always receives clean, natural prose.
+
+_split_text breaks the cleaned text into word-boundary chunks of ~40 words,
+preferring sentence then clause punctuation as split points, with a hard cap
+of 60 words and a minimum of 8 (short fragments are merged into the previous
+chunk).
+
+Speed is passed to kokoro.create() at generation time — kokoro's own speed
+control is pitch-preserving (neural, not resampling), so voices sound natural
+across the full 0.25–4.0× range.  Speed changes snapshot at chunk boundaries
+(~4–8 s granularity), which is imperceptible in practice.
 
 Install: pip install kokoro-onnx soundfile sounddevice
 """
@@ -179,7 +184,152 @@ class TtsService:
         self._kokoro = Kokoro(_MODEL_PATH, _VOICES_PATH)
         return self._kokoro
 
-    # ── Generator thread ──────────────────────────────────────────────────────
+    # ── Text cleaning ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        """
+        Sanitise PDF-extracted text so kokoro reads it naturally.
+
+        Problems this addresses, in order:
+          - Ligatures and Unicode oddities (ﬁ → fi, curly quotes → straight)
+          - Hyphenated line-breaks from PDF reflow (re-\nfuse → refuse)
+          - URLs, file paths, and email addresses (useless when read aloud)
+          - Decimal numbers expanded to spoken form (23.5 → "23 point 5")
+          - Unit symbols (°, %, ½ etc.) expanded before anything else touches them
+          - Bullet / list markers stripped
+          - Common symbols expanded (&, =, #, +, §, ©, etc.)
+          - Common abbreviations expanded (Fig., Dr., e.g., etc.)
+          - All-caps words softened to title-case (INTRODUCTION → Introduction)
+          - Excessive whitespace collapsed
+        """
+        # ── 1. Unicode normalisation ──────────────────────────────────────────
+        # Ligatures
+        for lig, expanded in [
+            ("\ufb00", "ff"), ("\ufb01", "fi"), ("\ufb02", "fl"),
+            ("\ufb03", "ffi"), ("\ufb04", "ffl"), ("\ufb05", "st"),
+            ("\u00e6", "ae"), ("\u0153", "oe"),
+        ]:
+            text = text.replace(lig, expanded)
+
+        # Curly / typographic punctuation → ASCII equivalents
+        text = text.replace("\u2018", "'").replace("\u2019", "'")   # ' '
+        text = text.replace("\u201c", '"').replace("\u201d", '"')   # " "
+        text = text.replace("\u2013", "-").replace("\u2014", ", ")  # – —
+        text = text.replace("\u2026", "...")                         # …
+        text = text.replace("\u00b7", "")                            # middle dot
+        text = text.replace("\u00ad", "")                            # soft hyphen
+
+        # ── 2. Hyphenated line-breaks (PDFs wrap mid-word with a hyphen) ──────
+        # "re-\nfuse" → "refuse",  "self-\naware" → "self-aware" is ambiguous
+        # so only collapse when the hyphen is immediately before a newline.
+        text = re.sub(r'-\n(\S)', r'\1', text)
+
+        # ── 3. Remaining newlines → space ─────────────────────────────────────
+        text = text.replace("\n", " ").replace("\r", " ")
+
+        # ── 4. URLs — remove entirely ─────────────────────────────────────────
+        text = re.sub(r'https?://\S+', '', text)
+        text = re.sub(r'www\.\S+', '', text)
+        # Also strip bare file paths like /usr/local/bin/foo or C:\Windows\...
+        text = re.sub(r'(?<!\w)[A-Za-z]:\\[\\\S]+', '', text)
+        text = re.sub(r'(?<!\w)/[\w./\-]+', '', text)
+
+        # ── 5. Email addresses ────────────────────────────────────────────────
+        text = re.sub(r'\S+@\S+\.\S+', '', text)
+
+        # ── 6. Decimal numbers → spoken form ─────────────────────────────────
+        # Must run before unit-symbol expansion and the page-number stripper so
+        # "23.5°" becomes "23 point 5 degrees" and the digits are never seen as
+        # isolated page numbers.
+        # Handles: 23.5 / 0.75 / 3.14159 / -1.5 / +2.0
+        # Does NOT touch version strings like "3.2.1" (two dots) or plain
+        # integers — only a single decimal point between digit groups.
+        text = re.sub(
+            r'(-?\+?\d+)\.(\d+)(?!\.\d)',   # one dot only, not "3.2.1"
+            lambda m: m.group(1) + " point " + m.group(2),
+            text,
+        )
+
+        # ── 7. Unit symbols — expand BEFORE the page-number stripper ─────────
+        # "23 point 5°" → "23 point 5 degrees"
+        # "72°F" → "72 degrees Fahrenheit"
+        text = re.sub(
+            r'(\d)\s*°\s*([CF])\b',
+            lambda m: m.group(1) + " degrees " + ("Celsius" if m.group(2) == "C" else "Fahrenheit"),
+            text,
+        )
+        text = re.sub(r'(\d)\s*°', r'\1 degrees ', text)
+        text = text.replace("%", " percent ")
+
+        # ── 8. Bullet / list markers ──────────────────────────────────────────
+        # Symbolic bullets — safe to strip anywhere
+        text = re.sub(r'(?:^|\s)[•·▪▸►◦‣⁃]\s*', ' ', text)
+        # Alphanumeric list markers (1. / a.) — only strip when they follow
+        # start-of-string or sentence-ending punctuation so that mid-sentence
+        # constructs like "(C,A)" or "(x,y)" are never touched.
+        text = re.sub(r'(?:(?:^|(?<=[.!?]))\s*)(?:\d+\.|[a-zA-Z]\))\s+', ' ', text)
+
+        # ── 9. Other symbols ──────────────────────────────────────────────────
+        text = text.replace("©", "").replace("®", "").replace("™", "")
+        text = text.replace("§", "section ").replace("¶", "")
+        text = text.replace("+", " plus ")
+        text = text.replace("=", " equals ")
+        text = text.replace("&", " and ")
+        text = text.replace("@", " at ")
+        text = text.replace("#", " number ")
+        text = text.replace("½", "one half").replace("¼", "one quarter")
+        text = text.replace("¾", "three quarters")
+
+        # ── 10. Common abbreviations ──────────────────────────────────────────
+        _ABBREV = [
+            (r'\bFig\.',     "Figure"),
+            (r'\bfig\.',     "figure"),
+            (r'\bEq\.',      "Equation"),
+            (r'\beq\.',      "equation"),
+            (r'\bCh\.',      "Chapter"),
+            (r'\bSec\.',     "Section"),
+            (r'\bvol\.',     "volume"),
+            (r'\bVol\.',     "Volume"),
+            (r'\bpp\.',      "pages"),
+            (r'\bp\.',       "page"),
+            (r'\bno\.',      "number"),
+            (r'\bNo\.',      "Number"),
+            (r'\bvs\.',      "versus"),
+            (r'\betc\.',     "et cetera"),
+            (r'\be\.g\.',    "for example"),
+            (r'\bi\.e\.',    "that is"),
+            (r'\bapprox\.',  "approximately"),
+            (r'\bDr\.',      "Doctor"),
+            (r'\bProf\.',    "Professor"),
+            (r'\bMr\.',      "Mister"),
+            (r'\bMrs\.',     "Misses"),
+            (r'\bMs\.',      "Ms"),
+            (r'\bSt\.',      "Saint"),
+            (r'\bAve\.',     "Avenue"),
+            (r'\bBlvd\.',    "Boulevard"),
+            (r'\bDept\.',    "Department"),
+            (r'\bCorp\.',    "Corporation"),
+            (r'\bInc\.',     "Incorporated"),
+            (r'\bLtd\.',     "Limited"),
+            (r'\bco\.',      "company"),
+        ]
+        for pattern, replacement in _ABBREV:
+            text = re.sub(pattern, replacement, text)
+
+        # ── 11. All-caps words → title-case ──────────────────────────────────
+        # Short acronyms (CIA, PDF, TTS) are fine — kokoro reads them letter by
+        # letter already.  Long all-caps words (INTRODUCTION, CONCLUSION) sound
+        # robotic; title-casing them reads more naturally.
+        def _maybe_titlecase(m: re.Match) -> str:
+            w = m.group(0)
+            return w.title() if len(w) > 4 else w
+        text = re.sub(r'\b[A-Z]{5,}\b', _maybe_titlecase, text)
+
+        # ── 12. Collapse whitespace ───────────────────────────────────────────
+        text = re.sub(r'\s{2,}', ' ', text).strip()
+
+        return text
 
     # ── Text splitting ────────────────────────────────────────────────────────
 
@@ -270,7 +420,7 @@ class TtsService:
             import numpy as np
             kokoro = self._load_kokoro()
 
-            sentences = self._split_text(text)
+            sentences = self._split_text(self._clean_text(text))
             if not sentences:
                 sentences = [text]
 
@@ -282,10 +432,15 @@ class TtsService:
                     print("[TTS-gen] Stopped early")
                     return
 
+                # Snapshot speed at generation time — kokoro's own speed
+                # parameter is pitch-preserving (neural, not resampling).
+                # Speed changes take effect at the next chunk boundary.
+                speed = max(0.25, min(4.0, float(self.speed)))
+
                 samples, sr = kokoro.create(
                     sentence,
                     voice=self.voice,
-                    speed=1.0,      # speed applied at playback time via resampling
+                    speed=speed,
                     lang="en-us",
                 )
 
@@ -327,8 +482,8 @@ class TtsService:
     def _player(self, q: queue.Queue) -> None:
         """
         Pull (samples, sample_rate) pairs from the queue and stream them
-        through a single persistent OutputStream.  Speed resampling is
-        applied per-chunk so slider changes take effect within ~85 ms.
+        through a single persistent OutputStream.  Speed is handled by kokoro
+        at generation time so the player just writes raw samples at a fixed rate.
         """
         import sounddevice as sd
 
@@ -392,22 +547,25 @@ class TtsService:
     def _stream_samples(self, stream, samples) -> bool:
         """
         Write *samples* to the already-open *stream* in _CHUNK_FRAMES-sized
-        ticks, applying live speed resampling and honouring pause/stop.
+        ticks, honouring pause and stop events.
+
+        Speed is now handled by kokoro at generation time (pitch-preserving),
+        so the player just writes raw samples at a fixed rate.
 
         Returns True if the sentence played to completion, False if interrupted.
         """
         import numpy as np
 
         total = len(samples)
-        pos_f: float = 0.0
+        pos   = 0
 
-        while pos_f < total:
+        while pos < total:
             # stop
             if self._stop_evt.is_set():
                 stream.abort()
                 return False
 
-            # pause — cuts audio immediately, waits for resume
+            # pause — cuts audio immediately, blocks until resumed or stopped
             if not self._pause_evt.is_set():
                 stream.stop()
                 self._pause_evt.wait()
@@ -415,26 +573,11 @@ class TtsService:
                     return False
                 stream.start()
 
-            # Speed-aware source window
-            speed      = max(0.1, float(self.speed))
-            src_frames = int(_CHUNK_FRAMES * speed)
-            src_start  = int(pos_f)
-            src_end    = min(src_start + src_frames, total)
-            src_chunk  = samples[src_start:src_end]
-
-            if len(src_chunk) == 0:
+            chunk = samples[pos: pos + _CHUNK_FRAMES]
+            if len(chunk) == 0:
                 break
 
-            # Linear interpolation to stretch/compress to exactly _CHUNK_FRAMES
-            src_len = len(src_chunk)
-            if src_len != _CHUNK_FRAMES:
-                out_idx   = np.linspace(0, src_len - 1, _CHUNK_FRAMES)
-                lo        = np.floor(out_idx).astype(np.int32)
-                hi        = np.minimum(lo + 1, src_len - 1)
-                frac      = (out_idx - lo)[:, np.newaxis]
-                src_chunk = src_chunk[lo] * (1.0 - frac) + src_chunk[hi] * frac
-
-            stream.write(src_chunk.astype(np.float32))
-            pos_f += src_frames
+            stream.write(chunk.astype(np.float32))
+            pos += len(chunk)
 
         return True

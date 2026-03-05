@@ -183,8 +183,8 @@ class TtsBar:
         tk.Scale(
             self._playback_frame,
             variable=self._speed_var,
-            from_=0.5, to=2.0, resolution=0.1,
-            orient=tk.HORIZONTAL, length=100,
+            from_=0.25, to=4.0, resolution=0.25,
+            orient=tk.HORIZONTAL, length=120,
             command=lambda v: self._on_speed_change(float(v)),
             bg=PALETTE["bg_mid"], fg=PALETTE["fg_primary"],
             troughcolor=PALETTE["bg_hover"],
