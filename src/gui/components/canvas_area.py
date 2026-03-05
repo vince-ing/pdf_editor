@@ -188,7 +188,7 @@ class CanvasArea:
         self.canvas = tk.Canvas(
             parent, bg=PALETTE["canvas_bg"],
             xscrollcommand=self.h_scroll.set,
-            yscrollcommand=self.v_scroll.set,
+            yscrollcommand=self._on_yscroll,
             highlightthickness=0,
             cursor="crosshair",
         )
@@ -209,6 +209,15 @@ class CanvasArea:
         self.canvas.bind("<Control-Button-5>",   cc.get("on_ctrl_scroll",lambda e: None))
         self.canvas.bind("<Motion>",             cc.get("on_motion",     lambda e: None))
         self.canvas.bind("<Configure>",          cc.get("on_configure",  lambda e: None))
+
+    def _on_yscroll(self, *args) -> None:
+        """Intercepts every canvas vertical scroll — from mousewheel, scrollbar
+        drag, yview_moveto, or trackpad — and fires the render callback so the
+        continuous-mode page loader always knows the view has moved."""
+        self.v_scroll.set(*args)
+        on_scroll = self._cc.get("on_scroll_changed")
+        if on_scroll:
+            on_scroll()
 
     # ── search-bar public API ─────────────────────────────────────────────────
 

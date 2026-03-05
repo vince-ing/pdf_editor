@@ -315,13 +315,14 @@ class InteractivePDFEditor:
         self._canvas_area = CanvasArea(
             self._body,
             canvas_callbacks={
-                "on_click":      self._on_canvas_click,
-                "on_drag":       self._on_canvas_drag,
-                "on_release":    self._on_canvas_release,
-                "on_mousewheel": self._on_mousewheel,
-                "on_ctrl_scroll":self._on_ctrl_scroll,
-                "on_motion":     self._on_mouse_motion,
-                "on_configure":  self._on_canvas_configure,
+                "on_click":        self._on_canvas_click,
+                "on_drag":         self._on_canvas_drag,
+                "on_release":      self._on_canvas_release,
+                "on_mousewheel":   self._on_mousewheel,
+                "on_ctrl_scroll":  self._on_ctrl_scroll,
+                "on_motion":       self._on_mouse_motion,
+                "on_configure":    self._on_canvas_configure,
+                "on_scroll_changed": self._on_canvas_scrolled,
             },
             search_bar_callbacks={
                 "on_find":       self._search_bar_find,
@@ -964,7 +965,14 @@ class InteractivePDFEditor:
 
     def _on_tts_start(self) -> None:
         """Called from TTS worker thread when generation begins."""
-        self.root.after(0, self._tts_bar.show_loading)
+        def _start_ui():
+            self._tts_bar.show_loading()
+            # Re-render visible pages since showing the TTS bar may resize the canvas
+            if self._continuous_mode and self.doc:
+                self.root.after(50, lambda: self._schedule_cont_render(self.current_page_idx))
+            elif self.doc:
+                self.root.after(50, self._render)
+        self.root.after(0, _start_ui)
 
     def _on_tts_progress(self, done: int, total: int, pct: int) -> None:
         """Called from TTS generator thread after each sentence is generated."""
@@ -1107,6 +1115,8 @@ class InteractivePDFEditor:
             self._right_panel.update_page_label(idx + 1, self.doc.page_count)
             self._status_bar.set_page_size(
                 f"{int(page.width)} × {int(page.height)} pt")
+            # Schedule surrounding pages to load after the scroll settles
+            self.root.after(100, lambda: self._schedule_cont_render(idx))
         else:
             self._right_panel.thumb.refresh_all_borders()
             self._render()
@@ -1296,16 +1306,17 @@ class InteractivePDFEditor:
         )
         self._set_zoom(new_scale, debounce=False)
 
-    def _set_zoom(self, s: float, debounce: bool = False) -> None:
+    def _set_zoom(self, s: float, debounce: bool = False, preserve_scroll: bool = False) -> None:
         self._target_scale = round(s, 3)
         self._update_zoom_label(self._target_scale)
+        self._zoom_preserve_scroll = preserve_scroll
         
         if hasattr(self, "_zoom_after_id") and self._zoom_after_id:
             self.root.after_cancel(self._zoom_after_id)
             
         if debounce:
-            # Wait 200ms after trackpad scrolling stops before rendering
-            self._zoom_after_id = self.root.after(200, self._apply_zoom)
+            # Wait 250ms after trackpad scrolling stops before rendering
+            self._zoom_after_id = self.root.after(250, self._apply_zoom)
         else:
             self._apply_zoom()
 
@@ -1314,10 +1325,11 @@ class InteractivePDFEditor:
         self.scale_factor = getattr(self, "_target_scale", self.scale_factor)
         self._cont_invalidate_cache()
         self._render()
-        if self._continuous_mode:
+        if self._continuous_mode and not getattr(self, "_zoom_preserve_scroll", False):
             # Force Tkinter to process the new boundaries before jumping
             self.canvas.update_idletasks()
             self._scroll_to_current_cont()
+        self._zoom_preserve_scroll = False
 
     def _update_zoom_label(self, scale: float) -> None:
         pct = int(scale / RENDER_DPI * 100)
@@ -1577,7 +1589,20 @@ class InteractivePDFEditor:
         self._right_panel.thumb.refresh_all_borders()
         self._right_panel.thumb.scroll_to_active()
 
-        # 3. Fire up the lazy background loading for only the visible slice
+        # 3. Immediately render the current page and its immediate neighbors
+        #    synchronously so the user never sees a blank screen after navigation.
+        IMMEDIATE = 1  # pages above/below to render right now
+        immediate_range = range(
+            max(0, self.current_page_idx - IMMEDIATE),
+            min(n, self.current_page_idx + IMMEDIATE + 1)
+        )
+        for i in immediate_range:
+            p  = doc.get_page(i)
+            iw = int(p.width  * self.scale_factor)
+            ih = int(p.height * self.scale_factor)
+            self._render_cont_page(i, iw, ih, cw)
+
+        # 4. Fire up the lazy background loading for the rest of the visible slice
         self._prune_cont_cache(self.current_page_idx)
         self._schedule_cont_render(self.current_page_idx)
 
@@ -1660,6 +1685,22 @@ class InteractivePDFEditor:
         else:
             for k in [k for k in self._cont_images if k[0] == page_idx]:
                 del self._cont_images[k]
+
+    def _on_cont_scroll_update_indicator(self) -> None:
+        """Cheap per-scroll-event call: only updates the page indicator, no rendering."""
+        if not self.doc or not self._continuous_mode:
+            return
+        top    = self.canvas.canvasy(0)
+        bottom = self.canvas.canvasy(self.canvas.winfo_height())
+        mid    = (top + bottom) / 2
+        idx    = self._cont_page_at_y(mid)
+        if idx != self.current_page_idx:
+            self.current_page_idx = idx
+            self._update_cont_offsets(idx)
+            page = self.doc.get_page(idx)
+            self._right_panel.update_page_label(idx + 1, self.doc.page_count)
+            self._status_bar.set_page_size(f"{int(page.width)} × {int(page.height)} pt")
+            self._right_panel.thumb.refresh_all_borders()
 
     def _on_cont_scroll(self) -> None:
         self._scroll_after_id = None
@@ -1782,7 +1823,15 @@ class InteractivePDFEditor:
         """Wait 150ms after the window size changes before doing a heavy redraw."""
         if hasattr(self, "_config_after_id") and self._config_after_id:
             self.root.after_cancel(self._config_after_id)
-        self._config_after_id = self.root.after(150, self._render)
+        self._config_after_id = self.root.after(150, self._on_canvas_configured)
+
+    def _on_canvas_configured(self) -> None:
+        """Rebuild layout after resize; always re-schedules page renders in cont mode."""
+        self._config_after_id = None
+        self._render()
+        # After _render_continuous builds the skeleton, ensure pages are re-loaded
+        if self._continuous_mode and self.doc:
+            self.root.after(20, lambda: self._schedule_cont_render(self.current_page_idx))
 
     def _canvas_to_pdf(self, cx: float, cy: float) -> tuple[float, float]:
         if self._continuous_mode:
@@ -1837,16 +1886,28 @@ class InteractivePDFEditor:
             self.canvas.yview_scroll(1, "units")
         else:
             self.canvas.yview_scroll(-1 * (event.delta // 120), "units")
-        if self._continuous_mode:
-            if self._scroll_after_id:
-                self.root.after_cancel(self._scroll_after_id)
-            self._scroll_after_id = self.root.after(80, self._on_cont_scroll)
+        # _on_canvas_scrolled is triggered automatically via yscrollcommand
+
+    def _on_canvas_scrolled(self) -> None:
+        """Called by CanvasArea._on_yscroll on EVERY scroll position change —
+        mousewheel, scrollbar drag, trackpad, or programmatic yview_moveto.
+        Debounces and fires the continuous-mode page renderer."""
+        if not self._continuous_mode:
+            return
+        if self._scroll_after_id:
+            self.root.after_cancel(self._scroll_after_id)
+        # Update page indicator immediately (cheap, no rendering)
+        self._on_cont_scroll_update_indicator()
+        # Schedule the actual page render shortly after scrolling settles
+        self._scroll_after_id = self.root.after(50, self._on_cont_scroll)
 
     def _on_ctrl_scroll(self, event: tk.Event) -> None:
         if event.num == 4 or (hasattr(event, "delta") and event.delta > 0):
-            self._zoom_in()
+            target = getattr(self, "_target_scale", self.scale_factor)
+            self._set_zoom(min(MAX_SCALE, target + SCALE_STEP), debounce=True, preserve_scroll=True)
         else:
-            self._zoom_out()
+            target = getattr(self, "_target_scale", self.scale_factor)
+            self._set_zoom(max(MIN_SCALE, target - SCALE_STEP), debounce=True, preserve_scroll=True)
 
     def _on_mouse_motion(self, event: tk.Event) -> None:
         if not self.doc:
