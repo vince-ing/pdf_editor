@@ -181,9 +181,86 @@ class TtsService:
 
     # ── Generator thread ──────────────────────────────────────────────────────
 
+    # ── Text splitting ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _split_text(text: str,
+                    target_words: int = 40,
+                    max_words:    int = 60,
+                    min_words:    int = 8) -> list[str]:
+        """
+        Split *text* into chunks that are safe and natural for kokoro.
+
+        Rules (in priority order):
+          1. Never split inside a word — only ever at whitespace boundaries.
+          2. Prefer splitting after sentence-ending punctuation (. ! ?).
+          3. Fall back to clause punctuation (, ; : — –) when no sentence
+             boundary exists within the target window.
+          4. Fall back to any word boundary when there is no punctuation at all
+             (handles raw OCR dumps, bullet lists, un-punctuated text, etc.).
+          5. Merge any trailing fragment shorter than *min_words* into the
+             previous chunk so kokoro is never fed a single word or two.
+
+        target_words : ideal chunk size in words
+        max_words    : hard ceiling — force a word-boundary split here
+        min_words    : minimum size; shorter fragments are merged backward
+        """
+        words = text.split()
+        if not words:
+            return []
+
+        sentence_end = re.compile(r'[.!?]["\'\u201d]?$')
+        clause_break = re.compile(r'[,;:\u2014\u2013]["\'\u201d]?$')
+
+        chunks: list[str] = []
+        start = 0
+
+        while start < len(words):
+            ideal_end = min(start + target_words, len(words))
+            hard_end  = min(start + max_words,    len(words))
+
+            # Remaining words fit within the hard ceiling — take them all.
+            if hard_end == len(words):
+                chunks.append(" ".join(words[start:]))
+                break
+
+            split_at = None
+
+            # 1. Sentence boundary — scan backwards from hard_end to ideal_end.
+            for i in range(hard_end - 1, ideal_end - 1, -1):
+                if sentence_end.search(words[i]):
+                    split_at = i + 1
+                    break
+
+            # 2. Clause boundary in the same window.
+            if split_at is None:
+                for i in range(hard_end - 1, ideal_end - 1, -1):
+                    if clause_break.search(words[i]):
+                        split_at = i + 1
+                        break
+
+            # 3. No punctuation — cut at the ideal word boundary.
+            if split_at is None:
+                split_at = ideal_end
+
+            chunks.append(" ".join(words[start:split_at]))
+            start = split_at
+
+        # Merge fragments that are too short into the previous chunk.
+        merged: list[str] = []
+        for chunk in chunks:
+            if merged and len(chunk.split()) < min_words:
+                merged[-1] = merged[-1] + " " + chunk
+            else:
+                merged.append(chunk)
+
+        return [c.strip() for c in merged if c.strip()]
+
+    # ── Generator thread ──────────────────────────────────────────────────────
+
     def _generator(self, text: str, q: queue.Queue) -> None:
         """
-        Split text into sentences, generate audio for each, push into queue.
+        Split text into chunks, generate audio for each, push into queue.
         Always pushes _SENTINEL last so the player knows generation is done.
         """
         try:
@@ -193,12 +270,12 @@ class TtsService:
             import numpy as np
             kokoro = self._load_kokoro()
 
-            sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+            sentences = self._split_text(text)
             if not sentences:
                 sentences = [text]
 
             total = len(sentences)
-            print(f"[TTS-gen] {total} sentence(s) to generate")
+            print(f"[TTS-gen] {total} chunk(s) to generate")
 
             for idx, sentence in enumerate(sentences):
                 if self._stop_evt.is_set():
