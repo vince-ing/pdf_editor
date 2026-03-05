@@ -69,6 +69,175 @@ def _download(url: str, dest: str, label: str) -> None:
     print(f"[TTS] Saved to {dest}")
 
 
+# ── Unit expansion tables (module-level so regexes compile once) ──────────────
+#
+# Each entry: (abbreviation, singular, plural)
+# Sorted longest-first in the regex alternation so "mm" is tried before "m",
+# "mph" before "m", etc.  Denominator of a rate always uses singular
+# ("per day" not "per days").
+
+_UNITS = [
+    # Length
+    ("mm",    "millimeter",   "millimeters"),
+    ("cm",    "centimeter",   "centimeters"),
+    ("km",    "kilometer",    "kilometers"),
+    ("nm",    "nanometer",    "nanometers"),
+    ("µm",    "micrometer",   "micrometers"),
+    ("um",    "micrometer",   "micrometers"),
+    ("ft",    "foot",         "feet"),
+    ("yd",    "yard",         "yards"),
+    ("mi",    "mile",         "miles"),
+    ("in",    "inch",         "inches"),
+    ("m",     "meter",        "meters"),       # after mm/cm/km/nm
+    # Area
+    ("km2",   "square kilometer",  "square kilometers"),
+    ("cm2",   "square centimeter", "square centimeters"),
+    ("mm2",   "square millimeter", "square millimeters"),
+    ("m2",    "square meter",      "square meters"),
+    ("ft2",   "square foot",       "square feet"),
+    ("ha",    "hectare",      "hectares"),
+    ("ac",    "acre",         "acres"),
+    # Volume
+    ("ml",    "milliliter",   "milliliters"),
+    ("cl",    "centiliter",   "centiliters"),
+    ("dl",    "deciliter",    "deciliters"),
+    ("µl",    "microliter",   "microliters"),
+    ("ul",    "microliter",   "microliters"),
+    ("fl oz", "fluid ounce",  "fluid ounces"),
+    ("gal",   "gallon",       "gallons"),
+    ("qt",    "quart",        "quarts"),
+    ("pt",    "pint",         "pints"),
+    ("L",     "liter",        "liters"),
+    ("l",     "liter",        "liters"),
+    # Mass
+    ("µg",    "microgram",    "micrograms"),
+    ("ug",    "microgram",    "micrograms"),
+    ("mg",    "milligram",    "milligrams"),
+    ("kg",    "kilogram",     "kilograms"),
+    ("lbs",   "pounds",       "pounds"),
+    ("lb",    "pound",        "pounds"),
+    ("oz",    "ounce",        "ounces"),
+    ("g",     "gram",         "grams"),        # after mg/kg/µg
+    # Time
+    ("ms",    "millisecond",  "milliseconds"),
+    ("µs",    "microsecond",  "microseconds"),
+    ("ns",    "nanosecond",   "nanoseconds"),
+    ("hr",    "hour",         "hours"),
+    ("min",   "minute",       "minutes"),
+    ("sec",   "second",       "seconds"),
+    ("day",   "day",          "days"),
+    ("wk",    "week",         "weeks"),
+    ("yr",    "year",         "years"),
+    ("s",     "second",       "seconds"),      # after ms/µs/ns
+    # Speed (already "per" — keep as-is, don't double-expand)
+    ("mph",   "miles per hour",       "miles per hour"),
+    ("kph",   "kilometers per hour",  "kilometers per hour"),
+    ("kmh",   "kilometers per hour",  "kilometers per hour"),
+    # Pressure
+    ("kPa",   "kilopascal",   "kilopascals"),
+    ("MPa",   "megapascal",   "megapascals"),
+    ("Pa",    "pascal",       "pascals"),
+    ("psi",   "pounds per square inch", "pounds per square inch"),
+    ("atm",   "atmosphere",   "atmospheres"),
+    ("bar",   "bar",          "bars"),
+    # Energy / power
+    ("kWh",   "kilowatt hour",   "kilowatt hours"),
+    ("mWh",   "milliwatt hour",  "milliwatt hours"),
+    ("kW",    "kilowatt",     "kilowatts"),
+    ("MW",    "megawatt",     "megawatts"),
+    ("GW",    "gigawatt",     "gigawatts"),
+    ("W",     "watt",         "watts"),
+    ("kJ",    "kilojoule",    "kilojoules"),
+    ("MJ",    "megajoule",    "megajoules"),
+    ("J",     "joule",        "joules"),
+    ("kcal",  "kilocalorie",  "kilocalories"),
+    ("cal",   "calorie",      "calories"),
+    # Data
+    ("KB",    "kilobyte",     "kilobytes"),
+    ("MB",    "megabyte",     "megabytes"),
+    ("GB",    "gigabyte",     "gigabytes"),
+    ("TB",    "terabyte",     "terabytes"),
+    ("Kb",    "kilobit",      "kilobits"),
+    ("Mb",    "megabit",      "megabits"),
+    ("Gb",    "gigabit",      "gigabits"),
+    ("GHz",   "gigahertz",    "gigahertz"),
+    ("MHz",   "megahertz",    "megahertz"),
+    ("kHz",   "kilohertz",    "kilohertz"),
+    ("Hz",    "hertz",        "hertz"),
+    # Temperature
+    ("K",     "kelvin",       "kelvin"),
+]
+
+_UNIT_MAP: dict[str, tuple[str, str]] = {
+    abbr: (sing, plur) for abbr, sing, plur in _UNITS
+}
+
+# Longest-first alternation so "mm" beats "m", "kWh" beats "kW", etc.
+_UNIT_ALT = "|".join(
+    re.escape(abbr) for abbr, _, _ in
+    sorted(_UNITS, key=lambda x: len(x[0]), reverse=True)
+)
+
+# number  unit/unit  — e.g. "120 mm/day" or "mm/day" (no leading number)
+_PER_RE = re.compile(
+    r'(\d*\.?\d*)\s*(' + _UNIT_ALT + r')\s*/\s*(' + _UNIT_ALT + r')\b'
+)
+# number  unit  — e.g. "5 km", "1 oz"
+_UNIT_RE = re.compile(r'(\d+\.?\d*)\s*(' + _UNIT_ALT + r')\b')
+
+# Month abbreviations → full names (applied before ordinal expansion)
+_MONTH_ABBR = {
+    'Jan': 'January',  'Feb': 'February', 'Mar': 'March',
+    'Apr': 'April',    'Jun': 'June',      'Jul': 'July',
+    'Aug': 'August',   'Sep': 'September', 'Sept': 'September',
+    'Oct': 'October',  'Nov': 'November',  'Dec': 'December',
+}
+_MONTH_ABBR_RE = re.compile(
+    r'\b(' + '|'.join(sorted(_MONTH_ABBR, key=len, reverse=True)) + r')\.?(?=\s|$)'
+)
+
+# Bare number after a full month name → ordinal  ("January 5" → "January 5th")
+_FULL_MONTH_PAT = (
+    'January|February|March|April|May|June|July|'
+    'August|September|October|November|December'
+)
+_ORDINAL_RE = re.compile(
+    r'\b(' + _FULL_MONTH_PAT + r')\s+(\d{1,2})\b(?!st|nd|rd|th)'
+)
+
+
+def _expand_per(m: re.Match) -> str:
+    num_str  = m.group(1).strip()
+    sing_n, plur_n = _UNIT_MAP[m.group(2)]
+    sing_d, _      = _UNIT_MAP[m.group(3)]   # denominator always singular
+    if num_str:
+        try:
+            num_word = sing_n if float(num_str) == 1.0 else plur_n
+        except ValueError:
+            num_word = plur_n
+        return f"{num_str} {num_word} per {sing_d}"
+    return f"{plur_n} per {sing_d}"
+
+
+def _expand_unit(m: re.Match) -> str:
+    num_str      = m.group(1)
+    sing, plur   = _UNIT_MAP[m.group(2)]
+    try:
+        word = sing if float(num_str) == 1.0 else plur
+    except ValueError:
+        word = plur
+    return f"{num_str} {word}"
+
+
+def _make_ordinal(m: re.Match) -> str:
+    n = int(m.group(2))
+    # 11, 12, 13 are always -th regardless of last digit
+    suffix = {1: "st", 2: "nd", 3: "rd"}.get(
+        n % 10 if n not in (11, 12, 13) else 0, "th"
+    )
+    return f"{m.group(1)} {n}{suffix}"
+
+
 class TtsService:
     """
     Wraps kokoro-onnx 0.5.x for low-latency, streaming TTS playback.
@@ -200,6 +369,11 @@ class TtsService:
           - Bullet / list markers stripped
           - Common symbols expanded (&, =, #, +, §, ©, etc.)
           - Common abbreviations expanded (Fig., Dr., e.g., etc.)
+          - SI / imperial units expanded, with per-rate support
+            (120 mm/day → "120 millimeters per day", 5 km → "5 kilometers")
+          - Month abbreviations expanded (Jan → January, Sept. → September)
+          - Bare numbers after month names given ordinal suffixes
+            (January 5 → "January 5th", March 21 → "March 21st")
           - All-caps words softened to title-case (INTRODUCTION → Introduction)
           - Excessive whitespace collapsed
         """
@@ -317,7 +491,23 @@ class TtsService:
         for pattern, replacement in _ABBREV:
             text = re.sub(pattern, replacement, text)
 
-        # ── 11. All-caps words → title-case ──────────────────────────────────
+        # ── 11. SI / imperial unit expansion ─────────────────────────────────
+        # Run per-unit first ("120 mm/day" → "120 millimeters per day"),
+        # then bare units ("5 km" → "5 kilometers").
+        text = _PER_RE.sub(_expand_per, text)
+        text = _UNIT_RE.sub(_expand_unit, text)
+
+        # ── 12. Month abbreviations → full names ──────────────────────────────
+        # "Jan 5" → "January 5",  "Sept." → "September"
+        # Must run before ordinal expansion so the full name is present.
+        text = _MONTH_ABBR_RE.sub(lambda m: _MONTH_ABBR[m.group(1)], text)
+
+        # ── 13. Ordinal dates ─────────────────────────────────────────────────
+        # "January 5" → "January 5th", "March 21" → "March 21st"
+        # Only fires when a full month name directly precedes a 1–2 digit number.
+        text = _ORDINAL_RE.sub(_make_ordinal, text)
+
+        # ── 14. All-caps words → title-case ──────────────────────────────────
         # Short acronyms (CIA, PDF, TTS) are fine — kokoro reads them letter by
         # letter already.  Long all-caps words (INTRODUCTION, CONCLUSION) sound
         # robotic; title-casing them reads more naturally.
@@ -326,7 +516,7 @@ class TtsService:
             return w.title() if len(w) > 4 else w
         text = re.sub(r'\b[A-Z]{5,}\b', _maybe_titlecase, text)
 
-        # ── 12. Collapse whitespace ───────────────────────────────────────────
+        # ── 15. Collapse whitespace ───────────────────────────────────────────
         text = re.sub(r'\s{2,}', ' ', text).strip()
 
         return text

@@ -883,13 +883,14 @@ class InteractivePDFEditor:
         if not self.doc:
             messagebox.showinfo("Read Aloud", "Please open a PDF document first.")
             return
-        # Try to get selected text from the select tool
-        sel_tool = self._tools.get("text")
-        text = ""
-        if sel_tool and hasattr(sel_tool, "get_selected_text"):
-            text = sel_tool.get_selected_text() or ""
+        sel_tool = self._tools.get("select_text")
+        text = sel_tool._selection_text() if sel_tool else ""
         if not text.strip():
-            messagebox.showinfo("Read Aloud", "No text selected.\nUse the Select Text tool to highlight text first.")
+            messagebox.showinfo(
+                "Read Aloud",
+                "No text selected.\n"
+                "Switch to the Select Text tool (S) and drag to highlight text first.",
+            )
             return
         self._canvas_area.show_tts_bar("Reading selection…")
         self._tts_bar.set_status("Reading selection…")
