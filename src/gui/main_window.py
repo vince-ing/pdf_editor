@@ -1315,20 +1315,58 @@ class InteractivePDFEditor:
             self.root.after_cancel(self._zoom_after_id)
             
         if debounce:
-            # Wait 250ms after trackpad scrolling stops before rendering
-            self._zoom_after_id = self.root.after(250, self._apply_zoom)
+            # Wait 150ms after last zoom event before rendering
+            self._zoom_after_id = self.root.after(150, self._apply_zoom)
         else:
             self._apply_zoom()
 
     def _apply_zoom(self) -> None:
         self._zoom_after_id = None
-        self.scale_factor = getattr(self, "_target_scale", self.scale_factor)
-        self._cont_invalidate_cache()
-        self._render()
-        if self._continuous_mode and not getattr(self, "_zoom_preserve_scroll", False):
-            # Force Tkinter to process the new boundaries before jumping
-            self.canvas.update_idletasks()
-            self._scroll_to_current_cont()
+        new_scale = getattr(self, "_target_scale", self.scale_factor)
+
+        if self._continuous_mode and self.doc and not getattr(self, "_zoom_preserve_scroll", False):
+            # Use pinch snapshot if available (trackpad), otherwise snapshot now (button zoom)
+            snap = getattr(self, "_pinch_snapshot", None)
+            if snap:
+                page_idx = snap["page_idx"]
+                frac     = snap["frac"]
+                old_page = snap["page"]
+                self._pinch_snapshot = None
+            else:
+                canvas_top = self.canvas.canvasy(0)
+                page_idx   = self.current_page_idx
+                page_top   = self._cont_page_top(page_idx)
+                old_page   = self.doc.get_page(page_idx)
+                old_page_h = int(old_page.height * self.scale_factor)
+                frac = (canvas_top - page_top) / old_page_h if old_page_h > 0 else 0.0
+                frac = max(0.0, frac)
+
+            # Apply new scale and rebuild layout
+            self.scale_factor = new_scale
+            self._cont_invalidate_cache()
+            self._render()
+
+            # Restore position after Tkinter processes the new geometry
+            def _restore():
+                self._zoom_restoring = True
+                try:
+                    new_page_top = self._cont_page_top(page_idx)
+                    new_page_h   = int(old_page.height * self.scale_factor)
+                    target_y     = new_page_top + frac * new_page_h
+                    bbox = self.canvas.bbox("all")
+                    if bbox and bbox[3] > 0:
+                        self.canvas.yview_moveto(max(0.0, target_y / bbox[3]))
+                finally:
+                    self._zoom_restoring = False
+                self._schedule_cont_render(self.current_page_idx)
+
+            self.canvas.after(0, _restore)
+        else:
+            self._pinch_snapshot = None
+            self.scale_factor = new_scale
+            self._cont_invalidate_cache()
+            self._render()
+
         self._zoom_preserve_scroll = False
 
     def _update_zoom_label(self, scale: float) -> None:
@@ -1355,8 +1393,14 @@ class InteractivePDFEditor:
         self._commit_all_boxes()
         self._continuous_mode = True
         self._update_view_mode_buttons()
+        # Tell _render_continuous to scroll to current page at the end of its run.
+        # _zoom_restoring suppresses _on_canvas_scrolled for the entire duration.
+        self._zoom_restoring = True
+        self._cont_mode_switch = True
         self._render()
-        self.root.after(80, self._scroll_to_current_cont)
+        self._zoom_restoring = False
+        # Trigger a render of visible pages now that we're at the right position
+        self._schedule_cont_render(self.current_page_idx)
 
     def _update_view_mode_buttons(self) -> None:
         self._top_bar.update_view_mode_buttons(self._continuous_mode)
@@ -1545,7 +1589,10 @@ class InteractivePDFEditor:
             self._cont_after_id = None
         doc = self.doc
         n   = doc.page_count
-        cw  = self.canvas.winfo_width()
+        # Capture cw ONCE and reuse it for all placeholders and page images
+        # in this render cycle — prevents 1px jitter from winfo_width() fluctuating.
+        self._cont_cw = self.canvas.winfo_width()
+        cw = self._cont_cw
         total_h = self._CONT_GAP
         max_iw  = 0
         heights, widths = [], []
@@ -1565,7 +1612,16 @@ class InteractivePDFEditor:
         self.canvas.delete("page_bg")
         self.canvas.delete("textsel")
         self.canvas.config(scrollregion=(0, 0, max(cw, max_iw + 80), total_h))
-        
+
+        # If switching INTO continuous mode, scroll to the right page NOW —
+        # before drawing any placeholders — so page 1 never flashes into view.
+        # We use total_h directly because bbox("all") is None until items are drawn.
+        if getattr(self, "_cont_mode_switch", False):
+            self._cont_mode_switch = False
+            y_top = self._cont_page_top(self.current_page_idx)
+            if total_h > 0:
+                self.canvas.yview_moveto(max(0.0, y_top / total_h))
+
         # 2. Draw lightweight gray placeholder rectangles to maintain layout
         y = self._CONT_GAP
         for i in range(n):
@@ -1666,7 +1722,7 @@ class InteractivePDFEditor:
         p  = self.doc.get_page(page_idx)
         iw = int(p.width  * self.scale_factor)
         ih = int(p.height * self.scale_factor)
-        cw = self.canvas.winfo_width()
+        cw = getattr(self, "_cont_cw", self.canvas.winfo_width())
         self._render_cont_page(page_idx, iw, ih, cw)
 
     def _update_cont_offsets(self, idx: int) -> None:
@@ -1744,7 +1800,9 @@ class InteractivePDFEditor:
             return
 
         n = self.doc.page_count
-        cw = self.canvas.winfo_width()
+        # Use the cw captured at render time — keeps page image x-positions
+        # consistent with their placeholder rectangles (no 1px jitter).
+        cw = getattr(self, "_cont_cw", self.canvas.winfo_width())
         
         # Dynamically determine the visible window based on zoom level
         start_idx, end_idx = self._get_visible_cont_pages()
@@ -1809,10 +1867,12 @@ class InteractivePDFEditor:
     def _scroll_to_current_cont(self) -> None:
         if not self.doc:
             return
-        y_top   = self._cont_page_top(self.current_page_idx)
-        total_h = self._cont_page_top(self.doc.page_count)
-        if total_h > 0:
-            frac = max(0.0, (y_top - self._CONT_GAP) / total_h)
+        self.canvas.update_idletasks()
+        y_top  = self._cont_page_top(self.current_page_idx)
+        bbox   = self.canvas.bbox("all")
+        doc_h  = bbox[3] if bbox else 0
+        if doc_h > 0:
+            frac = max(0.0, y_top / doc_h)
             self.canvas.yview_moveto(frac)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1894,6 +1954,11 @@ class InteractivePDFEditor:
         Debounces and fires the continuous-mode page renderer."""
         if not self._continuous_mode:
             return
+        # Suppress during programmatic zoom-restore scroll
+        if getattr(self, "_zoom_restoring", False):
+            return
+        # A manual scroll invalidates any pending pinch snapshot
+        self._pinch_snapshot = None
         if self._scroll_after_id:
             self.root.after_cancel(self._scroll_after_id)
         # Update page indicator immediately (cheap, no rendering)
@@ -1903,11 +1968,32 @@ class InteractivePDFEditor:
 
     def _on_ctrl_scroll(self, event: tk.Event) -> None:
         if event.num == 4 or (hasattr(event, "delta") and event.delta > 0):
-            target = getattr(self, "_target_scale", self.scale_factor)
-            self._set_zoom(min(MAX_SCALE, target + SCALE_STEP), debounce=True, preserve_scroll=True)
+            direction = 1
         else:
-            target = getattr(self, "_target_scale", self.scale_factor)
-            self._set_zoom(max(MIN_SCALE, target - SCALE_STEP), debounce=True, preserve_scroll=True)
+            direction = -1
+
+        # Use a larger step for trackpad (feels more responsive than button zoom)
+        step = SCALE_STEP * 2.5
+        target = getattr(self, "_target_scale", self.scale_factor)
+        new_target = max(MIN_SCALE, min(MAX_SCALE, target + direction * step))
+
+        # Snapshot reading position once at the START of a pinch gesture,
+        # not on every event — otherwise rapid events corrupt the snapshot.
+        if not getattr(self, "_pinch_snapshot", None):
+            if self._continuous_mode and self.doc:
+                canvas_top = self.canvas.canvasy(0)
+                page_idx   = self.current_page_idx
+                page_top   = self._cont_page_top(page_idx)
+                old_page   = self.doc.get_page(page_idx)
+                old_page_h = int(old_page.height * self.scale_factor)
+                frac = (canvas_top - page_top) / old_page_h if old_page_h > 0 else 0.0
+                self._pinch_snapshot = {
+                    "page_idx": page_idx,
+                    "frac":     max(0.0, frac),
+                    "page":     old_page,
+                }
+
+        self._set_zoom(new_target, debounce=True)
 
     def _on_mouse_motion(self, event: tk.Event) -> None:
         if not self.doc:
