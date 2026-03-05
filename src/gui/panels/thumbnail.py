@@ -172,7 +172,8 @@ class ThumbnailPanel:
         self._images = [None] * len(self._image_paths)
         self._dirty = [True] * len(self._image_paths)
         
-        tw, th = 80, 110 # Uniform thumbnail size
+        self._slot_tw, self._slot_th = 80, 110 # Cache uniform thumbnail size
+        tw, th = self._thumb_size()
         x_off = (THUMB_PANEL_W - tw) // 2
         
         total_h = self._slot_h() * len(self._image_paths) + THUMB_PAD
@@ -199,6 +200,17 @@ class ThumbnailPanel:
         doc = self._get_doc()
         if not doc:
             return
+
+        # Determine uniform slot size once and cache it. Force a portrait bounding box
+        # so that grid math never drifts if individual pages are rotated later.
+        try:
+            p = doc.get_page(0)
+            tw = int(p.width * THUMB_SCALE)
+            th = int(p.height * THUMB_SCALE)
+            self._slot_tw = min(tw, th)
+            self._slot_th = max(tw, th)
+        except Exception:
+            self._slot_tw, self._slot_th = 80, 110
 
         n     = doc.page_count
         self._images = [None] * n
@@ -242,14 +254,10 @@ class ThumbnailPanel:
     # ── geometry helpers ──────────────────────────────────────────────────────
 
     def _thumb_size(self) -> tuple[int, int]:
-        """Return (tw, th) for page 0 (used as the uniform slot size)."""
-        doc = self._get_doc()
-        if not doc:
-            return (80, 110)
-        p  = doc.get_page(0)
-        tw = int(p.width  * THUMB_SCALE)
-        th = int(p.height * THUMB_SCALE)
-        return tw, th
+        """Return the cached (tw, th) uniform slot size."""
+        if hasattr(self, "_slot_tw") and hasattr(self, "_slot_th"):
+            return self._slot_tw, self._slot_th
+        return 80, 110
 
     def _slot_h(self) -> int:
         _, th = self._thumb_size()
@@ -336,7 +344,7 @@ class ThumbnailPanel:
             if not self._get_image_thumbnail or idx >= len(self._image_paths):
                 return
             path = self._image_paths[idx]
-            tw, th = 80, 110
+            tw, th = self._thumb_size()
             ppm = self._get_image_thumbnail(path, tw)
             if not ppm:
                 return
@@ -347,11 +355,27 @@ class ThumbnailPanel:
             x_off = (THUMB_PANEL_W - tw) // 2
             y_top = self._slot_y(idx)
 
+            # Center the image inside the slot
+            actual_w, actual_h = img.width(), img.height()
+            img_x = x_off + (tw - actual_w) // 2
+            img_y = y_top + (th - actual_h) // 2
+
             self._canvas.delete(f"thumb_img_{idx}")
             self._canvas.create_image(
-                x_off, y_top, anchor=tk.NW, image=img,
+                img_x, img_y, anchor=tk.NW, image=img,
                 tags=(f"thumb_img_{idx}",),
             )
+            
+            # Snap the border perfectly to the actual image dimensions
+            self._canvas.coords(
+                f"thumb_border_{idx}",
+                img_x, img_y, img_x + actual_w, img_y + actual_h
+            )
+            self._canvas.coords(
+                f"thumb_hit_{idx}",
+                img_x, img_y, img_x + actual_w, img_y + actual_h
+            )
+
             self._canvas.tag_raise(f"thumb_border_{idx}")
             self._canvas.tag_raise(f"thumb_label_{idx}")
             self._canvas.tag_raise(f"thumb_hit_{idx}")
@@ -361,25 +385,61 @@ class ThumbnailPanel:
         doc = self._get_doc()
         if not doc or idx >= doc.page_count:
             return
+
+        tw, th = self._thumb_size()
+        x_off  = (THUMB_PANEL_W - tw) // 2
+        y_top  = self._slot_y(idx)
+
         try:
             page = doc.get_page(idx)
-            ppm  = page.render_to_ppm(scale=THUMB_SCALE)
-            img  = tk.PhotoImage(data=ppm)
+            
+            # 1. Render at standard thumb scale first
+            ppm = page.render_to_ppm(scale=THUMB_SCALE)
+            temp_img = tk.PhotoImage(data=ppm)
+            
+            actual_w = temp_img.width()
+            actual_h = temp_img.height()
+            
+            # 2. Check pixel dimensions. If it overflows the bounding box,
+            # calculate a correction multiplier and render it again perfectly sized.
+            if actual_w > tw or actual_h > th:
+                # 0.98 gives a 2% safety margin to prevent 1-pixel rounding overflows
+                scale_correction = min(tw / actual_w, th / actual_h) * 0.98
+                corrected_scale = THUMB_SCALE * scale_correction
+                
+                ppm = page.render_to_ppm(scale=corrected_scale)
+                img = tk.PhotoImage(data=ppm)
+                actual_w = img.width()
+                actual_h = img.height()
+            else:
+                img = temp_img
+
         except Exception:
             return
 
         self._images[idx] = img
         self._dirty[idx]  = False
 
-        tw, th = self._thumb_size()
-        x_off  = (THUMB_PANEL_W - tw) // 2
-        y_top  = self._slot_y(idx)
+        # Center the image inside the slot box
+        img_x = x_off + (tw - actual_w) // 2
+        img_y = y_top + (th - actual_h) // 2
 
         self._canvas.delete(f"thumb_img_{idx}")
         self._canvas.create_image(
-            x_off, y_top, anchor=tk.NW, image=img,
+            img_x, img_y, anchor=tk.NW, image=img,
             tags=(f"thumb_img_{idx}",),
         )
+        
+        # Snap the border perfectly to the actual image dimensions
+        self._canvas.coords(
+            f"thumb_border_{idx}",
+            img_x, img_y, img_x + actual_w, img_y + actual_h
+        )
+        self._canvas.coords(
+            f"thumb_hit_{idx}",
+            img_x, img_y, img_x + actual_w, img_y + actual_h
+        )
+
         self._canvas.tag_raise(f"thumb_border_{idx}")
         self._canvas.tag_raise(f"thumb_label_{idx}")
         self._canvas.tag_raise(f"thumb_hit_{idx}")
@@ -489,7 +549,7 @@ class ThumbnailPanel:
             return
 
         if not started:
-            # It was a click, not a drag — navigate to that page
+            # It was a pure click, not a drag — navigate to that page
             self._on_page_click_cb(src)
             return
 
@@ -498,12 +558,11 @@ class ThumbnailPanel:
             return
 
         dst = self._y_to_drop_idx(cy)   # insert-before index
-        n   = doc.page_count
-
-        # dst is the position to INSERT before.
-        # If inserting before dst and src < dst, effective slot = dst-1 after removal.
-        # No-op if dropping onto the same position.
+        
+        # FIX: If the user dropped it in the exact same spot it started, 
+        # their hand just twitched while clicking. Treat it as a click!
         if dst == src or dst == src + 1:
+            self._on_page_click_cb(src)
             return
 
         if self._on_reorder:
@@ -528,13 +587,20 @@ class ThumbnailPanel:
         if not doc or doc.page_count <= 1:
             return   # never show delete when only one page
 
-        tw, th = self._thumb_size()
-        x_off  = (THUMB_PANEL_W - tw) // 2
-        y_top  = self._slot_y(idx)
+        # Get actual image border coordinates for perfect badge placement
+        coords = self._canvas.coords(f"thumb_border_{idx}")
+        if coords:
+            x0, y0, x1, y1 = coords
+            bx = x1 - 1
+            by = y0 + 1
+        else:
+            tw, th = self._thumb_size()
+            x_off  = (THUMB_PANEL_W - tw) // 2
+            y_top  = self._slot_y(idx)
+            bx = x_off + tw - 1
+            by = y_top + 1
 
         # Small ✕ badge in top-right corner of thumbnail
-        bx = x_off + tw - 1
-        by = y_top + 1
         badge_bg = self._canvas.create_rectangle(
             bx - 16, by, bx, by + 16,
             fill="#C03030", outline="", tags="del_badge",
