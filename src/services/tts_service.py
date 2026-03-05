@@ -1,9 +1,24 @@
 """
 TtsService — offline text-to-speech via kokoro-onnx 0.5.x.
 
-kokoro-onnx >= 0.4.0 requires explicit model paths.
-This service downloads the model files once to a local cache folder
-(pdf_editor/models/kokoro/) and reuses them on every subsequent run.
+Architecture: producer / consumer pipeline
+─────────────────────────────────────────
+  Generator thread  →  Queue[numpy array]  →  Player thread
+                              ↑
+                       bounded to 3 items so the generator
+                       doesn't race too far ahead of playback
+
+The generator splits the text into sentences, calls kokoro.create() for
+each one, and pushes the resulting audio array into the queue.  The player
+pulls arrays out of the queue one at a time and streams them through a
+single persistent OutputStream using the speed-resampling chunk loop from
+before.  Because kokoro typically generates each sentence 3-5× faster than
+realtime, playback starts after the very first sentence is ready (~0.3 s
+for a short sentence) and subsequent sentences are waiting in the queue
+before the current one finishes.
+
+Pause / stop events are checked in the player's inner chunk loop (≤85 ms
+latency) and in the generator's sentence loop (stops generation immediately).
 
 Install: pip install kokoro-onnx soundfile sounddevice
 """
@@ -11,26 +26,35 @@ Install: pip install kokoro-onnx soundfile sounddevice
 from __future__ import annotations
 
 import os
+import queue
 import re
-import time
 import threading
 import urllib.request
 from typing import Callable
 
-# Model files hosted by the kokoro-onnx project on Hugging Face
+# ── Model locations ───────────────────────────────────────────────────────────
+
 _MODEL_URL  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
 _VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
 
-# Cache next to the project root so it survives venv rebuilds
-_HERE         = os.path.dirname(os.path.abspath(__file__))   # src/services/
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(_HERE))      # pdf_editor/
+_HERE         = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_HERE))
 _CACHE_DIR    = os.path.join(_PROJECT_ROOT, "models", "kokoro")
 _MODEL_PATH   = os.path.join(_CACHE_DIR, "kokoro-v1.0.onnx")
 _VOICES_PATH  = os.path.join(_CACHE_DIR, "voices-v1.0.bin")
 
-# How many audio frames to write per callback tick (controls pause/stop latency).
-# At 24 kHz, 2048 frames ≈ 85 ms — responsive without too many callbacks.
+# ── Tuning constants ──────────────────────────────────────────────────────────
+
+# Frames written to the OutputStream per loop tick.
+# At 24 kHz, 2048 frames ≈ 85 ms — fast enough for responsive pause/stop.
 _CHUNK_FRAMES = 2048
+
+# Maximum number of pre-generated sentence arrays waiting in the queue.
+# 3 gives a comfortable buffer without wasting memory on long documents.
+_QUEUE_MAXSIZE = 3
+
+# Sentinel pushed by the generator to tell the player it is done.
+_SENTINEL = object()
 
 
 def _download(url: str, dest: str, label: str) -> None:
@@ -42,23 +66,14 @@ def _download(url: str, dest: str, label: str) -> None:
 
 class TtsService:
     """
-    Wraps kokoro-onnx 0.5.x for offline TTS playback on a background thread.
+    Wraps kokoro-onnx 0.5.x for low-latency, streaming TTS playback.
 
-    Playback is done via a sounddevice OutputStream with a manual chunk loop
-    so that stop and pause events are honoured within ~85 ms.
-
-    Parameters
-    ----------
-    on_start : callable, optional
-        Called on the worker thread when generation begins.
-    on_playback_start : callable, optional
-        Called on the worker thread just before audio starts playing.
-    on_progress : callable(int, int, int), optional
-        Called with (processed_chars, total_chars, eta_seconds) during generation.
-    on_stop : callable, optional
-        Called on the worker thread when speech ends *naturally* (not user stop).
-    on_error : callable(str), optional
-        Called with an error message if something goes wrong.
+    Callbacks (all called on worker threads — use root.after() to touch UI):
+      on_start()                          generation has begun
+      on_playback_start()                 first audio is about to play
+      on_progress(done, total, pct)       sentences done / total / 0-100 int
+      on_stop()                           natural completion (not user stop)
+      on_error(msg)                       something went wrong
     """
 
     def __init__(
@@ -78,34 +93,48 @@ class TtsService:
         self._kokoro    = None
         self._stop_evt  = threading.Event()
         self._pause_evt = threading.Event()
-        self._pause_evt.set()   # not paused initially
-        self._thread: threading.Thread | None = None
+        self._pause_evt.set()          # clear = paused, set = playing
         self._speaking  = False
 
-        # Voice options: 'af_heart', 'af_sky', 'am_adam', 'bf_emma', 'bm_george'
-        self.voice = "af_alloy"
-        self.speed = 1.0
+        # Both threads stored so stop() can join them
+        self._gen_thread:  threading.Thread | None = None
+        self._play_thread: threading.Thread | None = None
 
-    # ── public API ────────────────────────────────────────────────────────────
+        self.voice = "af_alloy"
+        self.speed = 1.0              # read live by the player every chunk tick
+
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def speak(self, text: str) -> None:
-        """Start speaking *text*. Stops any current speech first. Non-blocking."""
+        """Start speaking *text*.  Stops any ongoing speech first.  Non-blocking."""
         self.stop()
         text = text.strip()
         if not text:
             return
         self._stop_evt.clear()
         self._pause_evt.set()
-        self._thread = threading.Thread(
-            target=self._worker, args=(text,), daemon=True)
-        self._thread.start()
+        self._speaking = True
+
+        # Bounded queue shared between the two threads
+        audio_queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAXSIZE)
+
+        self._gen_thread = threading.Thread(
+            target=self._generator, args=(text, audio_queue), daemon=True,
+            name="tts-generator")
+        self._play_thread = threading.Thread(
+            target=self._player, args=(audio_queue,), daemon=True,
+            name="tts-player")
+
+        self._gen_thread.start()
+        self._play_thread.start()
 
     def stop(self) -> None:
-        """Stop playback immediately. The audio position is *not* remembered."""
+        """Stop immediately.  Blocks until both threads exit (at most ~300 ms)."""
         self._stop_evt.set()
-        self._pause_evt.set()   # unblock a paused thread so it can exit
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=3.0)
+        self._pause_evt.set()   # unblock a paused player so it sees stop
+        for t in (self._gen_thread, self._play_thread):
+            if t and t.is_alive():
+                t.join(timeout=4.0)
         self._speaking = False
 
     def pause(self) -> None:
@@ -128,7 +157,7 @@ class TtsService:
     def is_paused(self) -> bool:
         return not self._pause_evt.is_set()
 
-    # ── internals ─────────────────────────────────────────────────────────────
+    # ── Model helpers ─────────────────────────────────────────────────────────
 
     def _ensure_models(self) -> None:
         if not os.path.exists(_MODEL_PATH):
@@ -143,170 +172,192 @@ class TtsService:
             from kokoro_onnx import Kokoro
         except ImportError:
             raise RuntimeError(
-                "kokoro-onnx not installed. Run:\n"
-                "pip install kokoro-onnx soundfile sounddevice"
+                "kokoro-onnx not installed.\n"
+                "Run: pip install kokoro-onnx soundfile sounddevice"
             )
         self._ensure_models()
         self._kokoro = Kokoro(_MODEL_PATH, _VOICES_PATH)
         return self._kokoro
 
-    def _play_samples(self, samples, sample_rate: int) -> bool:
+    # ── Generator thread ──────────────────────────────────────────────────────
+
+    def _generator(self, text: str, q: queue.Queue) -> None:
         """
-        Stream *samples* (numpy float32 array) through an OutputStream,
-        checking stop/pause every _CHUNK_FRAMES output frames.
-
-        Speed is read from self.speed on every iteration so the slider
-        takes effect within ~85 ms without pausing or restarting.
-
-        Strategy: each iteration we consume (chunk_frames * speed) source
-        frames, resample them down to chunk_frames output frames via linear
-        interpolation, then write those to the stream.  Faster speed →
-        more source frames consumed per tick → audio finishes sooner.
-        Pitch is not preserved (it rises slightly at higher speeds) which
-        is acceptable for speech and avoids a heavy DSP dependency.
-
-        Returns True if playback completed normally, False if interrupted.
+        Split text into sentences, generate audio for each, push into queue.
+        Always pushes _SENTINEL last so the player knows generation is done.
         """
-        import sounddevice as sd
-        import numpy as np
-
-        samples = np.asarray(samples, dtype=np.float32)
-        if samples.ndim == 1:
-            samples = samples.reshape(-1, 1)
-
-        n_channels = samples.shape[1]
-        total      = len(samples)
-        # Use a float position so fractional-frame accumulation is exact.
-        pos_f: float = 0.0
-
-        with sd.OutputStream(samplerate=sample_rate,
-                             channels=n_channels,
-                             dtype="float32") as stream:
-            while pos_f < total:
-                # ── stop ────────────────────────────────────────────────────
-                if self._stop_evt.is_set():
-                    stream.abort()
-                    return False
-
-                # ── pause ────────────────────────────────────────────────────
-                if not self._pause_evt.is_set():
-                    stream.stop()
-                    self._pause_evt.wait()
-                    if self._stop_evt.is_set():
-                        return False
-                    stream.start()
-
-                # ── read current speed and compute source window ──────────────
-                speed = max(0.1, float(self.speed))   # guard against 0 / negative
-                # How many source frames we want to consume this tick
-                src_frames = int(_CHUNK_FRAMES * speed)
-                src_start  = int(pos_f)
-                src_end    = min(src_start + src_frames, total)
-                src_chunk  = samples[src_start:src_end]
-
-                if len(src_chunk) == 0:
-                    break
-
-                # ── resample src_chunk → _CHUNK_FRAMES output frames ──────────
-                src_len = len(src_chunk)
-                if src_len == _CHUNK_FRAMES:
-                    # Speed is exactly 1.0 (or chunk lands perfectly) — no work needed
-                    out_chunk = src_chunk
-                else:
-                    # Linear interpolation along the time axis for each channel
-                    out_indices = np.linspace(0, src_len - 1, _CHUNK_FRAMES)
-                    lo  = np.floor(out_indices).astype(np.int32)
-                    hi  = np.minimum(lo + 1, src_len - 1)
-                    frac = (out_indices - lo)[:, np.newaxis]   # (frames, 1) broadcast
-                    out_chunk = src_chunk[lo] * (1.0 - frac) + src_chunk[hi] * frac
-
-                stream.write(out_chunk.astype(np.float32))
-                pos_f += src_frames   # advance by how many source frames we consumed
-
-        return True
-
-    def _worker(self, text: str) -> None:
-        """
-        Background thread:
-          1. Generate all audio chunks (with progress callbacks).
-          2. Play the complete buffer through the interruptible stream loop.
-        """
-        self._speaking = True
-        if self._on_start:
-            self._on_start()
-
-        naturally_stopped = False
-
         try:
+            if self._on_start:
+                self._on_start()
+
             import numpy as np
-
-            print("[TTS] Loading kokoro...")
             kokoro = self._load_kokoro()
-            print("[TTS] Generating audio...")
 
-            # ── 1. Generation phase ──────────────────────────────────────────
-            chunks = [c.strip() for c in re.split(r'(?<=[.!?])\s+', text) if c.strip()]
-            if not chunks:
-                chunks = [text]
+            sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+            if not sentences:
+                sentences = [text]
 
-            total_chars     = sum(len(c) for c in chunks)
-            processed_chars = 0
-            all_samples     = []
-            sample_rate     = 24000
-            start_time      = time.time()
+            total = len(sentences)
+            print(f"[TTS-gen] {total} sentence(s) to generate")
 
-            for chunk in chunks:
+            for idx, sentence in enumerate(sentences):
                 if self._stop_evt.is_set():
-                    print("[TTS] Stopped during generation")
+                    print("[TTS-gen] Stopped early")
                     return
 
                 samples, sr = kokoro.create(
-                    chunk,
+                    sentence,
                     voice=self.voice,
-                    speed=1.0,      # always generate at 1× — speed applied in _play_samples
+                    speed=1.0,      # speed applied at playback time via resampling
                     lang="en-us",
                 )
-                if hasattr(samples, "tolist"):
-                    all_samples.extend(samples.tolist())
-                else:
-                    all_samples.extend(samples)
-                sample_rate = sr
 
-                processed_chars += len(chunk)
-                elapsed        = time.time() - start_time
-                chars_per_sec  = processed_chars / elapsed if elapsed > 0 else 0
-                remaining      = total_chars - processed_chars
-                eta            = int(remaining / chars_per_sec) if chars_per_sec > 0 else 0
+                arr = np.asarray(samples, dtype=np.float32)
+                if arr.ndim == 1:
+                    arr = arr.reshape(-1, 1)
+
+                # Block until the player has room, but wake up on stop
+                while True:
+                    if self._stop_evt.is_set():
+                        return
+                    try:
+                        q.put((arr, sr), timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+
+                done = idx + 1
+                pct  = int(done / total * 100)
+                print(f"[TTS-gen] Generated sentence {done}/{total}")
                 if self._on_progress:
-                    self._on_progress(processed_chars, total_chars, eta)
-
-            if self._stop_evt.is_set():
-                print("[TTS] Stopped before playback")
-                return
-
-            # ── 2. Notify UI that playback is about to start ─────────────────
-            if self._on_playback_start:
-                self._on_playback_start()
-
-            print(f"[TTS] Playing {len(all_samples)/sample_rate:.1f}s of audio...")
-
-            # ── 3. Interruptible playback ────────────────────────────────────
-            completed = self._play_samples(all_samples, sample_rate)
-
-            if completed:
-                naturally_stopped = True
-                print("[TTS] Playback complete")
-            else:
-                print("[TTS] Playback interrupted")
+                    self._on_progress(done, total, pct)
 
         except Exception as exc:
             import traceback
-            print("[TTS] ERROR:", exc)
+            print("[TTS-gen] ERROR:", exc)
             traceback.print_exc()
             if self._on_error:
                 self._on_error(str(exc))
         finally:
+            # Always send the sentinel so the player can exit cleanly
+            try:
+                q.put(_SENTINEL, timeout=1.0)
+            except queue.Full:
+                pass
+
+    # ── Player thread ─────────────────────────────────────────────────────────
+
+    def _player(self, q: queue.Queue) -> None:
+        """
+        Pull (samples, sample_rate) pairs from the queue and stream them
+        through a single persistent OutputStream.  Speed resampling is
+        applied per-chunk so slider changes take effect within ~85 ms.
+        """
+        import sounddevice as sd
+
+        naturally_finished = False
+        playback_started   = False
+        stream             = None
+
+        try:
+            while True:
+                if self._stop_evt.is_set():
+                    break
+
+                # Pull the next sentence (or sentinel) from the queue
+                try:
+                    item = q.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                if item is _SENTINEL:
+                    naturally_finished = True
+                    break
+
+                sentence_samples, sample_rate = item
+
+                # Open the stream once, reuse it across all sentences to
+                # avoid the ~20 ms device-open overhead between sentences
+                if stream is None:
+                    stream = sd.OutputStream(
+                        samplerate=sample_rate,
+                        channels=sentence_samples.shape[1],
+                        dtype="float32",
+                    )
+                    stream.start()
+
+                if not playback_started:
+                    playback_started = True
+                    if self._on_playback_start:
+                        self._on_playback_start()
+
+                completed = self._stream_samples(stream, sentence_samples)
+                if not completed:
+                    break
+
+        except Exception as exc:
+            import traceback
+            print("[TTS-play] ERROR:", exc)
+            traceback.print_exc()
+            if self._on_error:
+                self._on_error(str(exc))
+        finally:
+            if stream is not None:
+                try:
+                    stream.abort()
+                    stream.close()
+                except Exception:
+                    pass
             self._speaking = False
-            # Only fire on_stop for natural completion, not user-initiated stop
-            if naturally_stopped and self._on_stop:
+            if naturally_finished and self._on_stop:
                 self._on_stop()
+
+    def _stream_samples(self, stream, samples) -> bool:
+        """
+        Write *samples* to the already-open *stream* in _CHUNK_FRAMES-sized
+        ticks, applying live speed resampling and honouring pause/stop.
+
+        Returns True if the sentence played to completion, False if interrupted.
+        """
+        import numpy as np
+
+        total = len(samples)
+        pos_f: float = 0.0
+
+        while pos_f < total:
+            # stop
+            if self._stop_evt.is_set():
+                stream.abort()
+                return False
+
+            # pause — cuts audio immediately, waits for resume
+            if not self._pause_evt.is_set():
+                stream.stop()
+                self._pause_evt.wait()
+                if self._stop_evt.is_set():
+                    return False
+                stream.start()
+
+            # Speed-aware source window
+            speed      = max(0.1, float(self.speed))
+            src_frames = int(_CHUNK_FRAMES * speed)
+            src_start  = int(pos_f)
+            src_end    = min(src_start + src_frames, total)
+            src_chunk  = samples[src_start:src_end]
+
+            if len(src_chunk) == 0:
+                break
+
+            # Linear interpolation to stretch/compress to exactly _CHUNK_FRAMES
+            src_len = len(src_chunk)
+            if src_len != _CHUNK_FRAMES:
+                out_idx   = np.linspace(0, src_len - 1, _CHUNK_FRAMES)
+                lo        = np.floor(out_idx).astype(np.int32)
+                hi        = np.minimum(lo + 1, src_len - 1)
+                frac      = (out_idx - lo)[:, np.newaxis]
+                src_chunk = src_chunk[lo] * (1.0 - frac) + src_chunk[hi] * frac
+
+            stream.write(src_chunk.astype(np.float32))
+            pos_f += src_frames
+
+        return True

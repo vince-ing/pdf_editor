@@ -99,14 +99,15 @@ class TtsBar:
         self._playback_frame.pack_forget()
         self._loading_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._progress.config(value=0)
-        self._eta_lbl.config(text="ETA: Calculating...")
+        self._eta_lbl.config(text="Generating…")
 
-    def update_progress(self, current: int, total: int, eta_seconds: int) -> None:
-        self._progress.config(maximum=total, value=current)
-        if eta_seconds == 0 and current >= total:
-            self._eta_lbl.config(text="Finishing...")
+    def update_progress(self, done: int, total: int, pct: int) -> None:
+        """Update the loading bar. done/total are sentence counts, pct is 0-100."""
+        self._progress.config(maximum=total, value=done)
+        if done >= total:
+            self._eta_lbl.config(text="Starting…")
         else:
-            self._eta_lbl.config(text=f"ETA: {eta_seconds}s")
+            self._eta_lbl.config(text=f"{pct}%  ({done}/{total})")
 
     def show_playback_controls(self) -> None:
         self._loading_frame.pack_forget()

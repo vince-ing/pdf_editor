@@ -910,9 +910,9 @@ class InteractivePDFEditor:
         """Called from TTS worker thread when generation begins."""
         self.root.after(0, self._tts_bar.show_loading)
 
-    def _on_tts_progress(self, current: int, total: int, eta: int) -> None:
-        """Called from TTS worker thread as chunks are generated."""
-        self.root.after(0, lambda c=current, t=total, e=eta: self._tts_bar.update_progress(c, t, e))
+    def _on_tts_progress(self, done: int, total: int, pct: int) -> None:
+        """Called from TTS generator thread after each sentence is generated."""
+        self.root.after(0, lambda d=done, t=total, p=pct: self._tts_bar.update_progress(d, t, p))
 
     def _on_tts_playback_start(self) -> None:
         """Called from TTS worker thread right before audio plays."""
