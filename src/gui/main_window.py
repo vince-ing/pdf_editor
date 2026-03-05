@@ -7,12 +7,9 @@ This class is now a pure orchestrator:
   • Never builds Tkinter widgets directly.
 
 Changes vs previous version:
-  • Native tk.Menu bar added: File, Edit, Tools, View.
-  • TopBar no longer holds Merge/Split or Images→PDF buttons.
+  • Native tk.Menu bar added: File, Actions.
   • Inspector panel can be shown/hidden from both Ctrl+T and the View menu,
     with the TopBar inspector toggle button kept in sync.
-  • OCR is now available from Tools → OCR Current Page (and still wired to
-    the page_action_callbacks for any other callers).
 """
 
 from __future__ import annotations
@@ -35,6 +32,7 @@ from src.services.annotation_service  import AnnotationService
 from src.services.redaction_service   import RedactionService
 from src.services.image_conversion    import ImageConversionService
 
+from src.commands.snapshot      import DocumentSnapshot
 from src.commands.insert_text   import InsertTextBoxCommand
 from src.commands.rotate_page   import RotatePageCommand
 from src.commands.page_ops      import ReorderPagesCommand, DuplicatePageCommand
@@ -96,6 +94,7 @@ class InteractivePDFEditor:
         self.root.configure(bg=PALETTE["bg_dark"])
         self.root.overrideredirect(True)  # remove native title bar
         self.task_manager = BackgroundTaskManager(self.root)
+        DocumentSnapshot.sweep_orphaned_files()
 
         # ── Services ──────────────────────────────────────────────────────────
         self.page_service             = PageService()
@@ -322,7 +321,7 @@ class InteractivePDFEditor:
                 "on_mousewheel": self._on_mousewheel,
                 "on_ctrl_scroll":self._on_ctrl_scroll,
                 "on_motion":     self._on_mouse_motion,
-                "on_configure":  lambda e: self._render(),
+                "on_configure":  self._on_canvas_configure,
             },
             search_bar_callbacks={
                 "on_find":       self._search_bar_find,
@@ -349,7 +348,7 @@ class InteractivePDFEditor:
         # Startup placeholder
         self._startup_frame = None
         self._update_view_mode_buttons()
-        self._update_zoom_label()
+        self._update_zoom_label(self.scale_factor)
 
         # Sync inspector toggle button to initial visible state
         self._top_bar.set_inspector_active(True)
@@ -1257,13 +1256,15 @@ class InteractivePDFEditor:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _zoom_in(self) -> None:
-        self._set_zoom(min(MAX_SCALE, self.scale_factor + SCALE_STEP))
+        target = getattr(self, "_target_scale", self.scale_factor)
+        self._set_zoom(min(MAX_SCALE, target + SCALE_STEP), debounce=True)
 
     def _zoom_out(self) -> None:
-        self._set_zoom(max(MIN_SCALE, self.scale_factor - SCALE_STEP))
+        target = getattr(self, "_target_scale", self.scale_factor)
+        self._set_zoom(max(MIN_SCALE, target - SCALE_STEP), debounce=True)
 
     def _zoom_reset(self) -> None:
-        self._set_zoom(RENDER_DPI)
+        self._set_zoom(RENDER_DPI, debounce=False)
 
     def _zoom_fit_width(self) -> None:
         if not self.doc:
@@ -1277,11 +1278,7 @@ class InteractivePDFEditor:
         new_scale = round(
             max(MIN_SCALE, min(MAX_SCALE, available_w / page.width)), 3
         )
-        self.scale_factor = new_scale
-        self._update_zoom_label()
-        self._cont_invalidate_cache()
-        self._render()
-        self._flash_status("↔ Fit width", color=PALETTE["accent_light"], duration_ms=1200)
+        self._set_zoom(new_scale, debounce=False)
 
     def _zoom_fit_page(self) -> None:
         if not self.doc:
@@ -1297,20 +1294,33 @@ class InteractivePDFEditor:
         new_scale = round(
             max(MIN_SCALE, min(MAX_SCALE, min(scale_w, scale_h))), 3
         )
-        self.scale_factor = new_scale
-        self._update_zoom_label()
+        self._set_zoom(new_scale, debounce=False)
+
+    def _set_zoom(self, s: float, debounce: bool = False) -> None:
+        self._target_scale = round(s, 3)
+        self._update_zoom_label(self._target_scale)
+        
+        if hasattr(self, "_zoom_after_id") and self._zoom_after_id:
+            self.root.after_cancel(self._zoom_after_id)
+            
+        if debounce:
+            # Wait 200ms after trackpad scrolling stops before rendering
+            self._zoom_after_id = self.root.after(200, self._apply_zoom)
+        else:
+            self._apply_zoom()
+
+    def _apply_zoom(self) -> None:
+        self._zoom_after_id = None
+        self.scale_factor = getattr(self, "_target_scale", self.scale_factor)
         self._cont_invalidate_cache()
         self._render()
-        self._flash_status("⛶ Fit page", color=PALETTE["accent_light"], duration_ms=1200)
+        if self._continuous_mode:
+            # Force Tkinter to process the new boundaries before jumping
+            self.canvas.update_idletasks()
+            self._scroll_to_current_cont()
 
-    def _set_zoom(self, s: float) -> None:
-        self.scale_factor = round(s, 3)
-        self._update_zoom_label()
-        self._cont_invalidate_cache()
-        self._render()
-
-    def _update_zoom_label(self) -> None:
-        pct = int(self.scale_factor / RENDER_DPI * 100)
+    def _update_zoom_label(self, scale: float) -> None:
+        pct = int(scale / RENDER_DPI * 100)
         self._top_bar.set_zoom_label(f"{pct}%")
         self._status_bar.set_zoom(f"Zoom {pct}%")
 
@@ -1674,8 +1684,18 @@ class InteractivePDFEditor:
         self._prune_cont_cache(idx)
         self._schedule_cont_render(idx)
     
+    def _get_visible_cont_pages(self) -> tuple[int, int]:
+        """Calculates exactly which pages are visible in the current viewport."""
+        if not self.doc:
+            return 0, 0
+        top = self.canvas.canvasy(0)
+        bottom = self.canvas.canvasy(self.canvas.winfo_height())
+        start_idx = self._cont_page_at_y(top)
+        end_idx   = self._cont_page_at_y(bottom)
+        return start_idx, end_idx
+
     def _schedule_cont_render(self, active_idx: int) -> None:
-        """Background thread queue that ONLY renders visible pages (±3 buffer)."""
+        """Background thread queue that ONLY renders visible pages (± buffer)."""
         if self._cont_after_id:
             self.root.after_cancel(self._cont_after_id)
             self._cont_after_id = None
@@ -1685,11 +1705,20 @@ class InteractivePDFEditor:
         n = self.doc.page_count
         cw = self.canvas.winfo_width()
         
-        # Build queue: priority to active page, then buffer pages outward
-        order = [active_idx]
-        for delta in range(1, 4):  # Buffer size of 3
-            if active_idx - delta >= 0: order.append(active_idx - delta)
-            if active_idx + delta < n:  order.append(active_idx + delta)
+        # Dynamically determine the visible window based on zoom level
+        start_idx, end_idx = self._get_visible_cont_pages()
+        
+        # Add a safe padding of 2 pages above and below the screen
+        BUFFER = 2
+        start_idx = max(0, start_idx - BUFFER)
+        end_idx   = min(n - 1, end_idx + BUFFER)
+
+        order = []
+        if start_idx <= active_idx <= end_idx:
+            order.append(active_idx)
+        for i in range(start_idx, end_idx + 1):
+            if i != active_idx:
+                order.append(i)
 
         def _render_one(remaining):
             if not remaining or not self.doc or not self._continuous_mode:
@@ -1698,28 +1727,32 @@ class InteractivePDFEditor:
             idx = remaining[0]
             rest = remaining[1:]
             
-            key = (idx, self.scale_factor)
-            if key not in self._cont_images:
-                p = self.doc.get_page(idx)
-                iw = int(p.width * self.scale_factor)
-                ih = int(p.height * self.scale_factor)
-                self._render_cont_page(idx, iw, ih, cw)
+            p = self.doc.get_page(idx)
+            iw = int(p.width * self.scale_factor)
+            ih = int(p.height * self.scale_factor)
+            self._render_cont_page(idx, iw, ih, cw)
                 
-            self._cont_after_id = self.root.after_idle(lambda: _render_one(rest))
+            # FIX: Changed from after_idle to after(5) to force Tkinter
+            # to push the pixels to the screen before rendering the next page!
+            self._cont_after_id = self.root.after(5, lambda: _render_one(rest))
 
         _render_one(order)
-    
+
     def _prune_cont_cache(self, active_idx: int) -> None:
         """Destroys high-res photo objects that scroll out of view to save RAM."""
         if not self._continuous_mode or not self.doc:
             return
-        BUFFER = 3
-        keep_indices = set(range(active_idx - BUFFER, active_idx + BUFFER + 1))
-        # Identify pages way outside the viewport buffer
+            
+        start_idx, end_idx = self._get_visible_cont_pages()
+        
+        # Keep a slightly larger buffer in RAM than we actively render
+        BUFFER = 4
+        keep_indices = set(range(start_idx - BUFFER, end_idx + BUFFER + 1))
+        
         keys_to_delete = [k for k in list(self._cont_images.keys()) if k[0] not in keep_indices]
         for k in keys_to_delete:
-            self.canvas.delete(f"page_img_{k[0]}")  # remove the physical canvas binding
-            del self._cont_images[k]                # destroy the pixel array in memory
+            self.canvas.delete(f"page_img_{k[0]}")
+            del self._cont_images[k]
 
     def _cont_invalidate_cache(self, page_idx: int | None = None) -> None:
         """Force flush the continuous cache (used on rotation, scaling, etc)."""
@@ -1744,6 +1777,12 @@ class InteractivePDFEditor:
     # ══════════════════════════════════════════════════════════════════════════
     #  Canvas event handlers
     # ══════════════════════════════════════════════════════════════════════════
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        """Wait 150ms after the window size changes before doing a heavy redraw."""
+        if hasattr(self, "_config_after_id") and self._config_after_id:
+            self.root.after_cancel(self._config_after_id)
+        self._config_after_id = self.root.after(150, self._render)
 
     def _canvas_to_pdf(self, cx: float, cy: float) -> tuple[float, float]:
         if self._continuous_mode:
@@ -2076,6 +2115,10 @@ class InteractivePDFEditor:
                 if aid:
                     try: self.root.after_cancel(aid)
                     except Exception: pass
+        
+        # Explicitly clear the history stack to delete all active temp files
+        self._history.clear()
+
         # Close doc and quit — use quit() not destroy() to exit the mainloop cleanly
         try: self.tts_service.stop()
         except Exception: pass

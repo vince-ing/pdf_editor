@@ -10,6 +10,7 @@ through.
 from __future__ import annotations
 
 import os
+import glob
 import tempfile
 
 import fitz
@@ -71,3 +72,19 @@ class DocumentSnapshot:
 
     def __del__(self) -> None:
         self._safe_delete()
+
+    @staticmethod
+    def sweep_orphaned_files() -> None:
+        """
+        Scans the OS temporary directory and safely deletes any orphaned
+        snapshot files left behind by prior crashed sessions.
+        """
+        temp_dir = tempfile.gettempdir()
+        pattern = os.path.join(temp_dir, "pdfed_*.snap.pdf")
+        orphans = glob.glob(pattern)
+        
+        for path in orphans:
+            try:
+                os.remove(path)
+            except OSError:
+                pass

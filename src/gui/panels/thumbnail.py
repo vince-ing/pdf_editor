@@ -222,10 +222,31 @@ class ThumbnailPanel:
         doc = self._get_doc()
         if not doc and not self._is_image_mode:
             return
+            
         n = doc.page_count if doc else len(self._image_paths)
-        if n == 0: return
-        frac = self._get_current_page() / max(n, 1)
-        self._canvas.yview_moveto(max(0.0, frac - 0.1))
+        if n == 0: 
+            return
+            
+        # Get actual pixel height of the total scrollable region
+        total_h = self._slot_h() * n + THUMB_PAD
+        if total_h <= 0:
+            return
+            
+        # Get the exact pixel Y coordinate of the active thumbnail
+        target_y = self._slot_y(self._get_current_page())
+        
+        # Offset the target Y up by 1.5 thumbnail slots.
+        # This perfectly places the active page near the top of the view
+        # while still letting you see the preceding page above it.
+        offset_y = target_y - (self._slot_h() * 1.5)
+        
+        # Convert the pixel position into a fraction (0.0 to 1.0) for Tkinter
+        frac = offset_y / total_h
+        
+        # Clamp it so we don't accidentally try to scroll past the boundaries
+        frac = max(0.0, min(1.0, frac))
+        
+        self._canvas.yview_moveto(frac)
         self._on_view_changed()
 
     def _thumb_size(self) -> tuple[int, int]:
