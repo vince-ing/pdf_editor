@@ -4,21 +4,29 @@ import tkinter.font as tkFont
 from src.gui.tools.base_tool import BaseTool
 from src.gui.widgets.edit_overlay import EditOverlay
 from src.commands.edit_text_command import EditTextCommand, RichText
+from src.utils.paragraph_grouper import (
+    group_page_spans,
+    paragraph_bbox,
+    paragraph_line_spacing,
+    hit_test,
+)
 from src.gui.theme import PAD_XL
 
 
-def _debug_span(span: dict, scale: float) -> None:
-    """Print every field PyMuPDF gives us for a span, plus derived values."""
-    font_raw   = span.get("font", "N/A")
-    size       = span.get("size", 0)
-    flags      = span.get("flags", 0)
-    color      = span.get("color", 0)
-    origin     = span.get("origin", None)
-    bbox       = span.get("bbox", None)
-    ascender   = span.get("ascender",  "N/A")
-    descender  = span.get("descender", "N/A")
-    text_snip  = span.get("text", "")[:40]
+# ──────────────────────────────────────────────────────────────────────────────
+# Debug helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
+def _debug_span(span: dict, scale: float) -> None:
+    font_raw  = span.get("font", "N/A")
+    size      = span.get("size", 0)
+    flags     = span.get("flags", 0)
+    color     = span.get("color", 0)
+    origin    = span.get("origin", None)
+    bbox      = span.get("bbox", None)
+    ascender  = span.get("ascender",  "N/A")
+    descender = span.get("descender", "N/A")
+    text_snip = span.get("text", "")[:40]
     pixel_size = -max(8, round(size * scale))
 
     print("  ── SPAN ─────────────────────────────────────────────")
@@ -36,51 +44,11 @@ def _debug_span(span: dict, scale: float) -> None:
     print(f"    text snippet : {text_snip!r}")
 
 
-def _debug_line_spacing(lines: list, font_size: float) -> tuple[float, str]:
-    """
-    Compute line spacing two ways and print both so we can see which is right.
-    Returns (spacing_value, method_used).
-    """
-    print("  ── LINE SPACING ─────────────────────────────────────")
-    if len(lines) < 2:
-        h = lines[0]["bbox"][3] - lines[0]["bbox"][1] if lines else font_size
-        ratio = h / font_size if font_size else 1.2
-        print(f"    single line — bbox height={h:.3f}  ratio={ratio:.4f}")
-        return ratio, "single-line bbox height"
-
-    bbox_y0    = lines[0]["bbox"][1]
-    bbox_y1    = lines[1]["bbox"][1]
-    bbox_gap   = bbox_y1 - bbox_y0
-    bbox_ratio = bbox_gap / font_size if font_size else 1.2
-
-    try:
-        orig_y0    = lines[0]["spans"][0]["origin"][1]
-        orig_y1    = lines[1]["spans"][0]["origin"][1]
-        orig_gap   = orig_y1 - orig_y0
-        orig_ratio = orig_gap / font_size if font_size else 1.2
-        has_origin = True
-    except (KeyError, IndexError, TypeError):
-        orig_gap   = None
-        orig_ratio = None
-        has_origin = False
-
-    print(f"    bbox[1] line0={bbox_y0:.3f}  line1={bbox_y1:.3f}")
-    print(f"    bbox gap      = {bbox_gap:.3f} pt  →  ratio = {bbox_ratio:.4f}  (OLD/WRONG: includes ascender)")
-    if has_origin:
-        print(f"    origin[1] line0={orig_y0:.3f}  line1={orig_y1:.3f}")
-        print(f"    baseline gap  = {orig_gap:.3f} pt  →  ratio = {orig_ratio:.4f}  (CORRECT: baseline-to-baseline)")
-        return orig_ratio, "baseline-to-baseline"
-    else:
-        print("    origin not available — falling back to bbox method")
-        return bbox_ratio, "bbox-top (origin missing)"
-
-
 def _debug_tkfont(family: str, pixel_size: int) -> None:
-    """Create the tkFont we'll actually use and print its metrics."""
     print("  ── TKINTER FONT ─────────────────────────────────────")
     print(f"    requested family : {family!r}  pixel_size={pixel_size}")
     try:
-        f = tkFont.Font(family=family, size=pixel_size)
+        f       = tkFont.Font(family=family, size=pixel_size)
         actual  = f.actual()
         metrics = f.metrics()
         print(f"    actual family    : {actual.get('family')!r}")
@@ -95,26 +63,49 @@ def _debug_tkfont(family: str, pixel_size: int) -> None:
         print(f"    ERROR: {e}")
 
 
-def _build_rich_text(block: dict) -> RichText:
-    """
-    Walk a PyMuPDF text block and return a ``RichText`` structure:
-    ``list[list[tuple[str, int]]]`` — lines → spans → (text, flags).
+# ──────────────────────────────────────────────────────────────────────────────
+# Rich-text builder
+# ──────────────────────────────────────────────────────────────────────────────
 
-    Spans within the same line are kept separate so the overlay can tag
-    them independently and the writer can draw them with the correct font.
+def _build_rich_text(para_spans: list[dict]) -> RichText:
     """
+    Convert a flat list of paragraph spans (from paragraph_grouper) into the
+    RichText wire format:  list[list[tuple[str, int]]].
+
+    Spans that share the same baseline y (within 0.5 pt) are grouped onto the
+    same RichText line, so a line like "Hello <bold>world</bold>" — which
+    PyMuPDF emits as two spans with the same origin y — is kept together.
+    """
+    if not para_spans:
+        return [[("", 0)]]
+
     rich: RichText = []
-    for line in block.get("lines", []):
-        line_spans: list[tuple[str, int]] = []
-        for span in line.get("spans", []):
-            text  = span.get("text", "")
-            flags = span.get("flags", 0)
-            if text:
-                line_spans.append((text, flags))
-        # Always emit a line entry so line count is preserved
-        rich.append(line_spans if line_spans else [("", 0)])
-    return rich
+    current_line: list[tuple[str, int]] = []
+    current_baseline: float | None = None
 
+    for span in para_spans:
+        baseline = round(span["origin"][1], 1)
+        flags    = span.get("flags", 0)
+        text     = span.get("text", "")
+
+        if current_baseline is None or abs(baseline - current_baseline) <= 0.5:
+            current_baseline = baseline
+            current_line.append((text, flags))
+        else:
+            if current_line:
+                rich.append(current_line)
+            current_line     = [(text, flags)]
+            current_baseline = baseline
+
+    if current_line:
+        rich.append(current_line)
+
+    return rich if rich else [[("", 0)]]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tool
+# ──────────────────────────────────────────────────────────────────────────────
 
 class EditTextTool(BaseTool):
 
@@ -123,6 +114,8 @@ class EditTextTool(BaseTool):
         self.text_service      = text_service
         self.redaction_service = redaction_service
         self.current_overlay   = None
+        # Cache paragraphs per page — re-parsed only after an edit or page change
+        self._para_cache: dict[int, list[list[dict]]] = {}
 
     def activate(self):
         self.ctx.canvas.config(cursor="ibeam")
@@ -131,6 +124,11 @@ class EditTextTool(BaseTool):
         if self.current_overlay:
             self.current_overlay.destroy_overlay()
             self.current_overlay = None
+        self._para_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Click handler
+    # ------------------------------------------------------------------
 
     def on_click(self, canvas_x: float, canvas_y: float):
         if self.current_overlay:
@@ -142,43 +140,35 @@ class EditTextTool(BaseTool):
             return
 
         page       = self.ctx.doc.get_page(p)
-        page_dict  = page.get_text_dict()
         page_width = page.width
 
         s     = self.ctx.scale
         pdf_x = (canvas_x - ox) / s
         pdf_y = (canvas_y - oy) / s
 
-        clicked_block = None
-        for block in page_dict.get("blocks", []):
-            if block.get("type") != 0:
-                continue
-            x0, y0, x1, y1 = block.get("bbox", [0, 0, 0, 0])
-            if x0 <= pdf_x <= x1 and y0 <= pdf_y <= y1:
-                clicked_block = block
+        # ── Get (or compute) paragraphs for this page ──────────────────────
+        if p not in self._para_cache:
+            self._para_cache[p] = group_page_spans(page)
+        paragraphs = self._para_cache[p]
+
+        # ── Find the paragraph the user clicked ───────────────────────────
+        clicked_para: list[dict] | None = None
+        for para in paragraphs:
+            if hit_test(pdf_x, pdf_y, para):
+                clicked_para = para
                 break
 
-        if not clicked_block:
+        if not clicked_para:
             return
 
-        # ── Extract the first span for shared metrics (font, size, color) ─
-        first_span = None
-        for line in clicked_block.get("lines", []):
-            if line.get("spans"):
-                first_span = line["spans"][0]
-                break
+        # ── Shared metrics from first span ────────────────────────────────
+        first_span = clicked_para[0]
 
-        if not first_span:
-            return
-
-        # ── Build rich-text representation of the whole block ─────────────
-        original_rich = _build_rich_text(clicked_block)
-
-        font_name  = first_span.get("font", "helv")
+        font_name = first_span.get("font", "helv")
         if "+" in font_name:
             font_name = font_name.split("+")[1]
 
-        font_size  = first_span.get("size", 12)
+        font_size  = first_span.get("size", 12.0)
         origin     = first_span.get("origin", None)
         baseline_y = origin[1] if origin else None
 
@@ -189,40 +179,41 @@ class EditTextTool(BaseTool):
         color_hex = f"#{r:02x}{g:02x}{b:02x}"
         color_rgb = (r / 255.0, g / 255.0, b / 255.0)
 
-        lines = clicked_block.get("lines", [])
+        original_rich = _build_rich_text(clicked_para)
+        bbox          = paragraph_bbox(clicked_para)
+        line_spacing  = paragraph_line_spacing(clicked_para)
+        print(f"  paragraph_bbox = {bbox}")
+        print(f"  baseline_y     = {baseline_y}")
+        print(f"  all span origins: {[sp['origin'] for sp in clicked_para]}")
 
-        # ── Debug output ──────────────────────────────────────────────────
+        # ── Debug output ───────────────────────────────────────────────────
         print("\n" + "═" * 60)
         print(f"  EDIT TOOL CLICK  page={p}  pdf_xy=({pdf_x:.1f}, {pdf_y:.1f})")
         print(f"  scale={s}  ox={ox}  oy={oy}")
-        print(f"  block bbox: {clicked_block['bbox']}")
-        print(f"  line count: {len(lines)}")
-        print(f"  rich spans: {sum(len(ln) for ln in original_rich)} total across {len(original_rich)} lines")
+        print(f"  paragraph bbox : {bbox}")
+        print(f"  paragraph spans: {len(clicked_para)}  →  {len(original_rich)} rich lines")
         _debug_span(first_span, s)
-
-        pixel_size_for_debug = -max(8, round(font_size * s))
-        _debug_tkfont(font_name, pixel_size_for_debug)
-
-        line_spacing, spacing_method = _debug_line_spacing(lines, font_size)
-        line_spacing = max(0.8, min(2.5, line_spacing))
-
-        print(f"  FINAL line_spacing = {line_spacing:.4f}  (method: {spacing_method})")
+        _debug_tkfont(font_name, -max(8, round(font_size * s)))
+        print(f"  FINAL line_spacing = {line_spacing:.4f}  (baseline-to-baseline)")
         print(f"  FINAL font_name    = {font_name!r}")
         print(f"  FINAL font_size    = {font_size}")
         print(f"  FINAL baseline_y   = {baseline_y}")
         print("═" * 60 + "\n")
-        # ─────────────────────────────────────────────────────────────────
 
         def on_commit(new_rich: RichText, pdf_bbox: tuple):
             self.current_overlay = None
+            self._para_cache.pop(p, None)
 
-            # Consider unchanged if the plain text content is identical
-            original_plain = "\n".join(
-                "".join(t for t, _ in ln) for ln in original_rich
-            )
-            new_plain = "\n".join(
-                "".join(t for t, _ in ln) for ln in new_rich
-            )
+            print("\n=== ON_COMMIT DEBUG ===")
+            print(f"  original_rich: {original_rich}")
+            print(f"  new_rich:      {new_rich}")
+            original_plain = "\n".join("".join(t for t, _ in ln) for ln in original_rich)
+            new_plain      = "\n".join("".join(t for t, _ in ln) for ln in new_rich)
+            print(f"  original_plain: {original_plain!r}")
+            print(f"  new_plain:      {new_plain!r}")
+            print(f"  plains_equal:   {new_plain == original_plain}")
+            print(f"  rich_equal:     {new_rich == original_rich}")
+            print("=== END ON_COMMIT DEBUG ===\n")
             if new_plain == original_plain and new_rich == original_rich:
                 return
 
@@ -253,7 +244,7 @@ class EditTextTool(BaseTool):
 
         self.current_overlay = EditOverlay(
             canvas       = self.ctx.canvas,
-            pdf_bbox     = clicked_block["bbox"],
+            pdf_bbox     = bbox,
             rich_text    = original_rich,
             font_family  = font_name,
             font_size    = font_size,
@@ -266,6 +257,10 @@ class EditTextTool(BaseTool):
             page_width   = page_width,
             line_spacing = line_spacing,
         )
+
+    # ------------------------------------------------------------------
+    # Page / offset resolution (unchanged)
+    # ------------------------------------------------------------------
 
     def _resolve_page_and_offsets(self, cy: float) -> tuple[int, float, float]:
         editor = self.ctx._editor

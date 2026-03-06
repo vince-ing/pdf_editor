@@ -71,6 +71,7 @@ pdf_editor
 │   └── utils
 │       ├── file_utils.py
 │       ├── font_loader.py
+│       ├── paragraph_grouper.py
 │       ├── recent_files.py
 │       ├── selection_compositor.py
 │       └── task_manager.py
