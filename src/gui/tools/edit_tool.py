@@ -276,3 +276,4 @@ class EditTextTool(BaseTool):
                 ox = self.ctx.page_offset_x
             return page_idx, ox, oy
         return self.ctx.current_page, self.ctx.page_offset_x, self.ctx.page_offset_y
+

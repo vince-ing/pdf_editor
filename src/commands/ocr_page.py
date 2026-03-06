@@ -12,67 +12,187 @@ from src.commands.snapshot import DocumentSnapshot
 from src.core.document import PDFDocument
 
 # Dynamically resolve the path to tesseract.exe based on this file's location
-CURRENT_DIR      = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT     = os.path.dirname(os.path.dirname(CURRENT_DIR))
+CURRENT_DIR        = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT       = os.path.dirname(os.path.dirname(CURRENT_DIR))
 TESSERACT_EXE_PATH = os.path.join(PROJECT_ROOT, "pytesseract", "tesseract.exe")
 
 if os.path.exists(TESSERACT_EXE_PATH):
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_EXE_PATH
 
+# Minimum Tesseract word confidence to accept (0-100)
+_MIN_CONFIDENCE = 30
 
-def generate_ocr_pdf_bytes(document: PDFDocument, page_index: int) -> bytes:
+# DPI to render regions for Tesseract
+_OCR_DPI = 300
+
+# Gaps between text blocks larger than this are treated as figure regions
+_MIN_FIGURE_GAP_PT = 60.0
+
+
+def _find_figure_regions(page: fitz.Page) -> list[fitz.Rect]:
     """
-    HEAVY WORKER: This function is safe to run in a background thread 
-    because it only reads from the document; it does not mutate it.
+    Find regions of the page that contain no text blocks — i.e. figures.
+
+    Since figures in PDFs are often stored as vector graphics or form XObjects
+    they don't appear as type=1 image blocks in get_text("dict"). Instead we
+    detect them as gaps in the vertical text layout that are large enough to
+    be a figure rather than normal paragraph spacing.
+    """
+    page_rect = page.rect
+
+    blocks = page.get_text("dict", flags=0).get("blocks", [])
+
+    # Collect top/bottom y of every text block (type=0 only)
+    text_spans: list[tuple[float, float]] = []
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        x0, y0, x1, y1 = b["bbox"]
+        text_spans.append((y0, y1))
+
+    if not text_spans:
+        # No text at all — the entire page is a figure
+        return [page_rect]
+
+    text_spans.sort(key=lambda s: s[0])
+
+    figure_rects: list[fitz.Rect] = []
+
+    # Gap above first text block
+    first_top = text_spans[0][0]
+    if first_top - page_rect.y0 > _MIN_FIGURE_GAP_PT:
+        figure_rects.append(fitz.Rect(
+            page_rect.x0, page_rect.y0, page_rect.x1, first_top))
+
+    # Gaps between consecutive text blocks
+    for i in range(len(text_spans) - 1):
+        prev_bottom = text_spans[i][1]
+        next_top    = text_spans[i + 1][0]
+        gap = next_top - prev_bottom
+        if gap > _MIN_FIGURE_GAP_PT:
+            figure_rects.append(fitz.Rect(
+                page_rect.x0, prev_bottom, page_rect.x1, next_top))
+
+    # Gap below last text block
+    last_bottom = text_spans[-1][1]
+    if page_rect.y1 - last_bottom > _MIN_FIGURE_GAP_PT:
+        figure_rects.append(fitz.Rect(
+            page_rect.x0, last_bottom, page_rect.x1, page_rect.y1))
+
+    return figure_rects
+
+
+def _ocr_region(page: fitz.Page, clip: fitz.Rect) -> list[dict]:
+    """
+    Render one region of the page at 300 DPI, run Tesseract, and return
+    word dicts with PDF-space coordinates.
+    """
+    mat   = fitz.Matrix(_OCR_DPI / 72, _OCR_DPI / 72)
+    pix   = page.get_pixmap(matrix=mat, clip=clip)
+    img   = Image.open(io.BytesIO(pix.tobytes("png")))
+    scale = _OCR_DPI / 72.0
+
+    data = pytesseract.image_to_data(
+        img,
+        output_type=pytesseract.Output.DICT,
+        config="--psm 3",
+    )
+
+    words = []
+    for i in range(len(data["text"])):
+        word = data["text"][i].strip()
+        if not word:
+            continue
+        try:
+            conf = int(data["conf"][i])
+        except (ValueError, TypeError):
+            conf = 0
+        if conf < _MIN_CONFIDENCE:
+            continue
+
+        px_h     = data["height"][i]
+        pdf_x    = clip.x0 + data["left"][i] / scale
+        pdf_y    = clip.y0 + (data["top"][i] + px_h * 0.85) / scale
+        fontsize = max(4.0, px_h / scale * 0.85)
+
+        words.append({"text": word, "x": pdf_x, "y": pdf_y, "fontsize": fontsize})
+
+    return words
+
+
+def generate_ocr_data(document: PDFDocument, page_index: int) -> list[dict] | None:
+    """
+    HEAVY WORKER — safe to run in a background thread (read-only).
+
+    Detects figure regions on the page (large vertical gaps between text blocks),
+    runs Tesseract on each one, and returns word dicts with PDF-space coordinates.
+
+    Returns None if no figure regions are found (text-only page).
     """
     doc  = document._doc
     page = doc[page_index]
 
-    # Render page at 300 DPI for high-accuracy OCR reading
-    pix = page.get_pixmap(dpi=300)
-    img = Image.open(io.BytesIO(pix.tobytes("png")))
+    figure_rects = _find_figure_regions(page)
+    print(f"[OCR DEBUG] page {page_index}: {len(figure_rects)} figure region(s)")
+    for r in figure_rects:
+        print(f"  region: {[round(x,1) for x in [r.x0,r.y0,r.x1,r.y1]]} ({r.width:.0f}x{r.height:.0f}pt)")
+    if not figure_rects:
+        print(f"  -> no figure regions found, skipping")
+        return None
 
-    # Generate new PDF bytes with an invisible text layer over the image
-    return pytesseract.image_to_pdf_or_hocr(img, extension="pdf")
+    all_words: list[dict] = []
+    for rect in figure_rects:
+        words = _ocr_region(page, rect)
+        print(f"  region {[round(x,1) for x in [rect.x0,rect.y0,rect.x1,rect.y1]]}: {len(words)} words found")
+        if words:
+            print(f"    first 3: {[w['text'] for w in words[:3]]}")
+        all_words.extend(words)
+
+    print(f"  -> total {len(all_words)} words to insert")
+    return all_words if all_words else None
 
 
 class OcrPageCommand(Command):
     """
-    Replaces an existing PDF page with a new OCR'd page using pre-computed PDF bytes.
-    This execution is lightning fast and safe for the Tkinter main thread.
+    Adds an invisible OCR text layer over figure regions of a page.
+
+    Never replaces or modifies any existing page content — only inserts
+    invisible text spans (render_mode=3) over the detected figure areas,
+    leaving all existing text, images, and layout completely untouched.
+
+    If ocr_words is None execute() is a no-op.
     """
-    
+
     label = "OCR Page"
 
-    def __init__(self, document: PDFDocument, page_index: int, ocr_pdf_bytes: bytes) -> None:
+    def __init__(
+        self,
+        document: PDFDocument,
+        page_index: int,
+        ocr_words: list[dict] | None,
+    ) -> None:
         self.document   = document
         self.page_index = page_index
-        self.ocr_pdf_bytes = ocr_pdf_bytes
+        self.ocr_words  = ocr_words
         self._snapshot  = DocumentSnapshot(document)
 
     def execute(self) -> None:
-        doc  = self.document._doc
-        page = doc[self.page_index]
+        if not self.ocr_words:
+            return
 
-        # 1. Capture the exact physical dimensions of the original page
-        original_rect = page.rect
-
-        # 2. Open the bytes we generated in the background thread
-        ocr_pdf = fitz.open("pdf", self.ocr_pdf_bytes)
-
-        # 3. Create a new blank page locked to the original physical dimensions
-        new_page = doc.new_page(
-            self.page_index + 1,
-            width=original_rect.width,
-            height=original_rect.height,
-        )
-
-        # 4. Stamp the Tesseract-generated page onto our correctly sized page.
-        new_page.show_pdf_page(new_page.rect, ocr_pdf, 0)
-
-        # 5. Delete the old page
-        doc.delete_page(self.page_index)
-        ocr_pdf.close()
+        page = self.document.get_page(self.page_index)
+        for word in self.ocr_words:
+            try:
+                page.insert_text(
+                    (word["x"], word["y"]),
+                    word["text"],
+                    fontsize=word["fontsize"],
+                    fontname="helv",
+                    color=(0, 0, 0),
+                    render_mode=3,  # invisible — text layer only, no visible ink
+                )
+            except Exception:
+                pass
 
     def undo(self) -> None:
         self._snapshot.restore(self.document)

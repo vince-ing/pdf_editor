@@ -38,7 +38,7 @@ from src.commands.rotate_page   import RotatePageCommand
 from src.commands.page_ops      import ReorderPagesCommand, DuplicatePageCommand
 from src.commands.draw_command  import DrawAnnotationCommand
 from src.commands.convert_images import ConvertImagesToPdfCommand
-from src.commands.ocr_page      import OcrPageCommand, generate_ocr_pdf_bytes
+from src.commands.ocr_page import OcrPageCommand, generate_ocr_data
 
 from src.gui.theme import (
     PALETTE, FONT_MONO, FONT_UI,
@@ -879,8 +879,11 @@ class InteractivePDFEditor:
         self._status_bar.show_progress("Running Tesseract OCR...")
 
         # 1. Define the success callback (runs on Main Thread)
-        def on_complete(pdf_bytes: bytes):
-            cmd = OcrPageCommand(self.doc, page_idx, pdf_bytes)
+        def on_complete(ocr_words):
+            if not ocr_words:
+                self._status_bar.hide_progress("OCR — page already has text, skipped")
+                return
+            cmd = OcrPageCommand(self.doc, page_idx, ocr_words)
             cmd.execute()
             self._push_history(cmd)
             self._mark_dirty()
@@ -894,7 +897,7 @@ class InteractivePDFEditor:
 
         # 3. Ship the heavy lifting to the background worker!
         self.task_manager.run_task(
-            worker_func=lambda: generate_ocr_pdf_bytes(self.doc, page_idx),
+            worker_func=lambda: generate_ocr_data(self.doc, page_idx),
             on_complete=on_complete,
             on_error=on_error
         )
@@ -1023,8 +1026,8 @@ class InteractivePDFEditor:
             results = []
             for idx in range(page_count):
                 # We reuse the same heavy function we built for the single page
-                pdf_bytes = generate_ocr_pdf_bytes(self.doc, idx)
-                results.append((idx, pdf_bytes))
+                ocr_words = generate_ocr_data(self.doc, idx)
+                results.append((idx, ocr_words))
             return results
 
         # 2. Define the Success Callback (Runs on Main Thread)
@@ -1033,8 +1036,12 @@ class InteractivePDFEditor:
             errors = []
             
             # Now safely execute the mutations in the Tkinter main loop
-            for idx, pdf_bytes in results:
-                cmd = OcrPageCommand(self.doc, idx, pdf_bytes)
+            skipped = 0
+            for idx, ocr_words in results:
+                if not ocr_words:
+                    skipped += 1
+                    continue
+                cmd = OcrPageCommand(self.doc, idx, ocr_words)
                 try:
                     cmd.execute()
                     self._push_history(cmd)
