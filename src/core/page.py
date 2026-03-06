@@ -35,10 +35,11 @@ class PDFPage:
         fontsize: int = 12,
         fontname: str = "helv",
         color: tuple[float, float, float] = (0, 0, 0),
+        render_mode: int = 0,
     ) -> None:
         self._page.insert_text(
             position, text,
-            fontsize=fontsize, fontname=fontname, color=color,
+            fontsize=fontsize, fontname=fontname, color=color, render_mode=render_mode
         )
 
     def insert_textbox(

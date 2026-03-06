@@ -31,61 +31,27 @@ _MIN_FIGURE_GAP_PT = 60.0
 
 def _find_figure_regions(page: fitz.Page) -> list[fitz.Rect]:
     """
-    Find regions of the page that contain no text blocks — i.e. figures.
-
-    Since figures in PDFs are often stored as vector graphics or form XObjects
-    they don't appear as type=1 image blocks in get_text("dict"). Instead we
-    detect them as gaps in the vertical text layout that are large enough to
-    be a figure rather than normal paragraph spacing.
+    Find regions of the page that contain images.
+    
+    Uses PyMuPDF's get_image_info() to locate the bounding boxes 
+    of all images displayed on the page.
     """
-    page_rect = page.rect
-
-    blocks = page.get_text("dict", flags=0).get("blocks", [])
-
-    # Collect top/bottom y of every text block (type=0 only)
-    text_spans: list[tuple[float, float]] = []
-    for b in blocks:
-        if b.get("type") != 0:
-            continue
-        x0, y0, x1, y1 = b["bbox"]
-        text_spans.append((y0, y1))
-
-    if not text_spans:
-        # No text at all — the entire page is a figure
-        return [page_rect]
-
-    text_spans.sort(key=lambda s: s[0])
-
     figure_rects: list[fitz.Rect] = []
-
-    # Gap above first text block
-    first_top = text_spans[0][0]
-    if first_top - page_rect.y0 > _MIN_FIGURE_GAP_PT:
-        figure_rects.append(fitz.Rect(
-            page_rect.x0, page_rect.y0, page_rect.x1, first_top))
-
-    # Gaps between consecutive text blocks
-    for i in range(len(text_spans) - 1):
-        prev_bottom = text_spans[i][1]
-        next_top    = text_spans[i + 1][0]
-        gap = next_top - prev_bottom
-        if gap > _MIN_FIGURE_GAP_PT:
-            figure_rects.append(fitz.Rect(
-                page_rect.x0, prev_bottom, page_rect.x1, next_top))
-
-    # Gap below last text block
-    last_bottom = text_spans[-1][1]
-    if page_rect.y1 - last_bottom > _MIN_FIGURE_GAP_PT:
-        figure_rects.append(fitz.Rect(
-            page_rect.x0, last_bottom, page_rect.x1, page_rect.y1))
-
+    
+    # get_image_info() returns a list of dictionaries. Each dictionary 
+    # contains a 'bbox' key with a tuple of coordinates: (x0, y0, x1, y1)
+    for img_info in page.get_image_info():
+        bbox = img_info.get("bbox")
+        if bbox:
+            figure_rects.append(fitz.Rect(bbox))
+            
     return figure_rects
 
 
 def _ocr_region(page: fitz.Page, clip: fitz.Rect) -> list[dict]:
     """
-    Render one region of the page at 300 DPI, run Tesseract, and return
-    word dicts with PDF-space coordinates.
+    Render one region of the page at 300 DPI, run Tesseract, group words by line,
+    and return text dicts with PDF-space coordinates.
     """
     mat   = fitz.Matrix(_OCR_DPI / 72, _OCR_DPI / 72)
     pix   = page.get_pixmap(matrix=mat, clip=clip)
@@ -98,26 +64,49 @@ def _ocr_region(page: fitz.Page, clip: fitz.Rect) -> list[dict]:
         config="--psm 3",
     )
 
-    words = []
+    lines = {}
+    
     for i in range(len(data["text"])):
         word = data["text"][i].strip()
         if not word:
             continue
+            
         try:
             conf = int(data["conf"][i])
         except (ValueError, TypeError):
             conf = 0
+            
         if conf < _MIN_CONFIDENCE:
             continue
+
+        # Create a unique identifier for this specific line of text
+        block_num = data["block_num"][i]
+        par_num   = data["par_num"][i]
+        line_num  = data["line_num"][i]
+        line_id   = (block_num, par_num, line_num)
 
         px_h     = data["height"][i]
         pdf_x    = clip.x0 + data["left"][i] / scale
         pdf_y    = clip.y0 + (data["top"][i] + px_h * 0.85) / scale
         fontsize = max(4.0, px_h / scale * 0.85)
 
-        words.append({"text": word, "x": pdf_x, "y": pdf_y, "fontsize": fontsize})
+        if line_id not in lines:
+            # First word in this line, establish the starting coordinates
+            lines[line_id] = {
+                "text": word,
+                "x": pdf_x,
+                "y": pdf_y,
+                "fontsize": fontsize
+            }
+        else:
+            # Append subsequent words with a space
+            lines[line_id]["text"] += " " + word
+            # Use the largest font size found on this line to ensure the bounding box fits
+            if fontsize > lines[line_id]["fontsize"]:
+                lines[line_id]["fontsize"] = fontsize
 
-    return words
+    # Flatten the grouped lines back into a list of dictionaries
+    return list(lines.values())
 
 
 def generate_ocr_data(document: PDFDocument, page_index: int) -> list[dict] | None:
