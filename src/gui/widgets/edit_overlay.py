@@ -134,10 +134,8 @@ class EditOverlay(tk.Text):
         # Extend height safely to account for the new added spacing
         # Instead of a blind +30, dynamically add only the exact extra spacing 
         # required for the number of lines, plus a tiny 5px descender buffer.
-        num_lines = text.count("\n") + 1
-        base_height = (y1 - y0) * scale_factor
-        height = base_height + (num_lines * extra_spacing) + 5
-        
+        height = ((y1 - y0) * scale_factor) + 8
+
         x_pos  = x0 * scale_factor + ox
 
         # ── Precise vertical alignment ─────────────────────────────────────
