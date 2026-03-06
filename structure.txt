@@ -5,6 +5,7 @@ pdf_editor
 │   │   ├── base.py
 │   │   ├── convert_images.py
 │   │   ├── draw_command.py
+│   │   ├── edit_text_command.py
 │   │   ├── extract_images.py
 │   │   ├── insert_image.py
 │   │   ├── insert_text.py
@@ -42,12 +43,14 @@ pdf_editor
 │   │   │   ├── annot_tool.py
 │   │   │   ├── base_tool.py
 │   │   │   ├── draw_tool.py
+│   │   │   ├── edit_tool.py
 │   │   │   ├── find_tool.py
 │   │   │   ├── image_tool.py
 │   │   │   ├── redact_tool.py
 │   │   │   └── select_tool.py
 │   │   └── widgets
 │   │       ├── __init__.py
+│   │       ├── edit_overlay.py
 │   │       ├── find_bar.py
 │   │       ├── text_box.py
 │   │       ├── tooltip.py

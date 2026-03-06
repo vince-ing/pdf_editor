@@ -110,6 +110,13 @@ class PDFPage:
     def get_image_info(self) -> list:
         return self._page.get_image_info(xrefs=True)
 
+    def get_text_dict(self) -> dict:
+        """
+        Return the full page text as a nested dict with blocks, lines, and spans.
+        Used for true in-place text editing to extract exact font properties and bboxes.
+        """
+        return self._page.get_text("dict")
+
     def get_text_blocks(self) -> list[tuple]:
         """Returns text blocks as (x0, y0, x1, y1, text, block_no, block_type)."""
         return self._page.get_text("blocks")
@@ -166,7 +173,7 @@ class PDFPage:
     def add_redact_annot(
         self,
         rect: tuple[float, float, float, float],
-        fill_color: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        fill_color: tuple[float, float, float] | None = (0.0, 0.0, 0.0),
         replacement_text: str = "",
     ) -> None:
         """
@@ -189,7 +196,7 @@ class PDFPage:
         fitz_rect = fitz.Rect(*rect)
         self._page.add_redact_annot(
             quad=fitz_rect,
-            fill=list(fill_color),
+            fill=list(fill_color) if fill_color is not None else None,
             text=replacement_text if replacement_text else None,
             fontsize=10 if replacement_text else 0,
         )

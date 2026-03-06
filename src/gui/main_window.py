@@ -63,6 +63,7 @@ from src.gui.tools.image_tool  import ImageInsertTool, ImageExtractTool
 from src.gui.tools.select_tool import SelectTextTool
 from src.gui.tools.redact_tool import RedactTool
 from src.gui.tools.draw_tool   import DrawTool
+from src.gui.tools.edit_tool   import EditTextTool
 
 from src.utils.recent_files import RecentFiles
 from src.services.tts_service import TtsService
@@ -416,6 +417,9 @@ class InteractivePDFEditor:
             ctx, self.image_service, set_hint=lambda t: None)
         self._tools["extract"]      = ImageExtractTool(ctx, self.image_service)
         self._tools["select_text"]  = SelectTextTool(ctx, self.root)
+        self._tools["edit_text"]    = EditTextTool(
+            ctx, self.text_service, self.redaction_service
+        )
         self._tools["redact"]       = RedactTool(
             ctx, self.redaction_service,
             get_fill_color=lambda:       s["redact_fill_color"],
@@ -458,6 +462,7 @@ class InteractivePDFEditor:
             "highlight": "crosshair", "rect_annot": "crosshair",
             "select_text": "ibeam", "extract": "arrow",
             "redact": "crosshair", "draw": "crosshair",
+            "edit_text": "ibeam",
         }
         self.canvas.config(cursor=cursor_map.get(name, "crosshair"))
 

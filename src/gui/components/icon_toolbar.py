@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 TOOL_DEFINITIONS = [
     ("__sep__", None, "Selection",          None),
     ("select_text",  "⬚",  "Select Text  — click or drag to copy text",   "select"),
+    ("edit_text",    "✎",  "Edit Text  — click paragraph to edit in-place", "select"),
     ("__sep__", None, "Markup",             None),
     ("highlight",    "▐",  "Highlight  — drag to mark a region",           "markup"),
     ("rect_annot",   "▭",  "Rectangle  — drag to draw a box annotation",   "markup"),
@@ -39,6 +40,7 @@ TOOL_DEFINITIONS = [
 # Single-key shortcut → tool name
 TOOL_KEY_MAP: dict[str, str] = {
     "v": "select_text",
+    "w": "edit_text",
     "t": "text",
     "h": "highlight",
     "r": "rect_annot",

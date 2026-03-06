@@ -22,14 +22,14 @@ from src.core.document import PDFDocument
 class RedactionService:
     """Applies permanent content redactions to a PDF page."""
 
-    DEFAULT_FILL: tuple[float, float, float] = (0.0, 0.0, 0.0)   # black
+    DEFAULT_FILL: tuple[float, float, float] | None = (0.0, 0.0, 0.0)   
 
     def add_redaction(
         self,
         document: PDFDocument,
         page_index: int,
         rect: tuple[float, float, float, float],
-        fill_color: tuple[float, float, float] = DEFAULT_FILL,
+        fill_color: tuple[float, float, float] | None = DEFAULT_FILL,
         replacement_text: str = "",
     ) -> None:
         """
