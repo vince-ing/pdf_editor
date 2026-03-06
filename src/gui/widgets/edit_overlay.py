@@ -110,7 +110,7 @@ class EditOverlay(tk.Text):
             undo=True,
             spacing1=0,
             spacing2=extra_spacing,
-            spacing3=0,
+            spacing3=extra_spacing,
         )
 
         self.canvas              = canvas
@@ -132,7 +132,12 @@ class EditOverlay(tk.Text):
             width = (x1 - x0) * 1.05 * scale_factor
 
         # Extend height safely to account for the new added spacing
-        height = (y1 - y0) * scale_factor + 30
+        # Instead of a blind +30, dynamically add only the exact extra spacing 
+        # required for the number of lines, plus a tiny 5px descender buffer.
+        num_lines = text.count("\n") + 1
+        base_height = (y1 - y0) * scale_factor
+        height = base_height + (num_lines * extra_spacing) + 5
+        
         x_pos  = x0 * scale_factor + ox
 
         # ── Precise vertical alignment ─────────────────────────────────────
