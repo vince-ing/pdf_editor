@@ -3,7 +3,7 @@ import tkinter.font as tkFont
 
 from src.gui.tools.base_tool import BaseTool
 from src.gui.widgets.edit_overlay import EditOverlay
-from src.commands.edit_text_command import EditTextCommand
+from src.commands.edit_text_command import EditTextCommand, RichText
 from src.gui.theme import PAD_XL
 
 
@@ -15,8 +15,8 @@ def _debug_span(span: dict, scale: float) -> None:
     color      = span.get("color", 0)
     origin     = span.get("origin", None)
     bbox       = span.get("bbox", None)
-    ascender   = span.get("ascender",  "N/A")   # relative, e.g. 0.905
-    descender  = span.get("descender", "N/A")   # relative, e.g. -0.212
+    ascender   = span.get("ascender",  "N/A")
+    descender  = span.get("descender", "N/A")
     text_snip  = span.get("text", "")[:40]
 
     pixel_size = -max(8, round(size * scale))
@@ -48,16 +48,14 @@ def _debug_line_spacing(lines: list, font_size: float) -> tuple[float, str]:
         print(f"    single line — bbox height={h:.3f}  ratio={ratio:.4f}")
         return ratio, "single-line bbox height"
 
-    # Method A: bbox top to bbox top (old, wrong)
-    bbox_y0 = lines[0]["bbox"][1]
-    bbox_y1 = lines[1]["bbox"][1]
-    bbox_gap = bbox_y1 - bbox_y0
+    bbox_y0    = lines[0]["bbox"][1]
+    bbox_y1    = lines[1]["bbox"][1]
+    bbox_gap   = bbox_y1 - bbox_y0
     bbox_ratio = bbox_gap / font_size if font_size else 1.2
 
-    # Method B: baseline (origin) to baseline
     try:
-        orig_y0 = lines[0]["spans"][0]["origin"][1]
-        orig_y1 = lines[1]["spans"][0]["origin"][1]
+        orig_y0    = lines[0]["spans"][0]["origin"][1]
+        orig_y1    = lines[1]["spans"][0]["origin"][1]
         orig_gap   = orig_y1 - orig_y0
         orig_ratio = orig_gap / font_size if font_size else 1.2
         has_origin = True
@@ -83,7 +81,7 @@ def _debug_tkfont(family: str, pixel_size: int) -> None:
     print(f"    requested family : {family!r}  pixel_size={pixel_size}")
     try:
         f = tkFont.Font(family=family, size=pixel_size)
-        actual = f.actual()
+        actual  = f.actual()
         metrics = f.metrics()
         print(f"    actual family    : {actual.get('family')!r}")
         print(f"    actual size      : {actual.get('size')}")
@@ -95,6 +93,27 @@ def _debug_tkfont(family: str, pixel_size: int) -> None:
         print(f"    metrics fixed    : {metrics['fixed']}")
     except Exception as e:
         print(f"    ERROR: {e}")
+
+
+def _build_rich_text(block: dict) -> RichText:
+    """
+    Walk a PyMuPDF text block and return a ``RichText`` structure:
+    ``list[list[tuple[str, int]]]`` — lines → spans → (text, flags).
+
+    Spans within the same line are kept separate so the overlay can tag
+    them independently and the writer can draw them with the correct font.
+    """
+    rich: RichText = []
+    for line in block.get("lines", []):
+        line_spans: list[tuple[str, int]] = []
+        for span in line.get("spans", []):
+            text  = span.get("text", "")
+            flags = span.get("flags", 0)
+            if text:
+                line_spans.append((text, flags))
+        # Always emit a line entry so line count is preserved
+        rich.append(line_spans if line_spans else [("", 0)])
+    return rich
 
 
 class EditTextTool(BaseTool):
@@ -122,8 +141,8 @@ class EditTextTool(BaseTool):
         if not self.ctx.doc:
             return
 
-        page      = self.ctx.doc.get_page(p)
-        page_dict = page.get_text_dict()
+        page       = self.ctx.doc.get_page(p)
+        page_dict  = page.get_text_dict()
         page_width = page.width
 
         s     = self.ctx.scale
@@ -142,6 +161,7 @@ class EditTextTool(BaseTool):
         if not clicked_block:
             return
 
+        # ── Extract the first span for shared metrics (font, size, color) ─
         first_span = None
         for line in clicked_block.get("lines", []):
             if line.get("spans"):
@@ -151,19 +171,14 @@ class EditTextTool(BaseTool):
         if not first_span:
             return
 
-        full_text = ""
-        for line in clicked_block.get("lines", []):
-            for span in line.get("spans", []):
-                full_text += span.get("text", "")
-            full_text += "\n"
-        full_text = full_text.strip()
+        # ── Build rich-text representation of the whole block ─────────────
+        original_rich = _build_rich_text(clicked_block)
 
         font_name  = first_span.get("font", "helv")
         if "+" in font_name:
             font_name = font_name.split("+")[1]
 
         font_size  = first_span.get("size", 12)
-        font_flags = first_span.get("flags", 0)
         origin     = first_span.get("origin", None)
         baseline_y = origin[1] if origin else None
 
@@ -176,12 +191,13 @@ class EditTextTool(BaseTool):
 
         lines = clicked_block.get("lines", [])
 
-        # ── FULL DEBUG OUTPUT ─────────────────────────────────────────────────
+        # ── Debug output ──────────────────────────────────────────────────
         print("\n" + "═" * 60)
         print(f"  EDIT TOOL CLICK  page={p}  pdf_xy=({pdf_x:.1f}, {pdf_y:.1f})")
         print(f"  scale={s}  ox={ox}  oy={oy}")
         print(f"  block bbox: {clicked_block['bbox']}")
         print(f"  line count: {len(lines)}")
+        print(f"  rich spans: {sum(len(ln) for ln in original_rich)} total across {len(original_rich)} lines")
         _debug_span(first_span, s)
 
         pixel_size_for_debug = -max(8, round(font_size * s))
@@ -195,25 +211,33 @@ class EditTextTool(BaseTool):
         print(f"  FINAL font_size    = {font_size}")
         print(f"  FINAL baseline_y   = {baseline_y}")
         print("═" * 60 + "\n")
-        # ─────────────────────────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────
 
-        def on_commit(new_text, pdf_bbox):
+        def on_commit(new_rich: RichText, pdf_bbox: tuple):
             self.current_overlay = None
-            if new_text == full_text:
+
+            # Consider unchanged if the plain text content is identical
+            original_plain = "\n".join(
+                "".join(t for t, _ in ln) for ln in original_rich
+            )
+            new_plain = "\n".join(
+                "".join(t for t, _ in ln) for ln in new_rich
+            )
+            if new_plain == original_plain and new_rich == original_rich:
                 return
+
             cmd = EditTextCommand(
                 self.redaction_service,
                 self.text_service,
                 self.ctx.doc,
                 p,
                 pdf_bbox,
-                new_text,
-                full_text,
+                new_rich,
+                original_rich,
                 font_name,
                 font_size,
                 color_rgb,
                 line_spacing,
-                font_flags,
                 baseline_y,
             )
             try:
@@ -230,7 +254,7 @@ class EditTextTool(BaseTool):
         self.current_overlay = EditOverlay(
             canvas       = self.ctx.canvas,
             pdf_bbox     = clicked_block["bbox"],
-            text         = full_text,
+            rich_text    = original_rich,
             font_family  = font_name,
             font_size    = font_size,
             color_hex    = color_hex,
@@ -239,7 +263,6 @@ class EditTextTool(BaseTool):
             oy           = oy,
             on_commit    = on_commit,
             baseline_y   = baseline_y,
-            font_flags   = font_flags,
             page_width   = page_width,
             line_spacing = line_spacing,
         )
