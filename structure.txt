@@ -70,6 +70,7 @@ pdf_editor
 │   │   └── tts_service.py
 │   └── utils
 │       ├── file_utils.py
+│       ├── font_loader.py
 │       ├── recent_files.py
 │       ├── selection_compositor.py
 │       └── task_manager.py

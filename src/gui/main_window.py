@@ -70,6 +70,7 @@ from src.services.tts_service import TtsService
 from src.gui.widgets.tts_bar import TtsBar
 from src.utils.selection_compositor import composite_selection
 from src.utils.task_manager import BackgroundTaskManager
+from src.utils.font_loader import load_custom_fonts
 from src.services.toc_service        import TocService           
 from src.commands.toc_commands       import ModifyTocCommand 
 
@@ -2303,6 +2304,7 @@ class InteractivePDFEditor:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    load_custom_fonts()
     root = tk.Tk()
     InteractivePDFEditor(root)
     root.mainloop()

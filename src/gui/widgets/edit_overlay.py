@@ -5,10 +5,6 @@ import tkinter.font as tkFont
 def _resolve_tk_family(pdf_font_name: str) -> str:
     """
     Map a PDF font name to a real Tkinter/system font family name.
-
-    PDF fonts come back as e.g. "ArialMT", "Arial-BoldMT", "Arial,Bold",
-    "TimesNewRomanPSMT", "CourierNewPSMT" — exact-match dicts miss all of
-    these.  We do a case-insensitive substring search instead.
     """
     lower = pdf_font_name.lower()
 
@@ -22,10 +18,11 @@ def _resolve_tk_family(pdf_font_name: str) -> str:
         ("times new roman", "Times New Roman"),
         ("timesnewroman",   "Times New Roman"),
         ("timesmt",         "Times New Roman"),
+        ("times",           "Times New Roman"), 
         ("tiro",            "Times New Roman"),
         ("georgia",         "Georgia"),
-        ("arial",           "Arial"),          # catches ArialMT, Arial-BoldMT, etc.
-        ("helv",            "Arial"),          # PostScript alias
+        ("arial",           "Arial"),
+        ("helv",            "Arial"),          
         ("helvetica",       "Arial"),
         ("calibri",         "Calibri"),
         ("cambria",         "Cambria"),
@@ -33,7 +30,7 @@ def _resolve_tk_family(pdf_font_name: str) -> str:
         ("trebuchet",       "Trebuchet MS"),
         ("garamond",        "Garamond"),
         ("symbol",          "Symbol"),
-        ("wingdings",       "Wingdings"),
+        ("wingdings",       "Wingdings"),       
         ("zadb",            "Wingdings"),
         ("zapf",            "Wingdings"),
     ]
@@ -42,8 +39,6 @@ def _resolve_tk_family(pdf_font_name: str) -> str:
         if fragment in lower:
             return family
 
-    # Unknown font — fall back to Arial rather than passing the raw PDF name,
-    # which Tkinter won't recognise and will silently substitute anyway.
     return "Arial"
 
 
@@ -76,6 +71,8 @@ class EditOverlay(tk.Text):
         on_commit,
         baseline_y=None,
         font_flags=0,
+        page_width=None,
+        line_spacing=1.2,
     ):
         tk_family = _resolve_tk_family(font_family)
 
@@ -94,6 +91,12 @@ class EditOverlay(tk.Text):
             slant=slant,
         )
 
+        # Calculate exactly how many extra pixels of spacing Tkinter needs 
+        # between lines to perfectly match the PDF's mathematical line height.
+        tk_linespace = self._tk_font.metrics("linespace")
+        target_linespace_px = line_spacing * font_size * scale_factor
+        extra_spacing = max(0, int(round(target_linespace_px - tk_linespace)))
+
         super().__init__(
             canvas,
             bd=0,
@@ -106,7 +109,7 @@ class EditOverlay(tk.Text):
             wrap="word",
             undo=True,
             spacing1=0,
-            spacing2=0,
+            spacing2=extra_spacing,
             spacing3=0,
         )
 
@@ -120,8 +123,16 @@ class EditOverlay(tk.Text):
         self.bind("<Escape>",   self._cancel)
 
         x0, y0, x1, y1 = pdf_bbox
-        width  = (x1 - x0) * scale_factor
-        height = (y1 - y0) * scale_factor
+        # Add a 5% (1.05) compensation buffer to the width so the slightly wider 
+        # Windows OS text rendering doesn't force an early line wrap.
+        if page_width is not None:
+            calc_width = max((x1 - x0) * 1.05, page_width - (2 * x0))
+            width = calc_width * scale_factor
+        else:
+            width = (x1 - x0) * 1.05 * scale_factor
+
+        # Extend height safely to account for the new added spacing
+        height = (y1 - y0) * scale_factor + 30
         x_pos  = x0 * scale_factor + ox
 
         # ── Precise vertical alignment ─────────────────────────────────────

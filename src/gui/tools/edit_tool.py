@@ -124,6 +124,7 @@ class EditTextTool(BaseTool):
 
         page      = self.ctx.doc.get_page(p)
         page_dict = page.get_text_dict()
+        page_width = page.width
 
         s     = self.ctx.scale
         pdf_x = (canvas_x - ox) / s
@@ -212,6 +213,8 @@ class EditTextTool(BaseTool):
                 font_size,
                 color_rgb,
                 line_spacing,
+                font_flags,
+                baseline_y,
             )
             try:
                 cmd.execute()
@@ -237,6 +240,8 @@ class EditTextTool(BaseTool):
             on_commit    = on_commit,
             baseline_y   = baseline_y,
             font_flags   = font_flags,
+            page_width   = page_width,
+            line_spacing = line_spacing,
         )
 
     def _resolve_page_and_offsets(self, cy: float) -> tuple[int, float, float]:

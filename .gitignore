@@ -8,6 +8,7 @@ __pycache__/
 
 models/
 generate_tree.py
+fonts/
 
 # Distribution / packaging
 pytesseract/
