@@ -18,10 +18,6 @@ class TextService:
         fontname: str = "helv",
         color: tuple[float, float, float] = (0, 0, 0),
     ) -> None:
-        """
-        Inserts a string of text onto a specific page at (x, y) from top-left.
-        color: RGB tuple with values in range 0.0–1.0.
-        """
         page = document.get_page(page_index)
         page.insert_text(position, text, fontsize=fontsize, fontname=fontname, color=color)
 
@@ -35,6 +31,7 @@ class TextService:
         fontname: str = "helv",
         color: tuple[float, float, float] = (0, 0, 0),
         align: int = 0,
+        lineheight: float | None = None,
     ) -> float:
         """
         Inserts text into a bounded rectangle.
@@ -43,6 +40,9 @@ class TextService:
         page = document.get_page(page_index)
         return page.insert_textbox(
             rect, text,
-            fontsize=fontsize, fontname=fontname,
-            color=color, align=align,
+            fontsize=fontsize,
+            fontname=fontname,
+            color=color,
+            align=align,
+            lineheight=lineheight,
         )
