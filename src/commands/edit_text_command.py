@@ -115,11 +115,68 @@ class EditTextCommand(Command):
         self._write(self.original_rich)
 
     # ------------------------------------------------------------------
+    # Word-wrap helper
+    # ------------------------------------------------------------------
+
+    def _wrap_spans(
+        self,
+        spans: list[tuple[str, int]],
+        max_width: float,
+    ) -> list[list[tuple[str, int]]]:
+        """
+        Word-wrap a single RichText line (list of styled spans) into multiple
+        visual lines that each fit within *max_width* PDF points.
+
+        Splitting is done at space boundaries.  Each token (word + trailing
+        space) is measured with the font that applies to it, so bold words —
+        which are slightly wider — are accounted for correctly.
+
+        Returns a list of visual lines, each being a list of (text, flags).
+        """
+        # Flatten to (token, flags) pairs, splitting only on spaces
+        tokens: list[tuple[str, int]] = []
+        for chunk_text, flags in spans:
+            parts = chunk_text.split(" ")
+            for i, part in enumerate(parts):
+                token = part + (" " if i < len(parts) - 1 else "")
+                if token:
+                    tokens.append((token, flags))
+
+        visual_lines: list[list[tuple[str, int]]] = []
+        current_line: list[tuple[str, int]] = []
+        current_width = 0.0
+
+        for token, flags in tokens:
+            font     = self._resolve_pymupdf_font(self.fontname, flags)
+            token_w  = self._fitz_text_length(token, font, self.fontsize)
+
+            if not current_line or current_width + token_w <= max_width:
+                current_line.append((token, flags))
+                current_width += token_w
+            else:
+                visual_lines.append(current_line)
+                current_line  = [(token, flags)]
+                current_width = token_w
+
+        if current_line:
+            visual_lines.append(current_line)
+
+        return visual_lines
+
+    # ------------------------------------------------------------------
     # Core renderer
     # ------------------------------------------------------------------
 
     def _write(self, rich: RichText) -> None:
-        """Redact the original bbox then re-draw each styled span."""
+        """
+        Redact the original bbox then re-draw each styled span with
+        word-wrapping so text never overflows horizontally.
+
+        Each RichText line is word-wrapped to fit the original paragraph
+        width.  The resulting visual lines are drawn span-by-span with
+        ``insert_text``, advancing the x cursor by the measured width of
+        each chunk so mixed bold/normal spans sit flush against each other.
+        """
         self.redaction_service.add_redaction(
             self.document,
             self.page_index,
@@ -127,10 +184,17 @@ class EditTextCommand(Command):
             fill_color=(1.0, 1.0, 1.0),
         )
 
-        x0 = self.original_bbox[0]
+        x0, _, x1, _ = self.original_bbox
+        max_width     = x1 - x0
 
-        for line_idx, spans in enumerate(rich):
-            # ── Compute the baseline Y for this line ──────────────────────
+        # ── Expand RichText lines into word-wrapped visual lines ──────────
+        visual_lines: list[list[tuple[str, int]]] = []
+        for spans in rich:
+            wrapped = self._wrap_spans(spans, max_width)
+            visual_lines.extend(wrapped)
+
+        # ── Draw each visual line span-by-span ────────────────────────────
+        for line_idx, spans in enumerate(visual_lines):
             if self.baseline_y is not None:
                 current_baseline = (
                     self.baseline_y
@@ -143,7 +207,6 @@ class EditTextCommand(Command):
                     + line_idx * self.fontsize * self.lineheight
                 )
 
-            # ── Draw each span, advancing x by the measured text width ────
             cursor_x = x0
             for chunk_text, chunk_flags in spans:
                 if not chunk_text:
@@ -161,7 +224,6 @@ class EditTextCommand(Command):
                     color=self.color,
                 )
 
-                # Advance cursor so the next span starts right after this one
                 cursor_x += self._fitz_text_length(
                     chunk_text, pymupdf_font, self.fontsize
                 )
