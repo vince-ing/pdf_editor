@@ -19,10 +19,7 @@ from src.services.redaction_service   import RedactionService
 from src.services.image_conversion    import ImageConversionService
 from src.services.toc_service         import TocService           
 from src.commands.snapshot            import DocumentSnapshot
-from src.commands.snapshot       import DocumentSnapshot
-from src.commands.rotate_page    import RotatePageCommand
-from src.commands.page_ops       import ReorderPagesCommand, DuplicatePageCommand
-from src.commands.toc_commands   import ModifyTocCommand
+from src.commands.toc_commands        import ModifyTocCommand 
 
 from src.gui.theme import PALETTE, RENDER_DPI, PAD_M
 from src.gui.history_manager  import HistoryManager
@@ -30,12 +27,13 @@ from src.gui.app_context      import AppContext
 from src.gui.viewport_manager import ViewportManager
 from src.gui.tools.tool_manager import ToolManager
 
-# Controllers
-from src.gui.controllers.tts_controller      import TtsController
-from src.gui.controllers.ocr_controller      import OcrController
-from src.gui.controllers.document_controller import DocumentController
-from src.gui.controllers.history_controller  import HistoryController
-from src.gui.controllers.window_controller   import WindowController
+# Phase 3 & 4 Controllers
+from src.gui.controllers.tts_controller       import TtsController
+from src.gui.controllers.ocr_controller       import OcrController
+from src.gui.controllers.document_controller  import DocumentController
+from src.gui.controllers.history_controller   import HistoryController
+from src.gui.controllers.window_controller    import WindowController
+from src.gui.controllers.thumbnail_controller import ThumbnailController
 
 # UI Components
 from src.gui.components.top_bar      import TopBar
@@ -143,6 +141,13 @@ class InteractivePDFEditor:
             push_history=self.history_controller.push, mark_dirty=self._mark_dirty, flash_status=self._flash_status
         )
 
+        self.thumbnail_controller = ThumbnailController(
+            get_doc=lambda: self.doc, viewport=self.viewport, document_controller=self.document_controller,
+            history_controller=self.history_controller, get_right_panel=lambda: self._right_panel,
+            page_service=self.page_service, mark_dirty=self._mark_dirty, flash_status=self._flash_status,
+            navigate_to=self._navigate_to
+        )
+
         self.window_controller = WindowController(
             root=self.root,
             callbacks={
@@ -239,9 +244,14 @@ class InteractivePDFEditor:
         self._right_panel = RightPanel(
             self._body, get_doc=lambda: self.doc, get_current_page=lambda: self.current_page_idx,
             thumbnail_callbacks={
-                "root": self.root, "page_click": self._thumb_page_click, "reorder": self._thumb_reorder,
-                "add_page": self._thumb_add_page, "delete_page": self._thumb_delete_page, "duplicate_page": self._thumb_duplicate_page,
-                "rotate_page": self._thumb_rotate_page, "prev_page": self._prev_page, "next_page": self._next_page, "on_page_jump": self._on_page_jump,
+                "root": self.root, 
+                "page_click": lambda idx: self.thumbnail_controller.page_click(idx), 
+                "reorder": lambda s, d: self.thumbnail_controller.reorder(s, d),
+                "add_page": lambda idx: self.thumbnail_controller.add_page(idx), 
+                "delete_page": lambda idx: self.thumbnail_controller.delete_page(idx), 
+                "duplicate_page": lambda idx: self.thumbnail_controller.duplicate_page(idx),
+                "rotate_page": lambda idx, angle: self.thumbnail_controller.rotate_page(idx, angle), 
+                "prev_page": self._prev_page, "next_page": self._next_page, "on_page_jump": self._on_page_jump,
             },
             tool_style_state={}, on_tool_style_change=lambda k, v: self.tool_manager.on_tool_style_change(k, v),
             toc_callbacks={"on_navigate": self._toc_navigate, "on_toc_changed": self._toc_changed, "get_page_count": lambda: self.doc.page_count if self.doc else 0},
@@ -348,109 +358,17 @@ class InteractivePDFEditor:
         self.viewport.navigate_to(idx)
         if self.tool_manager.current_tool: self.tool_manager.current_tool.activate()
 
-    def _thumb_page_click(self, idx: int) -> None:
-        if self.document_controller.is_staging_mode: self.document_controller.preview_staging_image(idx)
-        elif self.doc and idx != self.current_page_idx: self._navigate_to(idx)
-
-    def _thumb_reorder(self, src_idx: int, dst_idx: int) -> None:
-        if self.document_controller.is_staging_mode:
-            if src_idx == dst_idx: return
-            path = self.document_controller.staging_images.pop(src_idx)
-            insert_at = max(0, min(dst_idx if dst_idx < src_idx else dst_idx - 1, len(self.document_controller.staging_images)))
-            self.document_controller.staging_images.insert(insert_at, path)
-            self._right_panel.thumb.reset_for_images(self.document_controller.staging_images)
-            self.document_controller.preview_staging_image(insert_at)
-            self._flash_status(f"↕ Moved image {src_idx+1} → {insert_at+1}")
-            return
-        if not self.doc or src_idx == dst_idx: return
-        n = self.doc.page_count
-        if not (0 <= src_idx < n) or not (0 <= dst_idx <= n): return
-        order = list(range(n))
-        order.pop(src_idx)
-        insert_at = max(0, min(dst_idx if dst_idx < src_idx else dst_idx - 1, len(order)))
-        order.insert(insert_at, src_idx)
-        if order == list(range(n)): return
-        prev_page = self.current_page_idx
-        cmd = ReorderPagesCommand(self.doc, order)
-        try: cmd.execute()
-        except Exception as ex:
-            cmd.cleanup()
-            return messagebox.showerror("Reorder Error", str(ex))
-        try: self.viewport.current_page_idx = order.index(prev_page)
-        except ValueError: self.viewport.current_page_idx = 0
-        self._mark_dirty()
-        self.viewport.invalidate_cache()
-        self._right_panel.thumb.reset()
-        self.viewport.render()
-        self.history_controller.push(cmd)
-        self._flash_status(f"↕ Moved page {src_idx+1} → {insert_at+1}")
-
-    def _thumb_add_page(self, after_idx: int) -> None:
-        if not self.doc: return
-        try:
-            ref = self.doc.get_page(max(0, after_idx))
-            self.doc.insert_page(after_idx + 1, width=ref.width, height=ref.height)
-        except Exception as ex: return messagebox.showerror("Add Page", str(ex))
-        self.viewport.current_page_idx = after_idx + 1
-        self._mark_dirty()
-        self.viewport.invalidate_cache()
-        self._right_panel.thumb.reset()
-        self.viewport.render()
-        self._flash_status(f"+ Added page at {after_idx+2}")
-
-    def _thumb_delete_page(self, idx: int) -> None:
-        if not self.doc: return
-        if self.doc.page_count <= 1: return messagebox.showwarning("Cannot Delete", "A PDF must have at least one page.")
-        if not messagebox.askyesno("Delete Page", f"Permanently delete page {idx+1}?", icon="warning"): return
-        try: self.doc.delete_page(idx)
-        except Exception as ex: return messagebox.showerror("Delete", str(ex))
-        self.viewport.current_page_idx = min(self.current_page_idx, self.doc.page_count - 1)
-        self._mark_dirty()
-        self.viewport.invalidate_cache()
-        self._right_panel.thumb.reset()
-        self.viewport.render()
-        self._flash_status(f"✕ Deleted page {idx+1}")
-
-    def _thumb_duplicate_page(self, idx: int) -> None:
-        if not self.doc: return
-        cmd = DuplicatePageCommand(self.doc, idx)
-        try: cmd.execute()
-        except Exception as ex:
-            cmd.cleanup()
-            return messagebox.showerror("Duplicate", str(ex))
-        self.history_controller.push(cmd)
-        self.viewport.current_page_idx = idx + 1
-        self._mark_dirty()
-        self.viewport.invalidate_cache()
-        self._right_panel.thumb.reset()
-        self.viewport.render()
-        self._flash_status(f"⧉ Duplicated page {idx+1}")
-
-    def _thumb_rotate_page(self, idx: int, angle: int) -> None:
-        if not self.doc: return
-        cmd = RotatePageCommand(self.page_service, self.doc, idx, angle)
-        try: cmd.execute()
-        except Exception as ex:
-            cmd.cleanup()
-            return messagebox.showerror("Rotate", str(ex))
-        self.history_controller.push(cmd)
-        self._right_panel.thumb.mark_dirty(idx)
-        self.viewport.invalidate_cache(idx)
-        if idx == self.current_page_idx: self.viewport.render()
-        self._flash_status(f"{'↺' if angle < 0 else '↻'} Rotated page {idx+1}")
-
     def _rotate(self, angle: int) -> None:
-        if self.doc: self._thumb_rotate_page(self.current_page_idx, angle)
+        if self.doc: self.thumbnail_controller.rotate_page(self.current_page_idx, angle)
 
     def _add_page(self) -> None:
-        if self.doc: self._thumb_add_page(self.current_page_idx)
+        if self.doc: self.thumbnail_controller.add_page(self.current_page_idx)
 
     def _delete_page(self) -> None:
-        if self.doc: self._thumb_delete_page(self.current_page_idx)
+        if self.doc: self.thumbnail_controller.delete_page(self.current_page_idx)
 
     def _toc_navigate(self, page_idx: int) -> None:
-        if self.doc and 0 <= page_idx < self.doc.page_count: 
-            self._navigate_to(page_idx)
+        if self.doc and 0 <= page_idx < self.doc.page_count: self._navigate_to(page_idx)
 
     def _toc_changed(self, new_toc: list) -> None:
         if not self.doc: return
