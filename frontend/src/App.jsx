@@ -22,6 +22,15 @@ function App() {
     const refreshDocumentState = useCallback(async () => {
         try {
             const data = await engineApi.getDocumentState();
+            // ── DIAGNOSTIC: remove these logs once working ──
+            if (data?.children?.[0]) {
+                console.log('[DEBUG] First page from API:', {
+                    id: data.children[0].id,
+                    rotation: data.children[0].rotation,
+                    node_type: data.children[0].node_type,
+                    keys: Object.keys(data.children[0]),
+                });
+            }
             if (data && data.node_type === 'document') {
                 setDocumentState(data);
             }
@@ -58,6 +67,13 @@ function App() {
             await engineApi.undo();
             await refreshDocumentState();
         } catch { alert('Nothing to undo!'); }
+    };
+
+    const handleRedo = async () => {
+        try {
+            await engineApi.redo();
+            await refreshDocumentState();
+        } catch { alert('Nothing to redo!'); }
     };
 
     const handleFileUpload = async (event) => {
@@ -117,7 +133,8 @@ function App() {
 
                 <input type="file" accept="application/pdf" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
                 <button onClick={() => fileInputRef.current.click()} style={{ ...btnBase, backgroundColor: '#2980b9', color: 'white' }}>Open PDF</button>
-                <button onClick={handleUndo} style={{ ...btnBase, backgroundColor: '#c0392b', color: 'white' }}>Undo</button>
+                <button onClick={handleUndo} style={{ ...btnBase, backgroundColor: '#c0392b', color: 'white' }} title="Undo (Ctrl+Z)">↩ Undo</button>
+                <button onClick={handleRedo} style={{ ...btnBase, backgroundColor: '#7f8c8d', color: 'white' }} title="Redo (Ctrl+Y)">↪ Redo</button>
 
                 <div style={{ width: '1px', height: '28px', backgroundColor: 'rgba(255,255,255,0.15)' }} />
 
@@ -167,6 +184,7 @@ function App() {
                         documentState={documentState}
                         activePage={activePage}
                         onPageClick={scrollToPage}
+                        onDocumentChanged={refreshDocumentState}
                     />
                 )}
 
@@ -183,9 +201,11 @@ function App() {
                                 pageNode={page}
                                 pdfDoc={pdfDoc}
                                 pageIndex={index}
+                                totalPages={pageCount}
                                 scale={scale}
                                 activeTool={activeTool}
                                 onAnnotationAdded={refreshDocumentState}
+                                onDocumentChanged={refreshDocumentState}
                             />
                         </div>
                     ))}

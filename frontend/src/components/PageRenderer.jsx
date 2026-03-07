@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { engineApi } from '../api/client';
 import { TOOLS, TOOL_CURSORS } from '../tools';
 
+// ── Annotation overlay node ──────────────────────────────────────────────────
+
 const NodeOverlay = ({ node, scale = 1.0 }) => {
     const [hovered, setHovered] = useState(false);
     if (!node.bbox) return null;
@@ -39,29 +41,16 @@ const NodeOverlay = ({ node, scale = 1.0 }) => {
                 </div>
             );
         case 'highlight':
-            return (
-                <div style={{
-                    ...style,
-                    backgroundColor: '#FFFF00',
-                    opacity: 0.5,
-                    borderRadius: '2px',
-                }} />
-            );
-        case 'highlight_black': // redaction stored as highlight with black color
-        default:
             if (node.color === '#000000') {
-                return (
-                    <div style={{
-                        ...style,
-                        backgroundColor: '#000000',
-                        opacity: 1.0,
-                        borderRadius: '2px',
-                    }} />
-                );
+                return <div style={{ ...style, backgroundColor: '#000000', opacity: 1.0, borderRadius: '2px', pointerEvents: 'none' }} />;
             }
+            return <div style={{ ...style, backgroundColor: node.color || '#FFFF00', opacity: node.opacity ?? 0.5, borderRadius: '2px', pointerEvents: 'none' }} />;
+        default:
             return null;
     }
 };
+
+// ── Drag rect hook ───────────────────────────────────────────────────────────
 
 function useDragRect(overlayRef, scale, onComplete) {
     const [dragRect, setDragRect] = useState(null);
@@ -71,40 +60,27 @@ function useDragRect(overlayRef, scale, onComplete) {
         e.preventDefault();
         if (!overlayRef.current) return;
         const rect = overlayRef.current.getBoundingClientRect();
-        startPos.current = {
-            x: (e.clientX - rect.left) / scale,
-            y: (e.clientY - rect.top)  / scale,
-        };
+        startPos.current = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
         setDragRect(null);
     }, [scale]);
 
     const onMouseMove = useCallback((e) => {
         if (!startPos.current || !overlayRef.current) return;
         const rect = overlayRef.current.getBoundingClientRect();
-        const cur = {
-            x: (e.clientX - rect.left) / scale,
-            y: (e.clientY - rect.top)  / scale,
-        };
+        const cur = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
         setDragRect({
-            x:      Math.min(startPos.current.x, cur.x),
-            y:      Math.min(startPos.current.y, cur.y),
-            width:  Math.abs(cur.x - startPos.current.x),
-            height: Math.abs(cur.y - startPos.current.y),
+            x: Math.min(startPos.current.x, cur.x), y: Math.min(startPos.current.y, cur.y),
+            width: Math.abs(cur.x - startPos.current.x), height: Math.abs(cur.y - startPos.current.y),
         });
     }, [scale]);
 
     const finishDrag = useCallback((e) => {
         if (!startPos.current || !overlayRef.current) return;
         const rect = overlayRef.current.getBoundingClientRect();
-        const cur = {
-            x: (e.clientX - rect.left) / scale,
-            y: (e.clientY - rect.top)  / scale,
-        };
+        const cur = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
         const finalRect = {
-            x:      Math.min(startPos.current.x, cur.x),
-            y:      Math.min(startPos.current.y, cur.y),
-            width:  Math.abs(cur.x - startPos.current.x),
-            height: Math.abs(cur.y - startPos.current.y),
+            x: Math.min(startPos.current.x, cur.x), y: Math.min(startPos.current.y, cur.y),
+            width: Math.abs(cur.x - startPos.current.x), height: Math.abs(cur.y - startPos.current.y),
         };
         startPos.current = null;
         setDragRect(null);
@@ -114,21 +90,78 @@ function useDragRect(overlayRef, scale, onComplete) {
     return { dragRect, onMouseDown, onMouseMove, onMouseUp: finishDrag, onMouseLeave: finishDrag };
 }
 
-export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5, activeTool, onAnnotationAdded }) => {
+// ── Page controls bar ────────────────────────────────────────────────────────
+
+const PageControls = ({ pageIndex, totalPages, onRotateCW, onRotateCCW, onDelete, onMoveUp, onMoveDown }) => (
+    <div style={{
+        position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', gap: '6px', alignItems: 'center',
+        backgroundColor: 'rgba(15, 23, 35, 0.88)', backdropFilter: 'blur(6px)',
+        borderRadius: '8px', padding: '5px 10px', zIndex: 30,
+        boxShadow: '0 2px 12px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+        pointerEvents: 'auto', whiteSpace: 'nowrap',
+    }}>
+        <CtrlBtn onClick={onMoveUp}    disabled={pageIndex === 0}             title="Move up"       color="#546e7a">↑</CtrlBtn>
+        <CtrlBtn onClick={onMoveDown}  disabled={pageIndex >= totalPages - 1} title="Move down"     color="#546e7a">↓</CtrlBtn>
+        <Divider />
+        <CtrlBtn onClick={onRotateCW}  title="Rotate CW"  color="#2980b9">↻</CtrlBtn>
+        <CtrlBtn onClick={onRotateCCW} title="Rotate CCW" color="#2980b9">↺</CtrlBtn>
+        <Divider />
+        <CtrlBtn onClick={onDelete} disabled={totalPages <= 1} title="Delete page" color="#c0392b">✕</CtrlBtn>
+    </div>
+);
+
+const CtrlBtn = ({ children, onClick, title, color, disabled }) => (
+    <button title={title} onClick={onClick} disabled={disabled} style={{
+        width: '26px', height: '26px', borderRadius: '5px', border: 'none',
+        backgroundColor: disabled ? 'rgba(255,255,255,0.06)' : color,
+        color: disabled ? '#3d5166' : 'white',
+        fontSize: '14px', fontWeight: '700', cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, padding: 0,
+    }}>
+        {children}
+    </button>
+);
+
+const Divider = () => <div style={{ width: '1px', height: '16px', backgroundColor: 'rgba(255,255,255,0.12)' }} />;
+
+// ── PageRenderer ─────────────────────────────────────────────────────────────
+
+export const PageRenderer = ({
+    pageNode, pdfDoc, pageIndex, totalPages, scale = 1.5,
+    activeTool, onAnnotationAdded, onDocumentChanged,
+}) => {
     const canvasRef  = useRef(null);
     const overlayRef = useRef(null);
     const [annotations, setAnnotations] = useState([]);
+    const [hovered, setHovered] = useState(false);
+    const [busy, setBusy] = useState(false);
+
+    // Track rotation locally — the GET /api/document endpoint strips PageNode-specific
+    // fields (rotation, page_number) because children is typed as List[Node] in Pydantic.
+    // We update localRotation directly from the rotate API response, which serializes
+    // the PageNode directly and preserves all fields.
+    const [localRotation, setLocalRotation] = useState(pageNode.rotation ?? 0);
+
+    // Sync localRotation from pageNode.rotation whenever it changes.
+    // Now that the backend uses model_dump(), rotation is always a number.
+    // This handles: undo, sidebar-initiated rotate, reorder, new doc load.
+    useEffect(() => {
+        if (typeof pageNode.rotation === 'number') {
+            setLocalRotation(pageNode.rotation);
+        }
+    }, [pageNode.rotation, pageNode.id]);
+
     const [dimensions, setDimensions] = useState({
         width:  (pageNode.metadata?.width  || 612) * scale,
         height: (pageNode.metadata?.height || 792) * scale,
     });
 
-    // Sync annotations when parent document state refreshes (e.g. after undo)
     useEffect(() => {
         setAnnotations(pageNode.children || []);
     }, [pageNode.children]);
 
-    // Canvas render — isolated from annotation state changes
+    // ── Canvas render — driven by localRotation ───────────────────────────────
     useEffect(() => {
         if (!pdfDoc) return;
         let isMounted = true;
@@ -136,21 +169,33 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5, activeT
 
         const renderPage = async () => {
             try {
-                const pageNum = pageIndex + 1;
+                // Use the original source page number, not the current array index.
+                // After deletes/moves, pageIndex shifts but page_number stays fixed.
+                const pageNum = (pageNode.page_number ?? pageIndex) + 1;
                 if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
 
-                const page     = await pdfDoc.getPage(pageNum);
+                const page    = await pdfDoc.getPage(pageNum);
                 if (!isMounted) return;
 
-                const viewport = page.getViewport({ scale, rotation: pageNode.rotation ?? 0 });
-                setDimensions({ width: viewport.width, height: viewport.height });
-
-                const canvas  = canvasRef.current;
+                // Scale the canvas by devicePixelRatio so text is sharp on
+                // HiDPI / Retina screens. CSS size stays at logical dimensions.
+                const dpr      = window.devicePixelRatio || 1;
+                const viewport = page.getViewport({ scale: scale * dpr, rotation: localRotation });
+                const canvas   = canvasRef.current;
                 if (!canvas) return;
 
-                const context = canvas.getContext('2d');
+                const context  = canvas.getContext('2d');
+
+                // Physical pixels = logical size × dpr
                 canvas.width  = viewport.width;
                 canvas.height = viewport.height;
+
+                // CSS size = logical dimensions (unaffected by dpr)
+                const cssW = viewport.width  / dpr;
+                const cssH = viewport.height / dpr;
+                canvas.style.width  = `${cssW}px`;
+                canvas.style.height = `${cssH}px`;
+                setDimensions({ width: cssW, height: cssH });
 
                 renderTask = page.render({ canvasContext: context, viewport });
                 await renderTask.promise;
@@ -160,8 +205,71 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5, activeT
         };
 
         renderPage();
-        return () => { isMounted = false; renderTask?.cancel(); };
-    }, [pdfDoc, pageIndex, pageNode.rotation, scale]);
+        return () => { isMounted = false; if (renderTask) renderTask.cancel(); };
+    }, [pdfDoc, pageIndex, localRotation, scale]);
+
+    // ── Page-level commands ───────────────────────────────────────────────────
+
+    const busyRef = useRef(false);
+    const withBusy = useCallback(async (fn) => {
+        if (busyRef.current) return;
+        busyRef.current = true;
+        setBusy(true);
+        try { await fn(); }
+        finally { busyRef.current = false; setBusy(false); }
+    }, []);
+
+    const handleRotateCW = useCallback(() => {
+        withBusy(async () => {
+            const res = await engineApi.rotatePage(pageNode.id, 90);
+            // res.page is serialized as PageNode directly — rotation field is present
+            if (res?.page?.rotation !== undefined) {
+                console.log('[rotate] new rotation from API:', res.page.rotation);
+                setLocalRotation(res.page.rotation);
+            } else {
+                // Fallback: just add 90 locally
+                setLocalRotation(r => (r + 90) % 360);
+            }
+            if (onDocumentChanged) await onDocumentChanged();
+        });
+    }, [pageNode.id, withBusy, onDocumentChanged]);
+
+    const handleRotateCCW = useCallback(() => {
+        withBusy(async () => {
+            const res = await engineApi.rotatePage(pageNode.id, -90);
+            if (res?.page?.rotation !== undefined) {
+                setLocalRotation(res.page.rotation);
+            } else {
+                setLocalRotation(r => (r - 90 + 360) % 360);
+            }
+            if (onDocumentChanged) await onDocumentChanged();
+        });
+    }, [pageNode.id, withBusy, onDocumentChanged]);
+
+    const handleDelete = useCallback(() => {
+        if (totalPages <= 1) { alert('Cannot delete the last page.'); return; }
+        if (!window.confirm(`Delete page ${pageIndex + 1}?`)) return;
+        withBusy(async () => {
+            await engineApi.deletePage(pageNode.id);
+            if (onDocumentChanged) await onDocumentChanged();
+        });
+    }, [pageNode.id, pageIndex, totalPages, withBusy, onDocumentChanged]);
+
+    const handleMoveUp = useCallback(() => {
+        withBusy(async () => {
+            await engineApi.movePage(pageNode.id, pageIndex - 1);
+            if (onDocumentChanged) await onDocumentChanged();
+        });
+    }, [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
+
+    const handleMoveDown = useCallback(() => {
+        withBusy(async () => {
+            await engineApi.movePage(pageNode.id, pageIndex + 1);
+            if (onDocumentChanged) await onDocumentChanged();
+        });
+    }, [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
+
+    // ── Annotation interactions ───────────────────────────────────────────────
 
     const handleTextClick = useCallback(async (e) => {
         if (!overlayRef.current) return;
@@ -173,7 +281,7 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5, activeT
         try {
             const res = await engineApi.addTextAnnotation(pageNode.id, text, x, y);
             if (res?.node) setAnnotations(prev => [...prev, res.node]);
-            onAnnotationAdded?.();
+            if (onAnnotationAdded) onAnnotationAdded();
         } catch (err) {
             console.error('Failed to add text:', err);
             alert('Failed to add text: ' + (err.response?.data?.detail || err.message));
@@ -187,69 +295,58 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5, activeT
                 res = await engineApi.addHighlight(pageNode.id, rect.x, rect.y, rect.width, rect.height);
             } else if (activeTool === TOOLS.REDACT) {
                 res = await engineApi.applyRedaction(pageNode.id, rect.x, rect.y, rect.width, rect.height);
-            } else {
-                return;
-            }
-            if (res?.node) {
-                setAnnotations(prev => [...prev, res.node]);
-            } else if (res?.nodes) {
-                setAnnotations(prev => [...prev, ...res.nodes]);
-            }
-            onAnnotationAdded?.();
+            } else return;
+            if (res?.node)       setAnnotations(prev => [...prev, res.node]);
+            else if (res?.nodes) setAnnotations(prev => [...prev, ...res.nodes]);
+            if (onAnnotationAdded) onAnnotationAdded();
         } catch (err) {
             console.error('Annotation failed:', err);
             alert('Annotation failed: ' + (err.response?.data?.detail || err.message));
         }
     }, [activeTool, pageNode.id, onAnnotationAdded]);
 
-    const { dragRect, onMouseDown, onMouseMove, onMouseUp, onMouseLeave } = useDragRect(
-        overlayRef, scale, handleRectComplete
-    );
-
     const isDragTool = activeTool === TOOLS.HIGHLIGHT || activeTool === TOOLS.REDACT;
     const dragColor  = activeTool === TOOLS.REDACT ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,0,0.4)';
     const dragBorder = activeTool === TOOLS.REDACT ? '#333' : '#cccc00';
 
+    const { dragRect, onMouseDown, onMouseMove, onMouseUp, onMouseLeave } = useDragRect(
+        overlayRef, scale, handleRectComplete
+    );
+
     return (
-        <div style={{
-            position: 'relative',
-            width:  `${dimensions.width}px`,
-            height: `${dimensions.height}px`,
-            flexShrink: 0,
-            backgroundColor: 'white',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-            margin: '20px auto',
-            overflow: 'hidden',
-        }}>
-            {/* PDF canvas */}
-            <canvas
-                ref={canvasRef}
-                style={{
-                    position: 'absolute', top: 0, left: 0,
-                    width: `${dimensions.width}px`, height: `${dimensions.height}px`,
-                    pointerEvents: 'none',
-                }}
-            />
+        <div
+            style={{
+                position: 'relative',
+                width:  `${dimensions.width}px`,
+                height: `${dimensions.height}px`,
+                flexShrink: 0,
+                backgroundColor: 'white',
+                boxShadow: hovered ? '0 6px 28px rgba(0,0,0,0.35)' : '0 4px 16px rgba(0,0,0,0.25)',
+                margin: '20px auto',
+                overflow: 'visible',
+                transition: 'box-shadow 0.18s ease',
+                opacity: busy ? 0.7 : 1,
+            }}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+        >
+            <canvas ref={canvasRef} style={{
+                position: 'absolute', top: 0, left: 0,
+                width: `${dimensions.width}px`, height: `${dimensions.height}px`,
+                pointerEvents: 'none',
+            }} />
 
             {/* Annotation layer */}
-            <div style={{
-                position: 'absolute', top: 0, left: 0,
-                width: '100%', height: '100%',
-                pointerEvents: 'none', zIndex: 5,
-            }}>
-                {annotations.map(child => (
-                    <NodeOverlay key={child.id} node={child} scale={scale} />
-                ))}
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 5, overflow: 'hidden' }}>
+                {annotations.map(child => <NodeOverlay key={child.id} node={child} scale={scale} />)}
             </div>
 
             {/* Interaction layer */}
             <div
                 ref={overlayRef}
                 style={{
-                    position: 'absolute', top: 0, left: 0,
-                    width: '100%', height: '100%',
-                    cursor: TOOL_CURSORS[activeTool] || 'default',
-                    userSelect: 'none', zIndex: 10,
+                    position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                    cursor: TOOL_CURSORS[activeTool] || 'default', userSelect: 'none', zIndex: 10,
                 }}
                 onClick={activeTool === TOOLS.TEXT ? handleTextClick : undefined}
                 onMouseDown={isDragTool ? onMouseDown : undefined}
@@ -260,17 +357,26 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5, activeT
                 {dragRect && (
                     <div style={{
                         position: 'absolute',
-                        left:   `${dragRect.x * scale}px`,
-                        top:    `${dragRect.y * scale}px`,
-                        width:  `${dragRect.width * scale}px`,
-                        height: `${dragRect.height * scale}px`,
-                        backgroundColor: dragColor,
-                        border: `2px dashed ${dragBorder}`,
-                        pointerEvents: 'none',
-                        borderRadius: '2px',
+                        left: `${dragRect.x * scale}px`, top: `${dragRect.y * scale}px`,
+                        width: `${dragRect.width * scale}px`, height: `${dragRect.height * scale}px`,
+                        backgroundColor: dragColor, border: `2px dashed ${dragBorder}`,
+                        pointerEvents: 'none', borderRadius: '2px',
                     }} />
                 )}
             </div>
+
+            {/* Page controls */}
+            {hovered && (
+                <PageControls
+                    pageIndex={pageIndex}
+                    totalPages={totalPages}
+                    onRotateCW={handleRotateCW}
+                    onRotateCCW={handleRotateCCW}
+                    onDelete={handleDelete}
+                    onMoveUp={handleMoveUp}
+                    onMoveDown={handleMoveDown}
+                />
+            )}
 
             {/* Page number badge */}
             <div style={{
@@ -281,6 +387,17 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5, activeT
             }}>
                 {pageIndex + 1}
             </div>
+
+            {busy && (
+                <div style={{
+                    position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.15)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
+                }}>
+                    <div style={{ backgroundColor: 'rgba(15,23,35,0.9)', color: 'white', fontSize: '13px', fontWeight: '600', padding: '8px 18px', borderRadius: '6px' }}>
+                        Working…
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

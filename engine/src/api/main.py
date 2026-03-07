@@ -85,7 +85,11 @@ def upload_and_load_document(file: UploadFile = File(...)):
 
 @app.get("/api/document")
 def get_document_state():
-    return current_session.document
+    def node_to_dict(node):
+        d = node.model_dump()
+        d['children'] = [node_to_dict(c) for c in node.children]
+        return d
+    return node_to_dict(current_session.document)
 
 @app.post("/api/document/load")
 def load_document(payload: LoadPayload):
@@ -118,27 +122,54 @@ def rotate_page(page_id: str, payload: RotatePayload):
     service = PageService(current_session)
     try:
         updated_page = service.rotate_page(page_id, payload.degrees)
-        return {"status": "success", "page": updated_page}
+        return {"status": "success", "page": updated_page.model_dump()}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 @app.delete("/api/pages/{page_id}")
 def delete_page(page_id: str):
-    service = PageService(current_session)
     try:
+        before = len(current_session.document.children)
+        before_ids = [c.id for c in current_session.document.children]
+        print(f"[DELETE] page_id={page_id}")
+        print(f"[DELETE] before count={before}, ids={before_ids}")
+
+        service = PageService(current_session)
         service.delete_page(page_id)
-        return {"status": "success", "message": "Page deleted."}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+
+        after = len(current_session.document.children)
+        after_ids = [c.id for c in current_session.document.children]
+        print(f"[DELETE] after count={after}, ids={after_ids}")
+
+        return {
+            "status": "success",
+            "message": "Page deleted.",
+            "before": before,
+            "after": after,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages/{page_id}/move")
 def move_page(page_id: str, payload: MovePagePayload):
-    service = PageService(current_session)
     try:
+        before_ids = [c.id for c in current_session.document.children]
+        print(f"[MOVE] page_id={page_id} new_index={payload.new_index}")
+        print(f"[MOVE] before ids={before_ids}")
+
+        service = PageService(current_session)
         service.move_page(page_id, payload.new_index)
+
+        after_ids = [c.id for c in current_session.document.children]
+        print(f"[MOVE] after ids={after_ids}")
+
         return {"status": "success", "message": "Page moved."}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Annotation endpoints ──────────────────────────────────────────────────────

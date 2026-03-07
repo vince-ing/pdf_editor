@@ -16,12 +16,24 @@ export const engineApi = {
         const response = await axios.get(`${API_BASE}/document`);
         return response.data;
     },
+    exportDocument: async (outputPath) => {
+        const response = await axios.post(`${API_BASE}/document/export`, { output_path: outputPath });
+        return response.data;
+    },
     undo: async () => await axios.post(`${API_BASE}/undo`),
     redo: async () => await axios.post(`${API_BASE}/redo`),
 
     // --- Pages ---
     rotatePage: async (pageId, degrees = 90) => {
         const response = await axios.post(`${API_BASE}/pages/${pageId}/rotate`, { degrees });
+        return response.data;
+    },
+    deletePage: async (pageId) => {
+        const response = await axios.delete(`${API_BASE}/pages/${pageId}`);
+        return response.data;
+    },
+    movePage: async (pageId, newIndex) => {
+        const response = await axios.post(`${API_BASE}/pages/${pageId}/move`, { new_index: newIndex });
         return response.data;
     },
 
