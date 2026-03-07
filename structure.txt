@@ -1,5 +1,6 @@
 pdf_editor
 ├── .workspace
+│   ├── imgs.pdf
 │   └── Lab3_Watershed_Mass_Balance.pdf
 ├── engine
 │   └── src
@@ -41,13 +42,14 @@ pdf_editor
 │   ├── index.html
 │   ├── package-lock.json
 │   ├── package.json
-│   └── src
-│       ├── api
-│       │   └── client.js
-│       ├── App.jsx
-│       ├── components
-│       │   └── PageRenderer.jsx
-│       └── main.jsx
+│   ├── src
+│   │   ├── api
+│   │   │   └── client.js
+│   │   ├── App.jsx
+│   │   ├── components
+│   │   │   └── PageRenderer.jsx
+│   │   └── main.jsx
+│   └── vite.config.js
 └── src
     ├── commands
     │   ├── annotate.py
