@@ -109,6 +109,27 @@ def export_document(payload: ExportPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/document/download")
+def download_document():
+    """Stream the modified PDF directly to the browser as a file download."""
+    from fastapi.responses import Response
+    if not current_session.document or not current_session.document.file_name:
+        raise HTTPException(status_code=400, detail="No document loaded.")
+    try:
+        service = DocumentService(current_session)
+        pdf_bytes = service.export_to_bytes()
+        filename = current_session.document.file_name
+        download_name = f"edited_{filename}"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{download_name}"'}
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ── Page endpoints ────────────────────────────────────────────────────────────
 

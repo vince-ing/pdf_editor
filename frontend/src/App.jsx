@@ -96,6 +96,24 @@ function App() {
         }
     };
 
+    const handleDownload = async () => {
+        if (!documentState) return;
+        try {
+            const res = await fetch('http://localhost:8000/api/document/download');
+            if (!res.ok) throw new Error(await res.text());
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `edited_${documentState.file_name}`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error(err);
+            alert('Export failed: ' + err.message);
+        }
+    };
+
     const zoomIn    = () => setScale(s => Math.min(parseFloat((s + 0.25).toFixed(2)), 4.0));
     const zoomOut   = () => setScale(s => Math.max(parseFloat((s - 0.25).toFixed(2)), 0.25));
     const zoomReset = () => setScale(1.5);
@@ -135,6 +153,12 @@ function App() {
                 <button onClick={() => fileInputRef.current.click()} style={{ ...btnBase, backgroundColor: '#2980b9', color: 'white' }}>Open PDF</button>
                 <button onClick={handleUndo} style={{ ...btnBase, backgroundColor: '#c0392b', color: 'white' }} title="Undo (Ctrl+Z)">↩ Undo</button>
                 <button onClick={handleRedo} style={{ ...btnBase, backgroundColor: '#7f8c8d', color: 'white' }} title="Redo (Ctrl+Y)">↪ Redo</button>
+                <button
+                    onClick={handleDownload}
+                    disabled={!documentState}
+                    style={{ ...btnBase, backgroundColor: documentState ? '#27ae60' : '#3d5a47', color: 'white' }}
+                    title="Export and download modified PDF"
+                >⬇ Export PDF</button>
 
                 <div style={{ width: '1px', height: '28px', backgroundColor: 'rgba(255,255,255,0.15)' }} />
 
