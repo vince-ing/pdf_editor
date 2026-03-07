@@ -1,4 +1,53 @@
 pdf_editor
+├── .workspace
+│   └── Lab3_Watershed_Mass_Balance.pdf
+├── engine
+│   └── src
+│       ├── __init__.py
+│       ├── api
+│       │   └── main.py
+│       ├── commands
+│       │   ├── __init__.py
+│       │   ├── base.py
+│       │   ├── node_commands.py
+│       │   └── page_commands.py
+│       ├── core
+│       │   ├── __init__.py
+│       │   ├── annotation_nodes.py
+│       │   ├── document.py
+│       │   ├── node.py
+│       │   └── page_node.py
+│       ├── editor
+│       │   ├── __init__.py
+│       │   └── editor_session.py
+│       ├── plugin_system
+│       │   ├── __init__.py
+│       │   ├── plugin.py
+│       │   └── plugin_manager.py
+│       ├── plugins
+│       │   ├── __init__.py
+│       │   ├── ocr_plugin.py
+│       │   ├── plugins.py
+│       │   ├── redact_plugin.py
+│       │   └── tts_plugin.py
+│       └── services
+│           ├── __init__.py
+│           ├── annotation_service.py
+│           ├── document_service.py
+│           ├── page_service.py
+│           ├── redaction_service.py
+│           └── tts_service.py
+├── frontend
+│   ├── index.html
+│   ├── package-lock.json
+│   ├── package.json
+│   └── src
+│       ├── api
+│       │   └── client.js
+│       ├── App.jsx
+│       ├── components
+│       │   └── PageRenderer.jsx
+│       └── main.jsx
 └── src
     ├── commands
     │   ├── annotate.py
