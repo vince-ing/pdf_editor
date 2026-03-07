@@ -47,8 +47,10 @@ pdf_editor
 │   │   │   └── client.js
 │   │   ├── App.jsx
 │   │   ├── components
-│   │   │   └── PageRenderer.jsx
-│   │   └── main.jsx
+│   │   │   ├── PageRenderer.jsx
+│   │   │   └── Sidebar.jsx
+│   │   ├── main.jsx
+│   │   └── tools.js
 │   └── vite.config.js
 └── src
     ├── commands

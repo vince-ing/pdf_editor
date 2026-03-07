@@ -12,6 +12,7 @@ __pycache__/
 # Node / JS
 # ------------------------
 
+.workspace/
 node_modules/
 dist/
 build/

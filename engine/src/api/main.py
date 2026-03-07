@@ -3,12 +3,10 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Core Engine Imports
 from engine.src.editor.editor_session import EditorSession
 from engine.src.services.page_service import PageService
 from engine.src.services.document_service import DocumentService
-
-# Plugin Imports
+from engine.src.services.annotation_service import AnnotationService
 from engine.src.plugin_system.plugin_manager import PluginManager
 from engine.src.plugins.ocr_plugin import OCRPlugin
 from engine.src.plugins.tts_plugin import TTSPlugin
@@ -16,32 +14,25 @@ from engine.src.plugins.redact_plugin import RedactPlugin
 
 app = FastAPI(title="PDF Editor Engine API")
 
-# --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Session Management ---
-# THIS must be defined before the PluginManager uses it!
 current_session = EditorSession()
 
-# --- Initialize Plugin System ---
 plugin_manager = PluginManager(app, current_session)
-
-# Register Plugins
 plugin_manager.register_plugin(OCRPlugin)
 plugin_manager.register_plugin(TTSPlugin)
 plugin_manager.register_plugin(RedactPlugin)
-
-# Finalize mounts the /api/plugins router to the main app
 plugin_manager.finalize()
 
 
-# --- Pydantic Payloads ---
+# ── Pydantic models ───────────────────────────────────────────────────────────
+
 class RotatePayload(BaseModel):
     degrees: int = 90
 
@@ -51,59 +42,50 @@ class LoadPayload(BaseModel):
 class ExportPayload(BaseModel):
     output_path: str
 
+class TextAnnotationPayload(BaseModel):
+    page_id: str
+    text: str
+    x: float
+    y: float
+    width: float = 200
+    height: float = 30
+    font_size: float = 12.0
+    color: str = "#000000"
 
-# --- Endpoints ---
+class HighlightPayload(BaseModel):
+    page_id: str
+    x: float
+    y: float
+    width: float
+    height: float
+    color: str = "#FFFF00"
+    opacity: float = 0.4
+
+
+# ── Document endpoints ────────────────────────────────────────────────────────
+
 @app.post("/api/document/upload")
 def upload_and_load_document(file: UploadFile = File(...)):
-    import shutil
-    import traceback
-    
-    print(f"--- Attempting to upload: {file.filename} ---")
+    import shutil, traceback
+    print(f"--- Uploading: {file.filename} ---")
     try:
         os.makedirs(".workspace", exist_ok=True)
         temp_path = f".workspace/{file.filename}"
-        
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
-        print(f"File saved to {temp_path}. Loading into engine...")
-        
         service = DocumentService(current_session)
         doc_node = service.load_document(temp_path)
-        
-        print("Successfully loaded into engine!")
         return {"status": "success", "document": doc_node}
-        
     except Exception as e:
-        print("\n!!! UPLOAD FAILED !!!")
-        traceback.print_exc() # This prints the exact line that crashed
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.get("/api/document")
 def get_document_state():
-    """Returns the entire Document Scene Graph."""
     return current_session.document
-
-@app.post("/api/pages")
-def create_page(page_number: int, source_ref: str = None):
-    """Adds a new page to the document."""
-    service = PageService(current_session)
-    new_page = service.add_page(page_number, source_ref)
-    return new_page
-
-@app.post("/api/pages/{page_id}/rotate")
-def rotate_page(page_id: str, payload: RotatePayload):
-    """Rotates a specific page."""
-    service = PageService(current_session)
-    try:
-        updated_page = service.rotate_page(page_id, payload.degrees)
-        return {"status": "success", "page": updated_page}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
 
 @app.post("/api/document/load")
 def load_document(payload: LoadPayload):
-    """Loads a physical PDF into the engine state."""
     service = DocumentService(current_session)
     try:
         doc_node = service.load_document(payload.file_path)
@@ -113,7 +95,6 @@ def load_document(payload: LoadPayload):
 
 @app.post("/api/document/export")
 def export_document(payload: ExportPayload):
-    """Saves the current engine state to a physical PDF."""
     service = DocumentService(current_session)
     try:
         saved_path = service.export_document(payload.output_path)
@@ -121,18 +102,72 @@ def export_document(payload: ExportPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ── Page endpoints ────────────────────────────────────────────────────────────
+
+@app.post("/api/pages")
+def create_page(page_number: int, source_ref: str = None):
+    service = PageService(current_session)
+    return service.add_page(page_number, source_ref)
+
+@app.post("/api/pages/{page_id}/rotate")
+def rotate_page(page_id: str, payload: RotatePayload):
+    service = PageService(current_session)
+    try:
+        updated_page = service.rotate_page(page_id, payload.degrees)
+        return {"status": "success", "page": updated_page}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ── Annotation endpoints ──────────────────────────────────────────────────────
+
+@app.post("/api/annotations/text")
+def add_text_annotation(payload: TextAnnotationPayload):
+    page = current_session.document.get_child(payload.page_id)
+    if not page or page.node_type != "page":
+        raise HTTPException(status_code=404, detail="Page not found")
+    service = AnnotationService(current_session)
+    node = service.add_text(
+        page_id=payload.page_id,
+        text=payload.text,
+        x=payload.x,
+        y=payload.y,
+        width=payload.width,
+        height=payload.height,
+        font_size=payload.font_size,
+        color=payload.color,
+    )
+    return {"status": "success", "node": node}
+
+@app.post("/api/annotations/highlight")
+def add_highlight_annotation(payload: HighlightPayload):
+    page = current_session.document.get_child(payload.page_id)
+    if not page or page.node_type != "page":
+        raise HTTPException(status_code=404, detail="Page not found")
+    service = AnnotationService(current_session)
+    node = service.add_highlight(
+        page_id=payload.page_id,
+        x=payload.x,
+        y=payload.y,
+        width=payload.width,
+        height=payload.height,
+        color=payload.color,
+    )
+    node.opacity = payload.opacity
+    return {"status": "success", "node": node}
+
+
+# ── Undo / Redo ───────────────────────────────────────────────────────────────
+
 @app.post("/api/undo")
 def undo_last_action():
-    """Undoes the last command in the engine."""
-    success = current_session.undo()
-    if not success:
+    if not current_session.undo():
         raise HTTPException(status_code=400, detail="Nothing to undo.")
     return {"status": "success", "message": "Undo successful."}
 
 @app.post("/api/redo")
 def redo_last_action():
-    """Redoes the last undone command."""
-    success = current_session.redo()
-    if not success:
+    if not current_session.redo():
         raise HTTPException(status_code=400, detail="Nothing to redo.")
     return {"status": "success", "message": "Redo successful."}
