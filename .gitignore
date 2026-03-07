@@ -5,10 +5,12 @@ __pycache__/
 *.exe
 # C extensions
 *.so
+*.iss
 
 models/
 generate_tree.py
 fonts/
+build_tools/
 
 # Distribution / packaging
 pytesseract/

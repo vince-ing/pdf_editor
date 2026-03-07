@@ -1,4 +1,10 @@
 pdf_editor
+├── build
+│   └── PDFEditor
+├── dist
+├── installer.iss
+├── installer_output
+│   └── PDFEditorInstaller.exe
 ├── src
 │   ├── commands
 │   │   ├── annotate.py
@@ -29,6 +35,14 @@ pdf_editor
 │   │   │   ├── right_panel.py
 │   │   │   ├── status_bar.py
 │   │   │   └── top_bar.py
+│   │   ├── controllers
+│   │   │   ├── __init__.py
+│   │   │   ├── document_controller.py
+│   │   │   ├── history_controller.py
+│   │   │   ├── ocr_controller.py
+│   │   │   ├── thumbnail_controller.py
+│   │   │   ├── tts_controller.py
+│   │   │   └── window_controller.py
 │   │   ├── history_manager.py
 │   │   ├── main_window.py
 │   │   ├── panels
@@ -47,7 +61,10 @@ pdf_editor
 │   │   │   ├── find_tool.py
 │   │   │   ├── image_tool.py
 │   │   │   ├── redact_tool.py
-│   │   │   └── select_tool.py
+│   │   │   ├── select_tool.py
+│   │   │   └── tool_manager.py
+│   │   ├── ui_manager.py
+│   │   ├── viewport_manager.py
 │   │   └── widgets
 │   │       ├── __init__.py
 │   │       ├── edit_overlay.py
@@ -72,7 +89,7 @@ pdf_editor
 │       ├── file_utils.py
 │       ├── font_loader.py
 │       ├── paragraph_grouper.py
-│       ├── recent_files.py
 │       ├── selection_compositor.py
+│       ├── settings_manager.py
 │       └── task_manager.py
 └── tests
