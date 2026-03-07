@@ -6,20 +6,41 @@ from src.gui.components.icon_toolbar import TOOL_KEY_MAP
 from src.gui.theme import PALETTE
 
 class WindowController:
-    """Handles OS window chrome (minimize/maximize/close) and global key bindings."""
-    def __init__(self, root: tk.Tk, callbacks: dict):
+    """Handles OS window chrome (minimize/maximize/close), global bindings, and geometry persistence."""
+    def __init__(self, root: tk.Tk, settings: Any, callbacks: dict):
         self.root = root
+        self.settings = settings
         self.cb = callbacks
-        self._maximized = False
-        self._pre_max_geometry = "1280x860+0+0"
+        
+        self._maximized = self.settings.get("window_maximized", False)
+        self._pre_max_geometry = self.settings.get("window_geometry", "1280x860+0+0")
         self._min_helper = None
 
+        if self._maximized:
+            self.root.after(10, self._apply_maximize)
+            
         self._bind_keys()
         self.root.protocol("WM_DELETE_WINDOW", self.cb["on_closing"])
 
+    def save_state(self) -> None:
+        self.settings.set("window_maximized", self._maximized)
+        if not self._maximized: self.settings.set("window_geometry", self.root.geometry())
+        else: self.settings.set("window_geometry", self._pre_max_geometry)
+
+    def _apply_maximize(self):
+        try:
+            import ctypes
+            class RECT(ctypes.Structure):
+                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+            r = RECT()
+            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
+            w, h, x, y = r.right - r.left, r.bottom - r.top, r.left, r.top
+        except Exception:
+            w, h, x, y = self.root.winfo_screenwidth(), self.root.winfo_screenheight(), 0, 0
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+
     def _bind_keys(self) -> None:
-        r = self.root
-        b = self.cb
+        r, b = self.root, self.cb
         r.bind("<Control-o>", lambda e: b["open"]())
         r.bind("<Control-s>", lambda e: b["save"]())
         r.bind("<Control-S>", lambda e: b["save_as"]())
@@ -45,10 +66,7 @@ class WindowController:
         key = event.keysym.lower()
         if key in TOOL_KEY_MAP:
             self.cb["select_tool"](TOOL_KEY_MAP[key])
-            self.cb["flash_status"](
-                f"Tool: {TOOL_KEY_MAP[key].replace('_', ' ').title()}  [{key.upper()}]",
-                color=PALETTE["accent_light"], duration_ms=1200
-            )
+            self.cb["flash_status"](f"Tool: {TOOL_KEY_MAP[key].replace('_', ' ').title()}  [{key.upper()}]", color=PALETTE["accent_light"], duration_ms=1200)
 
     def minimize(self) -> None:
         self.root.withdraw()
@@ -72,16 +90,7 @@ class WindowController:
             self._maximized = False
         else:
             self._pre_max_geometry = self.root.geometry()
-            try:
-                import ctypes
-                class RECT(ctypes.Structure):
-                    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
-                r = RECT()
-                ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
-                w, h, x, y = r.right - r.left, r.bottom - r.top, r.left, r.top
-            except Exception:
-                w, h, x, y = self.root.winfo_screenwidth(), self.root.winfo_screenheight(), 0, 0
-            self.root.geometry(f"{w}x{h}+{x}+{y}")
+            self._apply_maximize()
             self._maximized = True
             
     def close(self) -> None:

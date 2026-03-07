@@ -87,8 +87,8 @@ class RightPanel:
         Expected keys:
           ``on_navigate``      callable(page_idx: int)
           ``on_toc_changed``   callable(new_toc: list)
-    tool_style_state : dict
-        Mutable dict of current tool style values.
+    tool_style_state : callable → dict
+        Returns the mutable dict of current tool style values.
     on_tool_style_change : callable(key, value) | None
     """
 
@@ -123,7 +123,7 @@ class RightPanel:
         self._get_current_page = get_current_page
         self._thumb_cbs        = thumbnail_callbacks
         self._toc_cbs          = toc_callbacks or {}
-        self._style            = tool_style_state
+        self._get_style = tool_style_state
         self._on_style_change  = on_tool_style_change
 
         self._visible = True
@@ -160,6 +160,12 @@ class RightPanel:
         self._redact_hit_label:      tk.Label     | None = None
 
         self.frame = self._build(parent)
+    
+    # ── style property ────────────────────────────────────────────────────────
+    
+    @property
+    def _style(self) -> dict:
+        return self._get_style()
 
     # ── build ─────────────────────────────────────────────────────────────────
 
@@ -703,7 +709,8 @@ class RightPanel:
     # ── widget change callbacks ───────────────────────────────────────────────
 
     def _notify(self, key: str, value) -> None:
-        self._style[key] = value
+        self._style[key] = value   
+                                
         if self._on_style_change:
             self._on_style_change(key, value)
 
