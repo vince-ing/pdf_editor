@@ -1,7 +1,4 @@
 pdf_editor
-├── .workspace
-│   ├── imgs.pdf
-│   └── Lab3_Watershed_Mass_Balance.pdf
 ├── engine
 │   └── src
 │       ├── __init__.py

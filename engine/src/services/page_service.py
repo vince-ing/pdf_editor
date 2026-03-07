@@ -2,7 +2,7 @@ from typing import Optional
 from engine.src.editor.editor_session import EditorSession
 from engine.src.core.page_node import PageNode
 from engine.src.commands.node_commands import AddNodeCommand, DeleteNodeCommand
-from engine.src.commands.page_commands import RotatePageCommand
+from engine.src.commands.page_commands import RotatePageCommand, DeletePageCommand, MovePageCommand
 
 class PageService:
     """
@@ -26,7 +26,14 @@ class PageService:
         
         return self.session.document.get_child(page_id)
 
-    def delete_page(self, page_id: str) -> None:
-        """Removes a page from the document."""
-        command = DeleteNodeCommand(node_id=page_id)
-        self.session.execute(command)
+    def delete_page(self, page_id: str) -> bool:
+        command = DeletePageCommand(page_id)
+        # Assuming your EditorSession handles command execution and history:
+        # If your session doesn't have an execute_command method, use: command.execute(self.session)
+        command.execute(self.session) 
+        return True
+
+    def move_page(self, page_id: str, new_index: int) -> bool:
+        command = MovePageCommand(page_id, new_index)
+        command.execute(self.session)
+        return True

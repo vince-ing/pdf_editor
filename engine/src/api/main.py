@@ -33,6 +33,9 @@ plugin_manager.finalize()
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
+class MovePagePayload(BaseModel):
+    new_index: int
+
 class RotatePayload(BaseModel):
     degrees: int = 90
 
@@ -116,6 +119,24 @@ def rotate_page(page_id: str, payload: RotatePayload):
     try:
         updated_page = service.rotate_page(page_id, payload.degrees)
         return {"status": "success", "page": updated_page}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/api/pages/{page_id}")
+def delete_page(page_id: str):
+    service = PageService(current_session)
+    try:
+        service.delete_page(page_id)
+        return {"status": "success", "message": "Page deleted."}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.post("/api/pages/{page_id}/move")
+def move_page(page_id: str, payload: MovePagePayload):
+    service = PageService(current_session)
+    try:
+        service.move_page(page_id, payload.new_index)
+        return {"status": "success", "message": "Page moved."}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
