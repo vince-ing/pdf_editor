@@ -1,3 +1,5 @@
+# src/gui/app_context.py
+
 """
 AppContext — lightweight namespace passed to all tool classes.
 
@@ -42,7 +44,7 @@ class AppContext:
 
     def __init__(self, editor: "InteractivePDFEditor"):
         self._editor = editor
-        # Single callback wired by the window after construction.
+        # Single callback wired by the window/tool manager after construction.
         # Signature: on_tool_state_change(key: str, value: object) -> None
         self.on_tool_state_change = None
 
@@ -66,15 +68,20 @@ class AppContext:
 
     @property
     def page_offset_x(self) -> float:
-        return self._editor._page_offset_x
+        if hasattr(self._editor, "viewport"):
+            return self._editor.viewport.page_offset_x
+        return 0.0
 
     @property
     def page_offset_y(self) -> float:
-        return self._editor._page_offset_y
+        if hasattr(self._editor, "viewport"):
+            return self._editor.viewport.page_offset_y
+        return 0.0
 
     # ── actions (tools call these to drive the window) ────────────────────────
     def invalidate_cache(self, page_idx: int = None) -> None:
-            self._editor._cont_invalidate_cache(page_idx)
+        if hasattr(self._editor, "viewport"):
+            self._editor.viewport.invalidate_cache(page_idx)
 
     def canvas_to_pdf(self, cx: float, cy: float) -> tuple[float, float]:
         return self._editor._canvas_to_pdf(cx, cy)
@@ -83,7 +90,8 @@ class AppContext:
         self._editor._push_history(cmd)
 
     def render(self):
-        self._editor._render()
+        if hasattr(self._editor, "viewport"):
+            self._editor.viewport.render()
 
     def flash_status(self, message: str, color: str = None, duration_ms: int = 3000):
         self._editor._flash_status(message, color, duration_ms)
