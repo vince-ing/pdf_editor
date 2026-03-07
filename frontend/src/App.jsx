@@ -10,6 +10,7 @@ function App() {
     const [documentState, setDocumentState] = useState(null);
     const [pdfDoc, setPdfDoc] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [scale, setScale] = useState(1.5);
     const fileInputRef = useRef(null);
 
     const refreshDocumentState = useCallback(async () => {
@@ -58,11 +59,15 @@ function App() {
         }
     };
 
+    const zoomIn  = () => setScale(s => Math.min(parseFloat((s + 0.25).toFixed(2)), 4.0));
+    const zoomOut = () => setScale(s => Math.max(parseFloat((s - 0.25).toFixed(2)), 0.25));
+    const zoomReset = () => setScale(1.5);
+
     if (loading) return <div style={{ padding: '20px' }}>Loading...</div>;
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#e0e0e0' }}>
-            <div style={{ padding: '15px', backgroundColor: '#2c3e50', color: 'white', display: 'flex', gap: '15px', alignItems: 'center' }}>
+            <div style={{ padding: '15px', backgroundColor: '#2c3e50', color: 'white', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
                     type="file"
                     accept="application/pdf"
@@ -80,7 +85,7 @@ function App() {
                     onClick={handleUndo}
                     style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: '4px' }}
                 >
-                    Undo Last Action
+                    Undo
                 </button>
                 <button
                     onClick={refreshDocumentState}
@@ -88,6 +93,32 @@ function App() {
                 >
                     Sync State
                 </button>
+
+                {/* Zoom controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '16px', borderLeft: '1px solid rgba(255,255,255,0.2)', paddingLeft: '16px' }}>
+                    <button
+                        onClick={zoomOut}
+                        disabled={scale <= 0.25}
+                        style={{ padding: '8px 12px', cursor: 'pointer', backgroundColor: '#546e7a', color: 'white', border: 'none', borderRadius: '4px', fontSize: '16px', lineHeight: 1 }}
+                    >
+                        −
+                    </button>
+                    <span
+                        onClick={zoomReset}
+                        title="Click to reset to 150%"
+                        style={{ minWidth: '52px', textAlign: 'center', fontWeight: 'bold', cursor: 'pointer', userSelect: 'none' }}
+                    >
+                        {Math.round(scale * 100)}%
+                    </span>
+                    <button
+                        onClick={zoomIn}
+                        disabled={scale >= 4.0}
+                        style={{ padding: '8px 12px', cursor: 'pointer', backgroundColor: '#546e7a', color: 'white', border: 'none', borderRadius: '4px', fontSize: '16px', lineHeight: 1 }}
+                    >
+                        +
+                    </button>
+                </div>
+
                 <span style={{ marginLeft: 'auto', fontWeight: 'bold' }}>
                     {documentState ? `Loaded: ${documentState.file_name}` : "No Document Loaded"}
                 </span>
@@ -105,6 +136,7 @@ function App() {
                         pageNode={page}
                         pdfDoc={pdfDoc}
                         pageIndex={index}
+                        scale={scale}
                     />
                 ))}
             </div>

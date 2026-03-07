@@ -40,14 +40,12 @@ const NodeOverlay = ({ node, scale = 1.0 }) => {
     }
 };
 
-export const PageRenderer = ({ pageNode, pdfDoc, pageIndex }) => {
+export const PageRenderer = ({ pageNode, pdfDoc, pageIndex, scale = 1.5 }) => {
     const canvasRef = useRef(null);
     const [dimensions, setDimensions] = useState({
-        width: pageNode.metadata?.width || 612,
-        height: pageNode.metadata?.height || 792
+        width: (pageNode.metadata?.width || 612) * scale,
+        height: (pageNode.metadata?.height || 792) * scale
     });
-
-    const scale = 1.5;
 
     useEffect(() => {
         if (!pdfDoc) return;
@@ -56,7 +54,6 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex }) => {
 
         const renderPage = async () => {
             try {
-                // pageIndex is 0-based from the array; PDF.js getPage is 1-based
                 const pageNum = pageIndex + 1;
 
                 if (pageNum < 1 || pageNum > pdfDoc.numPages) {
@@ -80,7 +77,6 @@ export const PageRenderer = ({ pageNode, pdfDoc, pageIndex }) => {
 
                 renderTask = page.render({ canvasContext: context, viewport });
                 await renderTask.promise;
-                console.log(`Page ${pageNum} rendered successfully.`);
 
             } catch (error) {
                 if (error?.name !== 'RenderingCancelledException') {
