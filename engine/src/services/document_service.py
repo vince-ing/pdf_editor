@@ -78,15 +78,12 @@ class DocumentService:
                 out_page.set_rotation(page_node.rotation)
 
             # Apply crop if set.
-            # PyMuPDF cropbox coords: origin is bottom-left, y increases upward.
-            # Our crop_box stores coords in the same PDF space (from frontend conversion).
+            # Frontend sends crop_box in pdfjs coordinate space: top-left origin,
+            # y increases downward, unscaled PDF points. fitz.Rect uses the same
+            # convention, so we can use the values directly with no y-flip.
             if page_node.crop_box:
                 cb = page_node.crop_box
-                page_rect = out_page.rect  # full page rect in fitz coords (top-left origin)
-                # Convert from PDF space (bottom-left origin) to fitz space (top-left origin)
-                fitz_y0 = page_rect.height - (cb.y + cb.height)
-                fitz_y1 = page_rect.height - cb.y
-                crop_rect = fitz.Rect(cb.x, fitz_y0, cb.x + cb.width, fitz_y1)
+                crop_rect = fitz.Rect(cb.x, cb.y, cb.x + cb.width, cb.y + cb.height)
                 out_page.set_cropbox(crop_rect)
 
             # Apply annotations
@@ -146,12 +143,13 @@ class DocumentService:
             if out_page.rotation != page_node.rotation:
                 out_page.set_rotation(page_node.rotation)
 
+            # Apply crop if set.
+            # Frontend sends crop_box in pdfjs coordinate space: top-left origin,
+            # y increases downward, unscaled PDF points. fitz.Rect uses the same
+            # convention, so we can use the values directly with no y-flip.
             if page_node.crop_box:
                 cb = page_node.crop_box
-                page_rect = out_page.rect
-                fitz_y0 = page_rect.height - (cb.y + cb.height)
-                fitz_y1 = page_rect.height - cb.y
-                crop_rect = fitz.Rect(cb.x, fitz_y0, cb.x + cb.width, fitz_y1)
+                crop_rect = fitz.Rect(cb.x, cb.y, cb.x + cb.width, cb.y + cb.height)
                 out_page.set_cropbox(crop_rect)
 
             for child in page_node.get_annotations():

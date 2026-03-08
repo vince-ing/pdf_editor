@@ -313,6 +313,20 @@ export const PageRenderer = ({
 
         wasDragging.current = true;
 
+        // Crop: raw box clamped to page bounds, no text snapping
+        if (activeTool === TOOLS.CROP) {
+            const W = pageNode.metadata?.width  || 612;
+            const H = pageNode.metadata?.height || 792;
+            liveRectsRef.current = [{
+                x:      Math.max(0, Math.min(startPos.current.x, cur.x)),
+                y:      Math.max(0, Math.min(startPos.current.y, cur.y)),
+                width:  Math.min(Math.abs(cur.x - startPos.current.x), W),
+                height: Math.min(Math.abs(cur.y - startPos.current.y), H),
+            }];
+            bumpSel();
+            return;
+        }
+
         if (startIdx.current !== -1 && pageChars.length > 0) {
             const endIdx = nearestCharIdx(cur);
             if (endIdx !== -1) {
@@ -325,16 +339,17 @@ export const PageRenderer = ({
         }
         liveRectsRef.current = [];
         bumpSel();
-    }, [toPdf, nearestCharIdx, pageChars, bumpSel]);
+    }, [toPdf, nearestCharIdx, pageChars, bumpSel, activeTool, pageNode.metadata]);
 
     const onMouseUp = useCallback((e) => {
         if (!isDragging.current) return;
         isDragging.current = false;
 
         const rects = liveRectsRef.current;
-        console.log('[mouseup] liveRects:', rects.length, 'wasDragging:', wasDragging.current);
+        const r = rects[0];
 
-        if (rects.length === 0) {
+        // Discard tiny accidental drags
+        if (!r || (r.width < 4 && r.height < 4)) {
             liveRectsRef.current = [];
             bumpSel();
             return;
@@ -344,8 +359,6 @@ export const PageRenderer = ({
         committedRectsRef.current = rects;
         liveRectsRef.current = [];
         bumpSel();
-
-        console.log('[mouseup] committed:', committedRectsRef.current.length);
 
         // Handle tool action
         handleAction(rects);
@@ -367,6 +380,14 @@ export const PageRenderer = ({
     }, []);
 
     const handleAction = useCallback(async (rects) => {
+        if (activeTool === TOOLS.CROP) {
+            // Just store the first rect as the pending crop — confirm button applies it
+            committedRectsRef.current = [rects[0]];
+            liveRectsRef.current = [];
+            bumpSel();
+            return;
+        }
+
         if (activeTool === TOOLS.SELECT) {
             const tol = 4;
             const sel = pageChars.filter(c => {
@@ -409,6 +430,29 @@ export const PageRenderer = ({
     // Keep handleAction reachable from the stable onMouseUp via a ref
     handleActionRef.current = handleAction;
 
+    // ── Crop confirm / cancel ─────────────────────────────────────────────────
+
+    const handleCropConfirm = useCallback(() => {
+        const rect = committedRectsRef.current[0];
+        if (!rect) return;
+        withBusy(async () => {
+            // Convert from canvas (top-left, y-down, scaled) to PDF space (top-left, y-down, unscaled)
+            // The backend CropPageCommand stores in the same top-left space and
+            // document_service.py converts to fitz's bottom-left space on export.
+            await engineApi.cropPage(pageNode.id, rect.x, rect.y, rect.width, rect.height);
+            committedRectsRef.current = [];
+            liveRectsRef.current = [];
+            bumpSel();
+            if (onDocumentChanged) await onDocumentChanged();
+        });
+    }, [pageNode.id, withBusy, onDocumentChanged, bumpSel]);
+
+    const handleCropCancel = useCallback(() => {
+        committedRectsRef.current = [];
+        liveRectsRef.current = [];
+        bumpSel();
+    }, [bumpSel]);
+
     // ── Click = clear selection (only if no drag just finished) ──────────────
     const handleClick = useCallback(() => {
         if (wasDragging.current) {
@@ -438,17 +482,27 @@ export const PageRenderer = ({
 
     // ── Derived display ───────────────────────────────────────────────────────
 
-    const isDragTool = activeTool === TOOLS.HIGHLIGHT || activeTool === TOOLS.REDACT || activeTool === TOOLS.SELECT;
+    const isDragTool = activeTool === TOOLS.HIGHLIGHT || activeTool === TOOLS.REDACT
+                    || activeTool === TOOLS.SELECT   || activeTool === TOOLS.CROP;
 
     // Live drag takes priority; fall back to committed
     const displayRects = liveRectsRef.current.length > 0
         ? liveRectsRef.current
         : committedRectsRef.current;
 
-    const selColor  = activeTool === TOOLS.REDACT ? 'rgba(0,0,0,0.6)' : activeTool === TOOLS.SELECT ? 'rgba(52,152,219,0.3)' : 'rgba(255,255,0,0.4)';
-    const selBorder = activeTool === TOOLS.REDACT ? '2px solid #333'   : activeTool === TOOLS.SELECT ? 'none'                  : '2px solid #cccc00';
+    const selColor  = activeTool === TOOLS.REDACT ? 'rgba(0,0,0,0.6)'
+                    : activeTool === TOOLS.SELECT  ? 'rgba(52,152,219,0.3)'
+                    : activeTool === TOOLS.CROP    ? 'rgba(0,0,0,0)'
+                    : 'rgba(255,255,0,0.4)';
+    const selBorder = activeTool === TOOLS.REDACT ? '2px solid #333'
+                    : activeTool === TOOLS.SELECT  ? 'none'
+                    : activeTool === TOOLS.CROP    ? '2px solid #f39c12'
+                    : '2px solid #cccc00';
 
-    console.log('[render] displayRects:', displayRects.length, 'live:', liveRectsRef.current.length, 'committed:', committedRectsRef.current.length);
+    // For the crop tool — the pending crop rect (only ever one rect)
+    const cropRect = activeTool === TOOLS.CROP && committedRectsRef.current.length > 0
+        ? committedRectsRef.current[0]
+        : null;
 
     return (
         <div
@@ -468,6 +522,20 @@ export const PageRenderer = ({
                 {annotations.map(child => <NodeOverlay key={child.id} node={child} scale={scale} />)}
             </div>
 
+            {/* Crop darkened-outside overlay — shown when a crop rect is committed */}
+            {cropRect && (
+                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 8 }}>
+                    {/* top */}
+                    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: `${cropRect.y * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                    {/* bottom */}
+                    <div style={{ position: 'absolute', left: 0, bottom: 0, right: 0, top: `${(cropRect.y + cropRect.height) * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                    {/* left */}
+                    <div style={{ position: 'absolute', left: 0, top: `${cropRect.y * scale}px`, width: `${cropRect.x * scale}px`, height: `${cropRect.height * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                    {/* right */}
+                    <div style={{ position: 'absolute', right: 0, top: `${cropRect.y * scale}px`, left: `${(cropRect.x + cropRect.width) * scale}px`, height: `${cropRect.height * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                </div>
+            )}
+
             {/* Interaction layer */}
             <div
                 ref={overlayRef}
@@ -478,7 +546,7 @@ export const PageRenderer = ({
                 onMouseUp={isDragTool   ? onMouseUp   : undefined}
                 onMouseLeave={isDragTool ? onMouseLeave : undefined}
             >
-                {/* Selection rects */}
+                {/* Selection / crop rects */}
                 {displayRects.map((rect, i) => (
                     <div key={i} style={{
                         position: 'absolute',
@@ -486,11 +554,31 @@ export const PageRenderer = ({
                         width: `${rect.width * scale}px`, height: `${rect.height * scale}px`,
                         backgroundColor: selColor, border: selBorder,
                         pointerEvents: 'none', borderRadius: '1px',
+                        boxSizing: 'border-box',
                     }} />
                 ))}
             </div>
 
-            {hovered && <PageControls pageIndex={pageIndex} totalPages={totalPages} onRotateCW={handleRotateCW} onRotateCCW={handleRotateCCW} onDelete={handleDelete} onMoveUp={handleMoveUp} onMoveDown={handleMoveDown} />}
+            {/* Crop confirm / cancel bar */}
+            {cropRect && (
+                <div style={{
+                    position: 'absolute',
+                    bottom: `${(dimensions.height - (cropRect.y + cropRect.height) * scale) + 8}px`,
+                    left: '50%', transform: 'translateX(-50%)',
+                    display: 'flex', gap: '8px', zIndex: 30, pointerEvents: 'auto',
+                }}>
+                    <button
+                        onClick={handleCropConfirm}
+                        style={{ padding: '6px 16px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: '5px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+                    >✓ Apply Crop</button>
+                    <button
+                        onClick={handleCropCancel}
+                        style={{ padding: '6px 16px', backgroundColor: '#c0392b', color: 'white', border: 'none', borderRadius: '5px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+                    >✕ Cancel</button>
+                </div>
+            )}
+
+            {hovered && !cropRect && <PageControls pageIndex={pageIndex} totalPages={totalPages} onRotateCW={handleRotateCW} onRotateCCW={handleRotateCCW} onDelete={handleDelete} onMoveUp={handleMoveUp} onMoveDown={handleMoveDown} />}
 
             <div style={{ position: 'absolute', bottom: '8px', right: '10px', backgroundColor: 'rgba(0,0,0,0.45)', color: 'white', fontSize: '11px', fontWeight: '600', padding: '2px 7px', borderRadius: '10px', pointerEvents: 'none', zIndex: 20 }}>
                 {pageIndex + 1}

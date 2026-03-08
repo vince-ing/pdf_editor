@@ -3,6 +3,17 @@ import axios from 'axios';
 const API_BASE = 'http://localhost:8000/api';
 
 export const engineApi = {
+
+    cropPage: async (pageId, x, y, width, height) => {
+    const res = await fetch(`http://localhost:8000/api/pages/${pageId}/crop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x, y, width, height }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+    },
+
     // --- Document ---
     uploadDocument: async (file) => {
         const formData = new FormData();

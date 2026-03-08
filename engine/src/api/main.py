@@ -33,6 +33,12 @@ plugin_manager.finalize()
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
+class CropPayload(BaseModel):
+    x: float
+    y: float
+    width: float
+    height: float
+
 class MovePagePayload(BaseModel):
     new_index: int
 
@@ -132,6 +138,17 @@ def download_document():
 
 
 # ── Page endpoints ────────────────────────────────────────────────────────────
+
+@app.post("/api/pages/{page_id}/crop")
+def crop_page(page_id: str, payload: CropPayload):
+    try:
+        service = PageService(current_session)
+        service.crop_page(page_id, payload.x, payload.y, payload.width, payload.height)
+        return {"status": "success", "message": "Page cropped."}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages")
 def create_page(page_number: int, source_ref: str = None):

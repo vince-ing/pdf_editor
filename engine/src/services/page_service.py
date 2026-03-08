@@ -4,7 +4,7 @@ from typing import Optional
 from engine.src.editor.editor_session import EditorSession
 from engine.src.core.page_node import PageNode
 from engine.src.commands.node_commands import AddNodeCommand
-from engine.src.commands.page_commands import RotatePageCommand, DeletePageCommand, MovePageCommand
+from engine.src.commands.page_commands import RotatePageCommand, DeletePageCommand, MovePageCommand, CropPageCommand
 
 class PageService:
     """
@@ -36,6 +36,12 @@ class PageService:
     def move_page(self, page_id: str, new_index: int) -> bool:
         """Moves a page to new_index via the session so it lands on the undo stack."""
         command = MovePageCommand(page_id, new_index)
+        self.session.execute(command)
+        return True
+
+    def crop_page(self, page_id: str, x: float, y: float, width: float, height: float) -> bool:
+        """Crops a page to the given rectangle via the undo stack."""
+        command = CropPageCommand(page_id, x, y, width, height)
         self.session.execute(command)
         return True
 
