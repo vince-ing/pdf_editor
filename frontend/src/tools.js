@@ -3,6 +3,7 @@ export const TOOLS = {
     TEXT:      'text',
     HIGHLIGHT: 'highlight',
     REDACT:    'redact',
+    CROP:      'crop',
 };
 
 export const TOOL_ICONS = {
@@ -10,6 +11,7 @@ export const TOOL_ICONS = {
     [TOOLS.TEXT]:      { icon: 'T',  label: 'Text' },
     [TOOLS.HIGHLIGHT]: { icon: '▬', label: 'Highlight' },
     [TOOLS.REDACT]:    { icon: '■', label: 'Redact' },
+    [TOOLS.CROP]:      { icon: '⬚', label: 'Crop' },
 };
 
 export const TOOL_CURSORS = {
@@ -17,4 +19,5 @@ export const TOOL_CURSORS = {
     [TOOLS.TEXT]:      'text',
     [TOOLS.HIGHLIGHT]: 'crosshair',
     [TOOLS.REDACT]:    'crosshair',
+    [TOOLS.CROP]:      'crosshair',
 };

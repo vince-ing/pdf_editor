@@ -87,3 +87,30 @@ class MovePageCommand(Command):
         children = [c for c in session.document.children if c.id != self.page_id]
         children.insert(self.old_index, page)
         session.document.children = children
+
+
+class CropPageCommand(Command):
+    """Crops a page to a specified rectangle. Stores previous crop for undo."""
+    def __init__(self, page_id: str, x: float, y: float, width: float, height: float):
+        self.page_id = page_id
+        self.new_crop = {"x": x, "y": y, "width": width, "height": height}
+        self.old_crop = None  # saved on execute for undo
+
+    def execute(self, session) -> None:
+        page = session.document.get_child(self.page_id)
+        if not page or page.node_type != "page":
+            raise ValueError(f"Page with ID {self.page_id} not found.")
+        # Save previous crop so undo can restore it
+        self.old_crop = page.crop_box.model_dump() if page.crop_box else None
+        from engine.src.core.page_node import CropBox
+        page.crop_box = CropBox(**self.new_crop)
+
+    def undo(self, session) -> None:
+        page = session.document.get_child(self.page_id)
+        if not page:
+            return
+        if self.old_crop is None:
+            page.crop_box = None
+        else:
+            from engine.src.core.page_node import CropBox
+            page.crop_box = CropBox(**self.old_crop)

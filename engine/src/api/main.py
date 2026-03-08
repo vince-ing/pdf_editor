@@ -192,6 +192,19 @@ def move_page(page_id: str, payload: MovePagePayload):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/pages/{page_id}/chars")
+def get_page_chars(page_id: str):
+    service = PageService(current_session)
+    try:
+        chars = service.get_page_chars(page_id)
+        return {"status": "success", "chars": chars}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ── Annotation endpoints ──────────────────────────────────────────────────────
 

@@ -1,3 +1,5 @@
+import os
+import fitz
 from typing import Optional
 from engine.src.editor.editor_session import EditorSession
 from engine.src.core.page_node import PageNode
@@ -36,3 +38,43 @@ class PageService:
         command = MovePageCommand(page_id, new_index)
         self.session.execute(command)
         return True
+
+    def get_page_chars(self, page_id: str) -> list:
+        """Extracts character-level bounding boxes for text selection."""
+        page_node = self.session.document.get_child(page_id)
+        if not page_node:
+            raise ValueError(f"Page {page_id} not found.")
+
+        file_path = self.session.document.file_path
+        if not file_path or not os.path.exists(file_path):
+            return []
+
+        doc = fitz.open(file_path)
+        try:
+            src_page_index = page_node.page_number
+            if src_page_index < 0 or src_page_index >= len(doc):
+                return []
+            
+            fitz_page = doc[src_page_index]
+            
+            # "rawdict" provides deep text structure down to the individual character
+            rawdict = fitz_page.get_text("rawdict")
+            
+            chars = []
+            for block in rawdict.get("blocks", []):
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        for char in span.get("chars", []):
+                            bbox = char.get("bbox")
+                            if bbox and len(bbox) == 4:
+                                chars.append({
+                                    "text": char.get("c", ""),
+                                    "x": bbox[0],
+                                    "y": bbox[1],
+                                    "width": bbox[2] - bbox[0],
+                                    "height": bbox[3] - bbox[1],
+                                    "bbox": bbox  # Expose the raw array for the frontend
+                                })
+            return chars
+        finally:
+            doc.close()

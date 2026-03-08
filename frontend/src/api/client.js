@@ -36,6 +36,18 @@ export const engineApi = {
         const response = await axios.post(`${API_BASE}/pages/${pageId}/move`, { new_index: newIndex });
         return response.data;
     },
+    cropPage: async (pageId, x, y, width, height) => {
+        const response = await axios.post(`${API_BASE}/pages/${pageId}/crop`, { x, y, width, height });
+        return response.data;
+    },
+    clearCrop: async (pageId) => {
+        const response = await axios.delete(`${API_BASE}/pages/${pageId}/crop`);
+        return response.data;
+    },
+    getPageChars: async (pageId) => {
+        const response = await axios.get(`${API_BASE}/pages/${pageId}/chars`);
+        return response.data.chars;
+    },
 
     // --- Annotations ---
     addTextAnnotation: async (pageId, text, x, y, width = 200, height = 30) => {

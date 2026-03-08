@@ -50,44 +50,117 @@ const NodeOverlay = ({ node, scale = 1.0 }) => {
     }
 };
 
-// ── Drag rect hook ───────────────────────────────────────────────────────────
+// ── Smart text selection hook ────────────────────────────────────────────────
 
-function useDragRect(overlayRef, scale, onComplete) {
-    const [dragRect, setDragRect] = useState(null);
+function useSmartSelection(overlayRef, scale, chars, onComplete) {
+    const [mouseBox, setMouseBox] = useState(null);
+    const [textRects, setTextRects] = useState([]);
     const startPos = useRef(null);
+
+    const lineBBox = (lineChars) => {
+        const minX = Math.min(...lineChars.map(c => c.x));
+        const minY = Math.min(...lineChars.map(c => c.y));
+        const maxX = Math.max(...lineChars.map(c => c.x + c.width));
+        const maxY = Math.max(...lineChars.map(c => c.y + c.height));
+        return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+    };
 
     const onMouseDown = useCallback((e) => {
         e.preventDefault();
         if (!overlayRef.current) return;
         const rect = overlayRef.current.getBoundingClientRect();
         startPos.current = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
-        setDragRect(null);
+        setMouseBox(null);
+        setTextRects([]);
     }, [scale]);
 
     const onMouseMove = useCallback((e) => {
         if (!startPos.current || !overlayRef.current) return;
         const rect = overlayRef.current.getBoundingClientRect();
         const cur = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
-        setDragRect({
-            x: Math.min(startPos.current.x, cur.x), y: Math.min(startPos.current.y, cur.y),
-            width: Math.abs(cur.x - startPos.current.x), height: Math.abs(cur.y - startPos.current.y),
-        });
-    }, [scale]);
-
-    const finishDrag = useCallback((e) => {
-        if (!startPos.current || !overlayRef.current) return;
-        const rect = overlayRef.current.getBoundingClientRect();
-        const cur = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
-        const finalRect = {
-            x: Math.min(startPos.current.x, cur.x), y: Math.min(startPos.current.y, cur.y),
-            width: Math.abs(cur.x - startPos.current.x), height: Math.abs(cur.y - startPos.current.y),
+        
+        const rawBox = {
+            x: Math.min(startPos.current.x, cur.x),
+            y: Math.min(startPos.current.y, cur.y),
+            width: Math.abs(cur.x - startPos.current.x),
+            height: Math.abs(cur.y - startPos.current.y),
         };
-        startPos.current = null;
-        setDragRect(null);
-        if (finalRect.width > 4 && finalRect.height > 4) onComplete(finalRect);
-    }, [scale, onComplete]);
+        setMouseBox(rawBox);
 
-    return { dragRect, onMouseDown, onMouseMove, onMouseUp: finishDrag, onMouseLeave: finishDrag };
+        // Ignore tiny accidental drags
+        if (rawBox.width < 2 && rawBox.height < 2) {
+            setTextRects([]);
+            return;
+        }
+
+        if (chars && chars.length > 0) {
+            let startDist = Infinity;
+            let startIdx = -1;
+            let endDist = Infinity;
+            let endIdx = -1;
+
+            for (let i = 0; i < chars.length; i++) {
+                const c = chars[i];
+                const cx = c.x + c.width / 2;
+                const cy = c.y + c.height / 2;
+                
+                const d1 = Math.pow(cx - startPos.current.x, 2) + Math.pow(cy - startPos.current.y, 2);
+                if (d1 < startDist) { startDist = d1; startIdx = i; }
+
+                const d2 = Math.pow(cx - cur.x, 2) + Math.pow(cy - cur.y, 2);
+                if (d2 < endDist) { endDist = d2; endIdx = i; }
+            }
+
+            // Snap to text if the drag starts and ends reasonably close to characters (~31px threshold)
+            if (startIdx !== -1 && endIdx !== -1 && startDist < 1000 && endDist < 1000) {
+                const minIdx = Math.min(startIdx, endIdx);
+                const maxIdx = Math.max(startIdx, endIdx);
+                const selectedChars = chars.slice(minIdx, maxIdx + 1);
+
+                const rects = [];
+                if (selectedChars.length > 0) {
+                    let currentLine = [selectedChars[0]];
+                    for (let i = 1; i < selectedChars.length; i++) {
+                        const prev = currentLine[currentLine.length - 1];
+                        const curr = selectedChars[i];
+                        const prevCenterY = prev.y + prev.height / 2;
+                        const currCenterY = curr.y + curr.height / 2;
+
+                        // Start a new line box if vertical jump is significant
+                        if (Math.abs(prevCenterY - currCenterY) < prev.height * 0.5) {
+                            currentLine.push(curr);
+                        } else {
+                            rects.push(lineBBox(currentLine));
+                            currentLine = [curr];
+                        }
+                    }
+                    if (currentLine.length > 0) rects.push(lineBBox(currentLine));
+                }
+                setTextRects(rects);
+                return;
+            }
+        }
+        
+        // Clear text rects if we didn't snap, falling back to showing rawBox
+        setTextRects([]);
+
+    }, [scale, chars]);
+
+    const finishDrag = useCallback(() => {
+        if (!startPos.current) return;
+        
+        if (textRects.length > 0) {
+            onComplete(textRects);
+        } else if (mouseBox && mouseBox.width > 4 && mouseBox.height > 4) {
+            onComplete([mouseBox]);
+        }
+        
+        startPos.current = null;
+        setMouseBox(null);
+        setTextRects([]);
+    }, [mouseBox, textRects, onComplete]);
+
+    return { mouseBox, textRects, onMouseDown, onMouseMove, onMouseUp: finishDrag, onMouseLeave: finishDrag };
 }
 
 // ── Page controls bar ────────────────────────────────────────────────────────
@@ -134,22 +207,34 @@ export const PageRenderer = ({
     const canvasRef  = useRef(null);
     const overlayRef = useRef(null);
     const [annotations, setAnnotations] = useState([]);
+    const [pageChars, setPageChars] = useState([]);
     const [hovered, setHovered] = useState(false);
     const [busy, setBusy] = useState(false);
-
-    // Track rotation locally — the GET /api/document endpoint strips PageNode-specific
-    // fields (rotation, page_number) because children is typed as List[Node] in Pydantic.
-    // We update localRotation directly from the rotate API response, which serializes
-    // the PageNode directly and preserves all fields.
     const [localRotation, setLocalRotation] = useState(pageNode.rotation ?? 0);
 
-    // Sync localRotation from pageNode.rotation whenever it changes.
-    // Now that the backend uses model_dump(), rotation is always a number.
-    // This handles: undo, sidebar-initiated rotate, reorder, new doc load.
+    // Fetch and explicitly sort characters to ensure perfect line-reading order
     useEffect(() => {
-        if (typeof pageNode.rotation === 'number') {
-            setLocalRotation(pageNode.rotation);
-        }
+        let isMounted = true;
+        fetch(`http://localhost:8000/api/pages/${pageNode.id}/chars`)
+            .then(res => res.json())
+            .then(data => {
+                if (isMounted && data.status === 'success') {
+                    const fetchedChars = data.chars || [];
+                    fetchedChars.sort((a, b) => {
+                        // Sort top-to-bottom first (with a 5px forgiveness for inline shifts)
+                        if (Math.abs(a.y - b.y) > 5) return a.y - b.y;
+                        // Then sort left-to-right
+                        return a.x - b.x;
+                    });
+                    setPageChars(fetchedChars);
+                }
+            })
+            .catch(err => console.error("Could not fetch page chars:", err));
+        return () => { isMounted = false; };
+    }, [pageNode.id]);
+
+    useEffect(() => {
+        if (typeof pageNode.rotation === 'number') setLocalRotation(pageNode.rotation);
     }, [pageNode.rotation, pageNode.id]);
 
     const [dimensions, setDimensions] = useState({
@@ -161,7 +246,7 @@ export const PageRenderer = ({
         setAnnotations(pageNode.children || []);
     }, [pageNode.children]);
 
-    // ── Canvas render — driven by localRotation ───────────────────────────────
+    // ── Canvas render ────────────────────────────────────────────────────────
     useEffect(() => {
         if (!pdfDoc) return;
         let isMounted = true;
@@ -169,29 +254,22 @@ export const PageRenderer = ({
 
         const renderPage = async () => {
             try {
-                // Use the original source page number, not the current array index.
-                // After deletes/moves, pageIndex shifts but page_number stays fixed.
                 const pageNum = (pageNode.page_number ?? pageIndex) + 1;
                 if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
 
-                const page    = await pdfDoc.getPage(pageNum);
+                const page = await pdfDoc.getPage(pageNum);
                 if (!isMounted) return;
 
-                // Scale the canvas by devicePixelRatio so text is sharp on
-                // HiDPI / Retina screens. CSS size stays at logical dimensions.
-                const dpr      = window.devicePixelRatio || 1;
+                const dpr = window.devicePixelRatio || 1;
                 const viewport = page.getViewport({ scale: scale * dpr, rotation: localRotation });
-                const canvas   = canvasRef.current;
+                const canvas = canvasRef.current;
                 if (!canvas) return;
 
-                const context  = canvas.getContext('2d');
-
-                // Physical pixels = logical size × dpr
-                canvas.width  = viewport.width;
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
                 canvas.height = viewport.height;
 
-                // CSS size = logical dimensions (unaffected by dpr)
-                const cssW = viewport.width  / dpr;
+                const cssW = viewport.width / dpr;
                 const cssH = viewport.height / dpr;
                 canvas.style.width  = `${cssW}px`;
                 canvas.style.height = `${cssH}px`;
@@ -222,14 +300,8 @@ export const PageRenderer = ({
     const handleRotateCW = useCallback(() => {
         withBusy(async () => {
             const res = await engineApi.rotatePage(pageNode.id, 90);
-            // res.page is serialized as PageNode directly — rotation field is present
-            if (res?.page?.rotation !== undefined) {
-                console.log('[rotate] new rotation from API:', res.page.rotation);
-                setLocalRotation(res.page.rotation);
-            } else {
-                // Fallback: just add 90 locally
-                setLocalRotation(r => (r + 90) % 360);
-            }
+            if (res?.page?.rotation !== undefined) setLocalRotation(res.page.rotation);
+            else setLocalRotation(r => (r + 90) % 360);
             if (onDocumentChanged) await onDocumentChanged();
         });
     }, [pageNode.id, withBusy, onDocumentChanged]);
@@ -237,11 +309,8 @@ export const PageRenderer = ({
     const handleRotateCCW = useCallback(() => {
         withBusy(async () => {
             const res = await engineApi.rotatePage(pageNode.id, -90);
-            if (res?.page?.rotation !== undefined) {
-                setLocalRotation(res.page.rotation);
-            } else {
-                setLocalRotation(r => (r - 90 + 360) % 360);
-            }
+            if (res?.page?.rotation !== undefined) setLocalRotation(res.page.rotation);
+            else setLocalRotation(r => (r - 90 + 360) % 360);
             if (onDocumentChanged) await onDocumentChanged();
         });
     }, [pageNode.id, withBusy, onDocumentChanged]);
@@ -288,17 +357,28 @@ export const PageRenderer = ({
         }
     }, [scale, pageNode.id, onAnnotationAdded]);
 
-    const handleRectComplete = useCallback(async (rect) => {
+    const handleRectComplete = useCallback(async (rects) => {
         try {
-            let res = null;
-            if (activeTool === TOOLS.HIGHLIGHT) {
-                res = await engineApi.addHighlight(pageNode.id, rect.x, rect.y, rect.width, rect.height);
-            } else if (activeTool === TOOLS.REDACT) {
-                res = await engineApi.applyRedaction(pageNode.id, rect.x, rect.y, rect.width, rect.height);
-            } else return;
-            if (res?.node)       setAnnotations(prev => [...prev, res.node]);
-            else if (res?.nodes) setAnnotations(prev => [...prev, ...res.nodes]);
-            if (onAnnotationAdded) onAnnotationAdded();
+            const promises = rects.map(rect => {
+                if (activeTool === TOOLS.HIGHLIGHT) {
+                    return engineApi.addHighlight(pageNode.id, rect.x, rect.y, rect.width, rect.height);
+                } else if (activeTool === TOOLS.REDACT) {
+                    return engineApi.applyRedaction(pageNode.id, rect.x, rect.y, rect.width, rect.height);
+                }
+                return null;
+            }).filter(Boolean);
+
+            const results = await Promise.all(promises);
+            const newNodes = [];
+            for (const res of results) {
+                if (res?.node) newNodes.push(res.node);
+                else if (res?.nodes) newNodes.push(...res.nodes);
+            }
+
+            if (newNodes.length > 0) {
+                setAnnotations(prev => [...prev, ...newNodes]);
+                if (onAnnotationAdded) onAnnotationAdded();
+            }
         } catch (err) {
             console.error('Annotation failed:', err);
             alert('Annotation failed: ' + (err.response?.data?.detail || err.message));
@@ -309,8 +389,8 @@ export const PageRenderer = ({
     const dragColor  = activeTool === TOOLS.REDACT ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,0,0.4)';
     const dragBorder = activeTool === TOOLS.REDACT ? '#333' : '#cccc00';
 
-    const { dragRect, onMouseDown, onMouseMove, onMouseUp, onMouseLeave } = useDragRect(
-        overlayRef, scale, handleRectComplete
+    const { mouseBox, textRects, onMouseDown, onMouseMove, onMouseUp, onMouseLeave } = useSmartSelection(
+        overlayRef, scale, pageChars, handleRectComplete
     );
 
     return (
@@ -354,15 +434,27 @@ export const PageRenderer = ({
                 onMouseUp={isDragTool ? onMouseUp : undefined}
                 onMouseLeave={isDragTool ? onMouseLeave : undefined}
             >
-                {dragRect && (
+                {/* Fallback box shown if not snapping to text */}
+                {mouseBox && textRects.length === 0 && (
                     <div style={{
                         position: 'absolute',
-                        left: `${dragRect.x * scale}px`, top: `${dragRect.y * scale}px`,
-                        width: `${dragRect.width * scale}px`, height: `${dragRect.height * scale}px`,
-                        backgroundColor: dragColor, border: `2px dashed ${dragBorder}`,
+                        left: `${mouseBox.x * scale}px`, top: `${mouseBox.y * scale}px`,
+                        width: `${mouseBox.width * scale}px`, height: `${mouseBox.height * scale}px`,
+                        backgroundColor: 'rgba(52, 152, 219, 0.15)', border: '1px solid rgba(52, 152, 219, 0.5)',
                         pointerEvents: 'none', borderRadius: '2px',
                     }} />
                 )}
+
+                {/* Snapped Text Lines */}
+                {textRects.map((rect, i) => (
+                    <div key={i} style={{
+                        position: 'absolute',
+                        left: `${rect.x * scale}px`, top: `${rect.y * scale}px`,
+                        width: `${rect.width * scale}px`, height: `${rect.height * scale}px`,
+                        backgroundColor: dragColor, border: `2px dashed ${dragBorder}`,
+                        pointerEvents: 'none', borderRadius: '2px',
+                    }} />
+                ))}
             </div>
 
             {/* Page controls */}
