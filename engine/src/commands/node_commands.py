@@ -1,21 +1,23 @@
-from typing import Optional
+# engine/src/commands/node_commands.py
+
+from typing import Optional, List
 from .base import Command
 from engine.src.core.node import Node
 from engine.src.editor.editor_session import EditorSession
 
 class AddNodeCommand(Command):
-    """Adds a node to a specific parent node in the document."""
+    """Adds a single node to a specific parent node in the document."""
     def __init__(self, parent_id: str, new_node: Node):
         self.parent_id = parent_id
         self.new_node = new_node
 
     def execute(self, session: EditorSession) -> None:
-        # If parent_id matches the document root, add it there
+        self.new_node.parent_id = self.parent_id 
+        
         if session.document.id == self.parent_id:
             session.document.add_child(self.new_node)
             return
 
-        # Otherwise, search the document tree for the parent
         parent = session.document.get_child(self.parent_id)
         if parent:
             parent.add_child(self.new_node)
@@ -30,6 +32,41 @@ class AddNodeCommand(Command):
         parent = session.document.get_child(self.parent_id)
         if parent:
             parent.remove_child(self.new_node.id)
+
+
+class BatchAddNodeCommand(Command):
+    """Adds multiple nodes to a specific parent node in a single action (useful for multi-line highlights)."""
+    def __init__(self, parent_id: str, new_nodes: List[Node]):
+        self.parent_id = parent_id
+        self.new_nodes = new_nodes
+
+    def execute(self, session: EditorSession) -> None:
+        for node in self.new_nodes:
+            node.parent_id = self.parent_id 
+            
+        if session.document.id == self.parent_id:
+            for node in self.new_nodes:
+                session.document.add_child(node)
+            return
+
+        parent = session.document.get_child(self.parent_id)
+        if parent:
+            for node in self.new_nodes:
+                parent.add_child(node)
+        else:
+            raise ValueError(f"Parent node with ID {self.parent_id} not found.")
+
+    def undo(self, session: EditorSession) -> None:
+        if session.document.id == self.parent_id:
+            for node in self.new_nodes:
+                session.document.remove_child(node.id)
+            return
+
+        parent = session.document.get_child(self.parent_id)
+        if parent:
+            for node in self.new_nodes:
+                parent.remove_child(node.id)
+
 
 class DeleteNodeCommand(Command):
     """Deletes a node from the document and stores it for potential undo."""

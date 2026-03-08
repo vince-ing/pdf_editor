@@ -1,4 +1,7 @@
+# engine/src/api/main.py
+
 import os
+from typing import List
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -61,12 +64,15 @@ class TextAnnotationPayload(BaseModel):
     font_size: float = 12.0
     color: str = "#000000"
 
-class HighlightPayload(BaseModel):
-    page_id: str
+class HighlightRect(BaseModel):
     x: float
     y: float
     width: float
     height: float
+
+class HighlightPayload(BaseModel):
+    page_id: str
+    rects: List[HighlightRect]
     color: str = "#FFFF00"
     opacity: float = 0.4
 
@@ -249,16 +255,16 @@ def add_highlight_annotation(payload: HighlightPayload):
     if not page or page.node_type != "page":
         raise HTTPException(status_code=404, detail="Page not found")
     service = AnnotationService(current_session)
-    node = service.add_highlight(
+    
+    # Pass all rects at once to properly batch them into one undo operation
+    rect_dicts = [{"x": r.x, "y": r.y, "width": r.width, "height": r.height} for r in payload.rects]
+    nodes = service.add_highlights(
         page_id=payload.page_id,
-        x=payload.x,
-        y=payload.y,
-        width=payload.width,
-        height=payload.height,
+        rects=rect_dicts,
         color=payload.color,
+        opacity=payload.opacity
     )
-    node.opacity = payload.opacity
-    return {"status": "success", "node": node}
+    return {"status": "success", "nodes": nodes}
 
 
 # ── Undo / Redo ───────────────────────────────────────────────────────────────

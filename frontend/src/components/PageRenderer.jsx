@@ -1,3 +1,5 @@
+// frontend/src/components/PageRenderer.jsx
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { engineApi } from '../api/client';
 import { TOOLS, TOOL_CURSORS } from '../tools';
@@ -28,6 +30,7 @@ export const PageRenderer = ({
     activeTool, onAnnotationAdded, onDocumentChanged,
 }) => {
     const overlayRef = useRef(null);
+    const clearSelectionRef = useRef(null);
 
     const [annotations,   setAnnotations]   = useState([]);
     const [hovered,       setHovered]       = useState(false);
@@ -70,7 +73,6 @@ export const PageRenderer = ({
 
     const handleAction = useCallback(async (rects) => {
         if (activeTool === TOOLS.CROP) {
-            // Drag hook automatically stores this in committedRects, we just wait for confirm
             return;
         }
 
@@ -102,13 +104,35 @@ export const PageRenderer = ({
         }
 
         try {
-            const results = await Promise.all(rects.map(r => {
-                if (activeTool === TOOLS.HIGHLIGHT) return engineApi.addHighlight(pageNode.id, r.x, r.y, r.width, r.height);
-                if (activeTool === TOOLS.REDACT)    return engineApi.applyRedaction(pageNode.id, r.x, r.y, r.width, r.height);
-                return null;
-            }).filter(Boolean));
+            let results = [];
+            
+            if (activeTool === TOOLS.HIGHLIGHT) {
+                const payload = {
+                    page_id: pageNode.id,
+                    rects: rects.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+                };
+                const res = await fetch(`http://localhost:8000/api/annotations/highlight`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).then(r => r.json());
+                results = [res];
+            } else if (activeTool === TOOLS.REDACT) {
+                // Batch all rects into a single API call so it creates one undo command
+                const res = await engineApi.applyRedaction(pageNode.id, rects);
+                results = [res];
+            }
+
             const nodes = results.flatMap(r => r?.node ? [r.node] : r?.nodes ?? []);
-            if (nodes.length) { setAnnotations(p => [...p, ...nodes]); onAnnotationAdded?.(); }
+            if (nodes.length) { 
+                setAnnotations(p => [...p, ...nodes]); 
+                onAnnotationAdded?.(); 
+            }
+
+            if (clearSelectionRef.current && activeTool !== TOOLS.CROP) {
+                clearSelectionRef.current();
+            }
+
         } catch (err) { console.error(err); alert('Failed: ' + err.message); }
     }, [activeTool, pageNode.id, pageChars, triggerToast, onAnnotationAdded]);
 
@@ -125,6 +149,10 @@ export const PageRenderer = ({
         metadata: pageNode.metadata,
         onAction: handleAction
     });
+
+    useEffect(() => { 
+        clearSelectionRef.current = clearSelection; 
+    }, [clearSelection]);
 
     // ── Page Commands ─────────────────────────────────────────────────────────
     const busyRef = useRef(false);
@@ -177,10 +205,8 @@ export const PageRenderer = ({
                     : activeTool === TOOLS.SELECT  ? 'rgba(52,152,219,0.3)'
                     : activeTool === TOOLS.CROP    ? 'rgba(0,0,0,0)'
                     : 'rgba(255,255,0,0.4)';
-    const selBorder = activeTool === TOOLS.REDACT ? '2px solid #333'
-                    : activeTool === TOOLS.SELECT  ? 'none'
-                    : activeTool === TOOLS.CROP    ? '2px solid #f39c12'
-                    : '2px solid #cccc00';
+                    
+    const selBorder = activeTool === TOOLS.CROP ? '2px solid #f39c12' : 'none';
 
     const cropRect = activeTool === TOOLS.CROP && committedRects.length > 0
         ? committedRects[0]

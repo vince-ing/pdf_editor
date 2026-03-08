@@ -1,4 +1,91 @@
 pdf_editor
+├── archive
+│   ├── commands
+│   │   ├── annotate.py
+│   │   ├── base.py
+│   │   ├── convert_images.py
+│   │   ├── draw_command.py
+│   │   ├── edit_text_command.py
+│   │   ├── extract_images.py
+│   │   ├── insert_image.py
+│   │   ├── insert_text.py
+│   │   ├── macro.py
+│   │   ├── ocr_page.py
+│   │   ├── page_ops.py
+│   │   ├── redact.py
+│   │   ├── rotate_page.py
+│   │   ├── snapshot.py
+│   │   └── toc_commands.py
+│   ├── core
+│   │   ├── document.py
+│   │   └── page.py
+│   ├── gui
+│   │   ├── __init__.py
+│   │   ├── app_context.py
+│   │   ├── components
+│   │   │   ├── __init__.py
+│   │   │   ├── canvas_area.py
+│   │   │   ├── icon_toolbar.py
+│   │   │   ├── right_panel.py
+│   │   │   ├── status_bar.py
+│   │   │   └── top_bar.py
+│   │   ├── controllers
+│   │   │   ├── __init__.py
+│   │   │   ├── document_controller.py
+│   │   │   ├── history_controller.py
+│   │   │   ├── ocr_controller.py
+│   │   │   ├── thumbnail_controller.py
+│   │   │   ├── tts_controller.py
+│   │   │   └── window_controller.py
+│   │   ├── history_manager.py
+│   │   ├── main_window.py
+│   │   ├── panels
+│   │   │   ├── __init__.py
+│   │   │   ├── merge_split_dialog.py
+│   │   │   ├── sidebar.py
+│   │   │   ├── thumbnail.py
+│   │   │   └── toc_panel.py
+│   │   ├── theme.py
+│   │   ├── tools
+│   │   │   ├── __init__.py
+│   │   │   ├── annot_tool.py
+│   │   │   ├── base_tool.py
+│   │   │   ├── draw_tool.py
+│   │   │   ├── edit_tool.py
+│   │   │   ├── find_tool.py
+│   │   │   ├── image_tool.py
+│   │   │   ├── redact_tool.py
+│   │   │   ├── select_tool.py
+│   │   │   └── tool_manager.py
+│   │   ├── ui_manager.py
+│   │   ├── viewport_manager.py
+│   │   └── widgets
+│   │       ├── __init__.py
+│   │       ├── edit_overlay.py
+│   │       ├── find_bar.py
+│   │       ├── text_box.py
+│   │       ├── tooltip.py
+│   │       └── tts_bar.py
+│   ├── imaging
+│   │   ├── filters.py
+│   │   └── image_processor.py
+│   ├── services
+│   │   ├── annotation_service.py
+│   │   ├── image_conversion.py
+│   │   ├── image_service.py
+│   │   ├── merge_split_service.py
+│   │   ├── page_service.py
+│   │   ├── redaction_service.py
+│   │   ├── text_service.py
+│   │   ├── toc_service.py
+│   │   └── tts_service.py
+│   └── utils
+│       ├── file_utils.py
+│       ├── font_loader.py
+│       ├── paragraph_grouper.py
+│       ├── selection_compositor.py
+│       ├── settings_manager.py
+│       └── task_manager.py
 ├── engine
 │   └── src
 │       ├── __init__.py

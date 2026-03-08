@@ -1,12 +1,11 @@
+# engine/src/plugins/redact_plugin.py
+
 from typing import List
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 from engine.src.plugin_system.plugin import Plugin
 from engine.src.editor.editor_session import EditorSession
 from engine.src.services.annotation_service import AnnotationService
-
-# Assuming your existing redact command/service handles the PyMuPDF physical redaction
-from engine.src.services.redaction_service import RedactionService
 
 class BoundingBoxPayload(BaseModel):
     x: float
@@ -41,21 +40,16 @@ class RedactPlugin(Plugin):
                 raise HTTPException(status_code=404, detail="Page not found")
 
             annot_service = AnnotationService(session)
-            added_nodes = []
 
-            for rect in payload.rects:
-                # Add an opaque black rectangle to the scene graph
-                node = annot_service.add_highlight(
-                    page_id=payload.page_id,
-                    x=rect.x,
-                    y=rect.y,
-                    width=rect.width,
-                    height=rect.height,
-                    color="#000000" # Black
-                )
-                # Override the default 0.5 opacity for a redaction
-                node.opacity = 1.0 
-                added_nodes.append(node)
+            # Use batch add_highlights to group undo operations into one command
+            rect_dicts = [{"x": r.x, "y": r.y, "width": r.width, "height": r.height} for r in payload.rects]
+            
+            added_nodes = annot_service.add_highlights(
+                page_id=payload.page_id,
+                rects=rect_dicts,
+                color="#000000",
+                opacity=1.0
+            )
 
             return {
                 "status": "success",

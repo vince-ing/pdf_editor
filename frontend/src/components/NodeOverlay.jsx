@@ -38,10 +38,11 @@ export const NodeOverlay = ({ node, scale = 1.0 }) => {
                 </div>
             );
         case 'highlight':
+            const borderWidth = node.border_width || 0;
             if (node.color === '#000000') {
-                return <div style={{ ...style, backgroundColor: '#000000', opacity: 1.0, borderRadius: '2px', pointerEvents: 'none' }} />;
+                return <div style={{ ...style, backgroundColor: '#000000', opacity: 1.0, borderRadius: '2px', pointerEvents: 'none', border: `${borderWidth}px solid transparent` }} />;
             }
-            return <div style={{ ...style, backgroundColor: node.color || '#FFFF00', opacity: node.opacity ?? 0.5, borderRadius: '2px', pointerEvents: 'none' }} />;
+            return <div style={{ ...style, backgroundColor: node.color || '#FFFF00', opacity: node.opacity ?? 0.5, borderRadius: '2px', pointerEvents: 'none', border: `${borderWidth}px solid transparent` }} />;
         default:
             return null;
     }

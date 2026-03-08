@@ -22,3 +22,4 @@ class HighlightNode(Node):
     node_type: str = "highlight"
     color: str = "#FFFF00"
     opacity: float = 0.5
+    border_width: float = 0.0
