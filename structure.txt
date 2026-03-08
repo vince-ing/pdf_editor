@@ -44,8 +44,14 @@ pdf_editor
 │   │   │   └── client.js
 │   │   ├── App.jsx
 │   │   ├── components
+│   │   │   ├── NodeOverlay.jsx
+│   │   │   ├── PageControls.jsx
 │   │   │   ├── PageRenderer.jsx
 │   │   │   └── Sidebar.jsx
+│   │   ├── hooks
+│   │   │   ├── useDragSelection.js
+│   │   │   ├── usePageChars.js
+│   │   │   └── usePdfCanvas.js
 │   │   ├── main.jsx
 │   │   └── tools.js
 │   └── vite.config.js

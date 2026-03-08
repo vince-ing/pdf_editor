@@ -1,71 +1,14 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { engineApi } from '../api/client';
 import { TOOLS, TOOL_CURSORS } from '../tools';
 
-// ── Annotation overlay node ──────────────────────────────────────────────────
-
-const NodeOverlay = ({ node, scale = 1.0 }) => {
-    const [hovered, setHovered] = useState(false);
-    if (!node.bbox) return null;
-
-    const style = {
-        position: 'absolute',
-        left:   `${node.bbox.x * scale}px`,
-        top:    `${node.bbox.y * scale}px`,
-        width:  `${node.bbox.width * scale}px`,
-        height: `${node.bbox.height * scale}px`,
-        pointerEvents: 'none',
-    };
-
-    switch (node.node_type) {
-        case 'text':
-            return (
-                <div style={{ ...style, border: hovered ? '1px solid #3498db' : '1px solid transparent', cursor: 'pointer', borderRadius: '2px', pointerEvents: 'auto' }}
-                    onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-                    <span style={{ fontSize: `${node.font_size * scale}px`, fontFamily: node.font_family, color: node.color || '#000' }}>
-                        {node.text_content}
-                    </span>
-                </div>
-            );
-        case 'highlight':
-            if (node.color === '#000000') return <div style={{ ...style, backgroundColor: '#000000', opacity: 1.0, borderRadius: '2px', pointerEvents: 'none' }} />;
-            return <div style={{ ...style, backgroundColor: node.color || '#FFFF00', opacity: node.opacity ?? 0.5, borderRadius: '2px', pointerEvents: 'none' }} />;
-        default:
-            return null;
-    }
-};
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-function lineBBox(lineChars) {
-    const minX = Math.min(...lineChars.map(c => c.x));
-    const minY = Math.min(...lineChars.map(c => c.y));
-    const maxX = Math.max(...lineChars.map(c => c.x + c.width));
-    const maxY = Math.max(...lineChars.map(c => c.y + c.height));
-    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
-
-function buildLineRects(chars) {
-    if (!chars.length) return [];
-    const rects = [];
-    let line = [chars[0]];
-    for (let i = 1; i < chars.length; i++) {
-        const prev = line[line.length - 1];
-        const curr = chars[i];
-        const avgH = (prev.height + curr.height) / 2;
-        if (Math.abs((prev.y + prev.height / 2) - (curr.y + curr.height / 2)) < avgH * 0.75) {
-            line.push(curr);
-        } else {
-            rects.push(lineBBox(line));
-            line = [curr];
-        }
-    }
-    if (line.length) rects.push(lineBBox(line));
-    return rects;
-}
+import { PageControls } from './PageControls';
+import { NodeOverlay } from './NodeOverlay';
+import { usePdfCanvas } from '../hooks/usePdfCanvas';
+import { usePageChars } from '../hooks/usePageChars';
+import { useDragSelection } from '../hooks/useDragSelection';
 
 // ── Copy toast ────────────────────────────────────────────────────────────────
-
 const CopyToast = ({ visible }) => (
     <div style={{
         position: 'fixed', bottom: '32px', left: '50%',
@@ -79,271 +22,46 @@ const CopyToast = ({ visible }) => (
     }}>✓ Copied to clipboard</div>
 );
 
-// ── Page controls ─────────────────────────────────────────────────────────────
-
-const PageControls = ({ pageIndex, totalPages, onRotateCW, onRotateCCW, onDelete, onMoveUp, onMoveDown }) => (
-    <div style={{
-        position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)',
-        display: 'flex', gap: '6px', alignItems: 'center',
-        backgroundColor: 'rgba(15,23,35,0.88)', backdropFilter: 'blur(6px)',
-        borderRadius: '8px', padding: '5px 10px', zIndex: 30,
-        boxShadow: '0 2px 12px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)',
-        pointerEvents: 'auto', whiteSpace: 'nowrap',
-    }}>
-        <CtrlBtn onClick={onMoveUp}    disabled={pageIndex === 0}             title="Move up"    color="#546e7a">↑</CtrlBtn>
-        <CtrlBtn onClick={onMoveDown}  disabled={pageIndex >= totalPages - 1} title="Move down"  color="#546e7a">↓</CtrlBtn>
-        <Divider />
-        <CtrlBtn onClick={onRotateCW}  title="Rotate CW"  color="#2980b9">↻</CtrlBtn>
-        <CtrlBtn onClick={onRotateCCW} title="Rotate CCW" color="#2980b9">↺</CtrlBtn>
-        <Divider />
-        <CtrlBtn onClick={onDelete} disabled={totalPages <= 1} title="Delete page" color="#c0392b">✕</CtrlBtn>
-    </div>
-);
-
-const CtrlBtn = ({ children, onClick, title, color, disabled }) => (
-    <button title={title} onClick={onClick} disabled={disabled} style={{
-        width: '26px', height: '26px', borderRadius: '5px', border: 'none',
-        backgroundColor: disabled ? 'rgba(255,255,255,0.06)' : color,
-        color: disabled ? '#3d5166' : 'white', fontSize: '14px', fontWeight: '700',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, padding: 0,
-    }}>{children}</button>
-);
-
-const Divider = () => <div style={{ width: '1px', height: '16px', backgroundColor: 'rgba(255,255,255,0.12)' }} />;
-
-// ── PageRenderer ─────────────────────────────────────────────────────────────
-
+// ── PageRenderer ──────────────────────────────────────────────────────────────
 export const PageRenderer = ({
     pageNode, pdfDoc, pageIndex, totalPages, scale = 1.5,
     activeTool, onAnnotationAdded, onDocumentChanged,
 }) => {
-    const canvasRef  = useRef(null);
     const overlayRef = useRef(null);
 
     const [annotations,   setAnnotations]   = useState([]);
-    const [rawChars,      setRawChars]      = useState([]);  
-    const [pageChars,     setPageChars]     = useState([]);  
     const [hovered,       setHovered]       = useState(false);
     const [busy,          setBusy]          = useState(false);
     const [localRotation, setLocalRotation] = useState(pageNode.rotation ?? 0);
     const [showToast,     setShowToast]     = useState(false);
     
-    const [fullDimensions, setFullDimensions] = useState({
-        width:  (pageNode.metadata?.width  || 612) * scale,
-        height: (pageNode.metadata?.height || 792) * scale,
-    });
-
-    const liveRectsRef      = useRef([]);   
-    const committedRectsRef = useRef([]);   
-    const [selVersion, setSelVersion] = useState(0);
-    const bumpSel = useCallback(() => setSelVersion(v => v + 1), []);
-
-    const isDragging  = useRef(false);
-    const wasDragging = useRef(false); 
-    const startPos    = useRef(null);
-    const startIdx    = useRef(-1);
-
     const toastTimer = useRef(null);
 
-    useEffect(() => {
-        let alive = true;
-        fetch(`http://localhost:8000/api/pages/${pageNode.id}/chars`)
-            .then(r => r.json())
-            .then(data => {
-                if (!alive || data.status !== 'success') return;
-                setRawChars(data.chars || []);
-            })
-            .catch(err => console.error('[PageRenderer] chars fetch error:', err));
-        return () => { alive = false; };
-    }, [pageNode.id]);
-
-    useEffect(() => {
-        if (!rawChars.length) { setPageChars([]); return; }
-
-        const W = pageNode.metadata?.width  || 612;
-        const H = pageNode.metadata?.height || 792;
-
-        const transformed = rawChars.map(c => {
-            let { x, y, width, height } = c;
-            switch (((localRotation % 360) + 360) % 360) {
-                case 90: {
-                    const nx = H - y - height;
-                    const ny = x;
-                    return { ...c, x: nx, y: ny, width: height, height: width };
-                }
-                case 180: {
-                    return { ...c, x: W - x - width, y: H - y - height };
-                }
-                case 270: {
-                    const nx = y;
-                    const ny = W - x - width;
-                    return { ...c, x: nx, y: ny, width: height, height: width };
-                }
-                default:
-                    return c;
-            }
-        });
-
-        transformed.sort((a, b) =>
-            Math.abs(a.y - b.y) > 5 ? a.y - b.y : a.x - b.x
-        );
-        setPageChars(transformed);
-    }, [rawChars, localRotation, pageNode.metadata]);
-
+    // Keep rotation and annotations synced with the underlying node
     useEffect(() => {
         if (typeof pageNode.rotation === 'number') setLocalRotation(pageNode.rotation);
     }, [pageNode.rotation, pageNode.id]);
 
-    useEffect(() => { setAnnotations(pageNode.children || []); }, [pageNode.children]);
+    useEffect(() => { 
+        setAnnotations(pageNode.children || []); 
+    }, [pageNode.children]);
 
-    useEffect(() => {
-        if (activeTool !== TOOLS.SELECT) {
-            committedRectsRef.current = [];
-            liveRectsRef.current = [];
-            bumpSel();
-        }
-    }, [activeTool, bumpSel]);
+    // ── Custom Hooks ──────────────────────────────────────────────────────────
+    const { canvasRef, fullDimensions } = usePdfCanvas({
+        pdfDoc,
+        pageNode,
+        pageIndex,
+        scale,
+        localRotation
+    });
 
-    useEffect(() => {
-        committedRectsRef.current = [];
-        liveRectsRef.current = [];
-        bumpSel();
-    }, [localRotation, bumpSel]);
+    const { pageChars } = usePageChars({
+        pageNodeId: pageNode.id,
+        localRotation,
+        metadata: pageNode.metadata
+    });
 
-    useEffect(() => {
-        if (!pdfDoc) return;
-        let alive = true;
-        let renderTask = null;
-        const go = async () => {
-            try {
-                const pageNum = (pageNode.page_number ?? pageIndex) + 1;
-                if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
-                const page = await pdfDoc.getPage(pageNum);
-                if (!alive) return;
-                const dpr = window.devicePixelRatio || 1;
-                const vp  = page.getViewport({ scale: scale * dpr, rotation: localRotation });
-                const canvas = canvasRef.current;
-                if (!canvas) return;
-                canvas.width  = vp.width;
-                canvas.height = vp.height;
-                const cssW = vp.width / dpr, cssH = vp.height / dpr;
-                canvas.style.width = `${cssW}px`; canvas.style.height = `${cssH}px`;
-                setFullDimensions({ width: cssW, height: cssH });
-                renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport: vp });
-                await renderTask.promise;
-            } catch (err) { if (err?.name !== 'RenderingCancelledException') console.error(err); }
-        };
-        go();
-        return () => { alive = false; renderTask?.cancel(); };
-    }, [pdfDoc, pageIndex, localRotation, scale]);
-
-    const busyRef = useRef(false);
-    const withBusy = useCallback(async (fn) => {
-        if (busyRef.current) return;
-        busyRef.current = true; setBusy(true);
-        try { await fn(); } finally { busyRef.current = false; setBusy(false); }
-    }, []);
-
-    const handleRotateCW  = useCallback(() => withBusy(async () => { const r = await engineApi.rotatePage(pageNode.id, 90);  setLocalRotation(r?.page?.rotation ?? (v => (v+90)%360));  if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, withBusy, onDocumentChanged]);
-    const handleRotateCCW = useCallback(() => withBusy(async () => { const r = await engineApi.rotatePage(pageNode.id, -90); setLocalRotation(r?.page?.rotation ?? (v => (v-90+360)%360)); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, withBusy, onDocumentChanged]);
-    const handleDelete    = useCallback(() => { if (totalPages <= 1) { alert('Cannot delete the last page.'); return; } if (!window.confirm(`Delete page ${pageIndex + 1}?`)) return; withBusy(async () => { await engineApi.deletePage(pageNode.id); if (onDocumentChanged) await onDocumentChanged(); }); }, [pageNode.id, pageIndex, totalPages, withBusy, onDocumentChanged]);
-    const handleMoveUp    = useCallback(() => withBusy(async () => { await engineApi.movePage(pageNode.id, pageIndex-1); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
-    const handleMoveDown  = useCallback(() => withBusy(async () => { await engineApi.movePage(pageNode.id, pageIndex+1); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
-
-    const nearestCharIdx = useCallback((pt) => {
-        if (!pageChars.length) return -1;
-        let best = -1, bestD = 60 * 60;
-        pageChars.forEach((c, i) => {
-            const dx = (c.x + c.width/2) - pt.x, dy = (c.y + c.height/2) - pt.y;
-            const d = dx*dx + dy*dy;
-            if (d < bestD) { bestD = d; best = i; }
-        });
-        return best;
-    }, [pageChars]);
-
-    const toPdf = useCallback((e) => {
-        if (!overlayRef.current) return null;
-        const r = overlayRef.current.getBoundingClientRect();
-        return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
-    }, [scale]);
-
-    const onMouseDown = useCallback((e) => {
-        e.preventDefault();
-        const pt = toPdf(e);
-        if (!pt) return;
-        isDragging.current  = true;
-        wasDragging.current = false;
-        startPos.current    = pt;
-        startIdx.current    = nearestCharIdx(pt);
-        liveRectsRef.current = [];
-        bumpSel();
-    }, [toPdf, nearestCharIdx, bumpSel]);
-
-    const onMouseMove = useCallback((e) => {
-        if (!isDragging.current || !startPos.current) return;
-        const cur = toPdf(e);
-        if (!cur) return;
-
-        const dx = Math.abs(cur.x - startPos.current.x);
-        const dy = Math.abs(cur.y - startPos.current.y);
-        if (dx < 3 && dy < 3) return;
-
-        wasDragging.current = true;
-
-        if (activeTool === TOOLS.CROP) {
-            const W = pageNode.metadata?.width  || 612;
-            const H = pageNode.metadata?.height || 792;
-            liveRectsRef.current = [{
-                x:      Math.max(0, Math.min(startPos.current.x, cur.x)),
-                y:      Math.max(0, Math.min(startPos.current.y, cur.y)),
-                width:  Math.min(Math.abs(cur.x - startPos.current.x), W),
-                height: Math.min(Math.abs(cur.y - startPos.current.y), H),
-            }];
-            bumpSel();
-            return;
-        }
-
-        if (startIdx.current !== -1 && pageChars.length > 0) {
-            const endIdx = nearestCharIdx(cur);
-            if (endIdx !== -1) {
-                const lo = Math.min(startIdx.current, endIdx);
-                const hi = Math.max(startIdx.current, endIdx);
-                liveRectsRef.current = buildLineRects(pageChars.slice(lo, hi + 1));
-                bumpSel();
-                return;
-            }
-        }
-        liveRectsRef.current = [];
-        bumpSel();
-    }, [toPdf, nearestCharIdx, pageChars, bumpSel, activeTool, pageNode.metadata]);
-
-    const onMouseUp = useCallback((e) => {
-        if (!isDragging.current) return;
-        isDragging.current = false;
-
-        const rects = liveRectsRef.current;
-        const r = rects[0];
-
-        if (!r || (r.width < 4 && r.height < 4)) {
-            liveRectsRef.current = [];
-            bumpSel();
-            return;
-        }
-
-        committedRectsRef.current = rects;
-        liveRectsRef.current = [];
-        bumpSel();
-
-        handleActionRef.current(rects);
-    }, [bumpSel]);
-
-    const handleActionRef = useRef(null);
-
-    const onMouseLeave = useCallback((e) => {
-        if (isDragging.current) onMouseUp(e);
-    }, [onMouseUp]);
-
+    // ── Action / Tool Handlers ────────────────────────────────────────────────
     const triggerToast = useCallback(() => {
         setShowToast(true);
         clearTimeout(toastTimer.current);
@@ -352,9 +70,7 @@ export const PageRenderer = ({
 
     const handleAction = useCallback(async (rects) => {
         if (activeTool === TOOLS.CROP) {
-            committedRectsRef.current = [rects[0]];
-            liveRectsRef.current = [];
-            bumpSel();
+            // Drag hook automatically stores this in committedRects, we just wait for confirm
             return;
         }
 
@@ -396,36 +112,47 @@ export const PageRenderer = ({
         } catch (err) { console.error(err); alert('Failed: ' + err.message); }
     }, [activeTool, pageNode.id, pageChars, triggerToast, onAnnotationAdded]);
 
-    handleActionRef.current = handleAction;
+    const { 
+        liveRects, 
+        committedRects, 
+        clearSelection, 
+        handlers 
+    } = useDragSelection({
+        overlayRef,
+        pageChars,
+        scale,
+        activeTool,
+        metadata: pageNode.metadata,
+        onAction: handleAction
+    });
+
+    // ── Page Commands ─────────────────────────────────────────────────────────
+    const busyRef = useRef(false);
+    const withBusy = useCallback(async (fn) => {
+        if (busyRef.current) return;
+        busyRef.current = true; setBusy(true);
+        try { await fn(); } finally { busyRef.current = false; setBusy(false); }
+    }, []);
+
+    const handleRotateCW  = useCallback(() => withBusy(async () => { const r = await engineApi.rotatePage(pageNode.id, 90);  setLocalRotation(r?.page?.rotation ?? (v => (v+90)%360));  if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, withBusy, onDocumentChanged]);
+    const handleRotateCCW = useCallback(() => withBusy(async () => { const r = await engineApi.rotatePage(pageNode.id, -90); setLocalRotation(r?.page?.rotation ?? (v => (v-90+360)%360)); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, withBusy, onDocumentChanged]);
+    const handleDelete    = useCallback(() => { if (totalPages <= 1) { alert('Cannot delete the last page.'); return; } if (!window.confirm(`Delete page ${pageIndex + 1}?`)) return; withBusy(async () => { await engineApi.deletePage(pageNode.id); if (onDocumentChanged) await onDocumentChanged(); }); }, [pageNode.id, pageIndex, totalPages, withBusy, onDocumentChanged]);
+    const handleMoveUp    = useCallback(() => withBusy(async () => { await engineApi.movePage(pageNode.id, pageIndex-1); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
+    const handleMoveDown  = useCallback(() => withBusy(async () => { await engineApi.movePage(pageNode.id, pageIndex+1); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
 
     const handleCropConfirm = useCallback(() => {
-        const rect = committedRectsRef.current[0];
+        const rect = committedRects[0];
         if (!rect) return;
         withBusy(async () => {
             await engineApi.cropPage(pageNode.id, rect.x, rect.y, rect.width, rect.height);
-            committedRectsRef.current = [];
-            liveRectsRef.current = [];
-            bumpSel();
+            clearSelection();
             if (onDocumentChanged) await onDocumentChanged();
         });
-    }, [pageNode.id, withBusy, onDocumentChanged, bumpSel]);
+    }, [pageNode.id, withBusy, onDocumentChanged, clearSelection, committedRects]);
 
     const handleCropCancel = useCallback(() => {
-        committedRectsRef.current = [];
-        liveRectsRef.current = [];
-        bumpSel();
-    }, [bumpSel]);
-
-    const handleClick = useCallback(() => {
-        if (wasDragging.current) {
-            wasDragging.current = false;
-            return;
-        }
-        if (activeTool === TOOLS.SELECT && committedRectsRef.current.length > 0) {
-            committedRectsRef.current = [];
-            bumpSel();
-        }
-    }, [activeTool, bumpSel]);
+        clearSelection();
+    }, [clearSelection]);
 
     const handleTextClick = useCallback(async (e) => {
         if (!overlayRef.current) return;
@@ -440,12 +167,11 @@ export const PageRenderer = ({
         } catch (err) { console.error(err); alert('Failed: ' + err.message); }
     }, [scale, pageNode.id, onAnnotationAdded]);
 
+    // ── Derived Display & Masking Variables ───────────────────────────────────
     const isDragTool = activeTool === TOOLS.HIGHLIGHT || activeTool === TOOLS.REDACT
                     || activeTool === TOOLS.SELECT   || activeTool === TOOLS.CROP;
 
-    const displayRects = liveRectsRef.current.length > 0
-        ? liveRectsRef.current
-        : committedRectsRef.current;
+    const displayRects = liveRects.length > 0 ? liveRects : committedRects;
 
     const selColor  = activeTool === TOOLS.REDACT ? 'rgba(0,0,0,0.6)'
                     : activeTool === TOOLS.SELECT  ? 'rgba(52,152,219,0.3)'
@@ -456,13 +182,12 @@ export const PageRenderer = ({
                     : activeTool === TOOLS.CROP    ? '2px solid #f39c12'
                     : '2px solid #cccc00';
 
-    const cropRect = activeTool === TOOLS.CROP && committedRectsRef.current.length > 0
-        ? committedRectsRef.current[0]
+    const cropRect = activeTool === TOOLS.CROP && committedRects.length > 0
+        ? committedRects[0]
         : null;
 
     // Masking values
     const cropBox = pageNode.crop_box;
-    // Apply the mask continually as long as a crop box has been defined. 
     const isCroppedView = cropBox && typeof cropBox.width === 'number';
 
     const outerWidth   = isCroppedView ? cropBox.width * scale : fullDimensions.width;
@@ -482,6 +207,7 @@ export const PageRenderer = ({
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
         >
+            {/* Inner Wrapper (Retains full dimensions, shifted by mask offsets) */}
             <div style={{
                 position: 'absolute',
                 top: `${innerOffsetY}px`, left: `${innerOffsetX}px`,
@@ -505,11 +231,11 @@ export const PageRenderer = ({
                 <div
                     ref={overlayRef}
                     style={{ position: 'absolute', inset: 0, cursor: TOOL_CURSORS[activeTool] || 'default', userSelect: 'none', zIndex: 10 }}
-                    onClick={activeTool === TOOLS.TEXT ? handleTextClick : handleClick}
-                    onMouseDown={isDragTool ? onMouseDown : undefined}
-                    onMouseMove={isDragTool ? onMouseMove : undefined}
-                    onMouseUp={isDragTool   ? onMouseUp   : undefined}
-                    onMouseLeave={isDragTool ? onMouseLeave : undefined}
+                    onClick={activeTool === TOOLS.TEXT ? handleTextClick : handlers.onClick}
+                    onMouseDown={isDragTool ? handlers.onMouseDown : undefined}
+                    onMouseMove={isDragTool ? handlers.onMouseMove : undefined}
+                    onMouseUp={isDragTool   ? handlers.onMouseUp   : undefined}
+                    onMouseLeave={isDragTool ? handlers.onMouseLeave : undefined}
                 >
                     {displayRects.map((rect, i) => (
                         <div key={i} style={{
