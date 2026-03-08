@@ -3,6 +3,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { engineApi } from './api/client';
 import { PageRenderer } from './components/PageRenderer';
 import { Sidebar } from './components/Sidebar';
+import { TtsBar } from './components/TtsBar';
+import { useTts } from './hooks/useTts';
 import { TOOLS, TOOL_ICONS } from './tools';
 
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -16,13 +18,18 @@ function App() {
     const [activeTool, setActiveTool]       = useState(TOOLS.SELECT);
     const [activePage, setActivePage]       = useState(0);
     const [sidebarOpen, setSidebarOpen]     = useState(true);
+
+    // Last text selected via the SELECT tool — lifted up from PageRenderer
+    const [lastSelectedText, setLastSelectedText] = useState('');
+
     const fileInputRef = useRef(null);
     const pageRefs     = useRef([]);
+
+    const { tts, speak, stop: ttsStop, pauseResume, setSpeed } = useTts();
 
     const refreshDocumentState = useCallback(async () => {
         try {
             const data = await engineApi.getDocumentState();
-            // ── DIAGNOSTIC: remove these logs once working ──
             if (data?.children?.[0]) {
                 console.log('[DEBUG] First page from API:', {
                     id: data.children[0].id,
@@ -114,6 +121,44 @@ function App() {
         }
     };
 
+    // ── TTS actions ────────────────────────────────────────────────────────────
+
+    const handleReadPage = useCallback(async () => {
+        if (!documentState || !pdfDoc) {
+            alert('Please open a PDF document first.');
+            return;
+        }
+        const pageNode = documentState.children[activePage];
+        if (!pageNode) return;
+
+        try {
+            const chars = await engineApi.getPageChars(pageNode.id);
+            const text = chars.map(c => c.text).join('');
+            if (!text.trim()) {
+                alert('No readable text found on this page.\nTry running OCR first.');
+                return;
+            }
+            await speak(text, `Reading page ${activePage + 1}…`);
+        } catch (err) {
+            console.error(err);
+            alert('Failed to read page: ' + err.message);
+        }
+    }, [documentState, pdfDoc, activePage, speak]);
+
+    const handleReadSelection = useCallback(async () => {
+        if (!documentState) {
+            alert('Please open a PDF document first.');
+            return;
+        }
+        if (!lastSelectedText?.trim()) {
+            alert('No text selected.\nSwitch to the Select tool and drag to highlight text first.');
+            return;
+        }
+        await speak(lastSelectedText.trim(), 'Reading selection…');
+    }, [documentState, lastSelectedText, speak]);
+
+    // ── Zoom ───────────────────────────────────────────────────────────────────
+
     const zoomIn    = () => setScale(s => Math.min(parseFloat((s + 0.25).toFixed(2)), 4.0));
     const zoomOut   = () => setScale(s => Math.max(parseFloat((s - 0.25).toFixed(2)), 0.25));
     const zoomReset = () => setScale(1.5);
@@ -183,6 +228,31 @@ function App() {
 
                 <div style={{ width: '1px', height: '28px', backgroundColor: 'rgba(255,255,255,0.15)' }} />
 
+                {/* TTS buttons */}
+                <button
+                    onClick={handleReadPage}
+                    disabled={!documentState || tts.visible}
+                    title="Read current page aloud"
+                    style={{
+                        ...btnBase,
+                        backgroundColor: documentState && !tts.visible ? '#6c3483' : '#3d2654',
+                        color: 'white', fontSize: '14px', padding: '7px 11px',
+                    }}
+                >🔊</button>
+                <button
+                    onClick={handleReadSelection}
+                    disabled={!documentState || !lastSelectedText || tts.visible}
+                    title="Read selected text aloud"
+                    style={{
+                        ...btnBase,
+                        backgroundColor: documentState && lastSelectedText && !tts.visible ? '#1a5276' : '#1a2e3a',
+                        color: lastSelectedText ? 'white' : '#546e7a',
+                        fontSize: '13px',
+                    }}
+                >🔊 Selection</button>
+
+                <div style={{ width: '1px', height: '28px', backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
                 {/* Zoom */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <button onClick={zoomOut} disabled={scale <= 0.25} style={{ ...btnBase, backgroundColor: '#546e7a', color: 'white', padding: '7px 11px', fontSize: '16px' }}>−</button>
@@ -230,11 +300,25 @@ function App() {
                                 activeTool={activeTool}
                                 onAnnotationAdded={refreshDocumentState}
                                 onDocumentChanged={refreshDocumentState}
+                                onTextSelected={setLastSelectedText}
                             />
                         </div>
                     ))}
                 </div>
             </div>
+
+            {/* TTS Bar — sits between body and status bar */}
+            <TtsBar
+                visible={tts.visible}
+                status={tts.status}
+                phase={tts.phase}
+                progress={tts.progress}
+                isPaused={tts.isPaused}
+                speed={tts.speed}
+                onStop={ttsStop}
+                onPauseResume={pauseResume}
+                onSpeedChange={setSpeed}
+            />
 
             {/* Status bar */}
             <div style={{
@@ -247,6 +331,15 @@ function App() {
                 <span>Zoom: <strong style={{ color: 'white' }}>{Math.round(scale * 100)}%</strong></span>
                 {documentState && <span>Pages: <strong style={{ color: 'white' }}>{pageCount}</strong></span>}
                 {documentState && <span>Page: <strong style={{ color: 'white' }}>{activePage + 1}</strong></span>}
+                {lastSelectedText && (
+                    <span style={{ marginLeft: 'auto' }}>
+                        Selected: <strong style={{ color: '#5dade2' }}>
+                            {lastSelectedText.length > 40
+                                ? lastSelectedText.slice(0, 40) + '…'
+                                : lastSelectedText}
+                        </strong>
+                    </span>
+                )}
             </div>
         </div>
     );

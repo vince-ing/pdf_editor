@@ -76,5 +76,15 @@ export const engineApi = {
     runOcr: async (pageId, language = 'eng') => {
         const response = await axios.post(`${API_BASE}/plugins/ocr/process`, { page_id: pageId, language });
         return response.data;
-    }
+    },
+
+    // --- TTS ---
+    ttsPlay: async (text, speed = 1.0) => {
+        const response = await axios.post(`${API_BASE}/plugins/tts/play`, { text, speed });
+        return response.data;
+    },
+    ttsStop: async () => {
+        const response = await axios.post(`${API_BASE}/plugins/tts/stop`);
+        return response.data;
+    },
 };

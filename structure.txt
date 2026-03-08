@@ -134,11 +134,13 @@ pdf_editor
 │   │   │   ├── NodeOverlay.jsx
 │   │   │   ├── PageControls.jsx
 │   │   │   ├── PageRenderer.jsx
-│   │   │   └── Sidebar.jsx
+│   │   │   ├── Sidebar.jsx
+│   │   │   └── TtsBar.jsx
 │   │   ├── hooks
 │   │   │   ├── useDragSelection.js
 │   │   │   ├── usePageChars.js
-│   │   │   └── usePdfCanvas.js
+│   │   │   ├── usePdfCanvas.js
+│   │   │   └── useTts.js
 │   │   ├── main.jsx
 │   │   └── tools.js
 │   └── vite.config.js

@@ -27,7 +27,7 @@ const CopyToast = ({ visible }) => (
 // ── PageRenderer ──────────────────────────────────────────────────────────────
 export const PageRenderer = ({
     pageNode, pdfDoc, pageIndex, totalPages, scale = 1.5,
-    activeTool, onAnnotationAdded, onDocumentChanged,
+    activeTool, onAnnotationAdded, onDocumentChanged, onTextSelected, 
 }) => {
     const overlayRef = useRef(null);
     const clearSelectionRef = useRef(null);
@@ -98,8 +98,8 @@ export const PageRenderer = ({
                     text += (c.x - (p.x + p.width) > p.width * 0.4 ? ' ' : '') + c.text;
                 }
             }
-            try { await navigator.clipboard.writeText(text); triggerToast(); }
-            catch { window.prompt('Copy (Ctrl+C):', text); }
+            try { await navigator.clipboard.writeText(text); triggerToast(); onTextSelected?.(text);}
+            catch { window.prompt('Copy (Ctrl+C):', text); onTextSelected?.(text); }
             return;
         }
 
