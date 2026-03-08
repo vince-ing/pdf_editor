@@ -122,35 +122,30 @@ export const PageRenderer = ({
     const overlayRef = useRef(null);
 
     const [annotations,   setAnnotations]   = useState([]);
-    const [rawChars,      setRawChars]      = useState([]);  // always in original PDF space
-    const [pageChars,     setPageChars]     = useState([]);  // rotated to match current render
+    const [rawChars,      setRawChars]      = useState([]);  
+    const [pageChars,     setPageChars]     = useState([]);  
     const [hovered,       setHovered]       = useState(false);
     const [busy,          setBusy]          = useState(false);
     const [localRotation, setLocalRotation] = useState(pageNode.rotation ?? 0);
     const [showToast,     setShowToast]     = useState(false);
-    const [dimensions,    setDimensions]    = useState({
+    
+    const [fullDimensions, setFullDimensions] = useState({
         width:  (pageNode.metadata?.width  || 612) * scale,
         height: (pageNode.metadata?.height || 792) * scale,
     });
 
-    // ── All selection state lives entirely in refs so there are zero
-    //    stale-closure or batching issues. A single `selVersion` integer
-    //    is the only piece of React state — incrementing it forces a
-    //    re-render whenever selection changes.
-    const liveRectsRef      = useRef([]);   // rects shown during active drag
-    const committedRectsRef = useRef([]);   // rects shown after mouse-up
+    const liveRectsRef      = useRef([]);   
+    const committedRectsRef = useRef([]);   
     const [selVersion, setSelVersion] = useState(0);
     const bumpSel = useCallback(() => setSelVersion(v => v + 1), []);
 
-    // drag tracking
     const isDragging  = useRef(false);
-    const wasDragging = useRef(false); // lets onClick know a drag just finished
+    const wasDragging = useRef(false); 
     const startPos    = useRef(null);
     const startIdx    = useRef(-1);
 
     const toastTimer = useRef(null);
 
-    // ── Chars — fetch raw (original PDF space), re-transform on rotation ─────
     useEffect(() => {
         let alive = true;
         fetch(`http://localhost:8000/api/pages/${pageNode.id}/chars`)
@@ -163,15 +158,9 @@ export const PageRenderer = ({
         return () => { alive = false; };
     }, [pageNode.id]);
 
-    // Re-derive pageChars whenever rawChars or localRotation changes.
-    // PyMuPDF returns coords in the original (unrotated) PDF coordinate system
-    // (origin top-left, y increases downward). When the page is rotated we
-    // must transform each char bbox so hit-testing stays aligned with what the
-    // user actually sees on the canvas.
     useEffect(() => {
         if (!rawChars.length) { setPageChars([]); return; }
 
-        // Page dimensions in the *original* (unrotated) orientation
         const W = pageNode.metadata?.width  || 612;
         const H = pageNode.metadata?.height || 792;
 
@@ -179,27 +168,23 @@ export const PageRenderer = ({
             let { x, y, width, height } = c;
             switch (((localRotation % 360) + 360) % 360) {
                 case 90: {
-                    // (x,y) → (H - y - h,  x)  then swap w/h
                     const nx = H - y - height;
                     const ny = x;
                     return { ...c, x: nx, y: ny, width: height, height: width };
                 }
                 case 180: {
-                    // (x,y) → (W - x - w,  H - y - h)
                     return { ...c, x: W - x - width, y: H - y - height };
                 }
                 case 270: {
-                    // (x,y) → (y,  W - x - w)  then swap w/h
                     const nx = y;
                     const ny = W - x - width;
                     return { ...c, x: nx, y: ny, width: height, height: width };
                 }
                 default:
-                    return c; // 0° — no transform needed
+                    return c;
             }
         });
 
-        // Sort into reading order for the *rotated* orientation
         transformed.sort((a, b) =>
             Math.abs(a.y - b.y) > 5 ? a.y - b.y : a.x - b.x
         );
@@ -220,14 +205,12 @@ export const PageRenderer = ({
         }
     }, [activeTool, bumpSel]);
 
-    // Clear stale selection whenever the page is rotated
     useEffect(() => {
         committedRectsRef.current = [];
         liveRectsRef.current = [];
         bumpSel();
     }, [localRotation, bumpSel]);
 
-    // ── Canvas render ─────────────────────────────────────────────────────────
     useEffect(() => {
         if (!pdfDoc) return;
         let alive = true;
@@ -246,7 +229,7 @@ export const PageRenderer = ({
                 canvas.height = vp.height;
                 const cssW = vp.width / dpr, cssH = vp.height / dpr;
                 canvas.style.width = `${cssW}px`; canvas.style.height = `${cssH}px`;
-                setDimensions({ width: cssW, height: cssH });
+                setFullDimensions({ width: cssW, height: cssH });
                 renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport: vp });
                 await renderTask.promise;
             } catch (err) { if (err?.name !== 'RenderingCancelledException') console.error(err); }
@@ -255,7 +238,6 @@ export const PageRenderer = ({
         return () => { alive = false; renderTask?.cancel(); };
     }, [pdfDoc, pageIndex, localRotation, scale]);
 
-    // ── Page commands ─────────────────────────────────────────────────────────
     const busyRef = useRef(false);
     const withBusy = useCallback(async (fn) => {
         if (busyRef.current) return;
@@ -268,8 +250,6 @@ export const PageRenderer = ({
     const handleDelete    = useCallback(() => { if (totalPages <= 1) { alert('Cannot delete the last page.'); return; } if (!window.confirm(`Delete page ${pageIndex + 1}?`)) return; withBusy(async () => { await engineApi.deletePage(pageNode.id); if (onDocumentChanged) await onDocumentChanged(); }); }, [pageNode.id, pageIndex, totalPages, withBusy, onDocumentChanged]);
     const handleMoveUp    = useCallback(() => withBusy(async () => { await engineApi.movePage(pageNode.id, pageIndex-1); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
     const handleMoveDown  = useCallback(() => withBusy(async () => { await engineApi.movePage(pageNode.id, pageIndex+1); if (onDocumentChanged) await onDocumentChanged(); }), [pageNode.id, pageIndex, withBusy, onDocumentChanged]);
-
-    // ── Selection helpers ─────────────────────────────────────────────────────
 
     const nearestCharIdx = useCallback((pt) => {
         if (!pageChars.length) return -1;
@@ -287,8 +267,6 @@ export const PageRenderer = ({
         const r = overlayRef.current.getBoundingClientRect();
         return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
     }, [scale]);
-
-    // ── Mouse handlers (stable — no deps that go stale) ───────────────────────
 
     const onMouseDown = useCallback((e) => {
         e.preventDefault();
@@ -313,7 +291,6 @@ export const PageRenderer = ({
 
         wasDragging.current = true;
 
-        // Crop: raw box clamped to page bounds, no text snapping
         if (activeTool === TOOLS.CROP) {
             const W = pageNode.metadata?.width  || 612;
             const H = pageNode.metadata?.height || 792;
@@ -348,30 +325,24 @@ export const PageRenderer = ({
         const rects = liveRectsRef.current;
         const r = rects[0];
 
-        // Discard tiny accidental drags
         if (!r || (r.width < 4 && r.height < 4)) {
             liveRectsRef.current = [];
             bumpSel();
             return;
         }
 
-        // Commit the selection so it persists
         committedRectsRef.current = rects;
         liveRectsRef.current = [];
         bumpSel();
 
-        // Handle tool action
-        handleAction(rects);
-    }, [bumpSel]); // eslint-disable-line react-hooks/exhaustive-deps
-    // NOTE: handleAction is called via ref below to avoid stale closure
+        handleActionRef.current(rects);
+    }, [bumpSel]);
 
     const handleActionRef = useRef(null);
 
     const onMouseLeave = useCallback((e) => {
         if (isDragging.current) onMouseUp(e);
     }, [onMouseUp]);
-
-    // ── Action (copy / highlight / redact) ────────────────────────────────────
 
     const triggerToast = useCallback(() => {
         setShowToast(true);
@@ -381,7 +352,6 @@ export const PageRenderer = ({
 
     const handleAction = useCallback(async (rects) => {
         if (activeTool === TOOLS.CROP) {
-            // Just store the first rect as the pending crop — confirm button applies it
             committedRectsRef.current = [rects[0]];
             liveRectsRef.current = [];
             bumpSel();
@@ -410,7 +380,6 @@ export const PageRenderer = ({
                     text += (c.x - (p.x + p.width) > p.width * 0.4 ? ' ' : '') + c.text;
                 }
             }
-            console.log('[action] copying text:', JSON.stringify(text.slice(0, 80)));
             try { await navigator.clipboard.writeText(text); triggerToast(); }
             catch { window.prompt('Copy (Ctrl+C):', text); }
             return;
@@ -427,18 +396,12 @@ export const PageRenderer = ({
         } catch (err) { console.error(err); alert('Failed: ' + err.message); }
     }, [activeTool, pageNode.id, pageChars, triggerToast, onAnnotationAdded]);
 
-    // Keep handleAction reachable from the stable onMouseUp via a ref
     handleActionRef.current = handleAction;
-
-    // ── Crop confirm / cancel ─────────────────────────────────────────────────
 
     const handleCropConfirm = useCallback(() => {
         const rect = committedRectsRef.current[0];
         if (!rect) return;
         withBusy(async () => {
-            // Convert from canvas (top-left, y-down, scaled) to PDF space (top-left, y-down, unscaled)
-            // The backend CropPageCommand stores in the same top-left space and
-            // document_service.py converts to fitz's bottom-left space on export.
             await engineApi.cropPage(pageNode.id, rect.x, rect.y, rect.width, rect.height);
             committedRectsRef.current = [];
             liveRectsRef.current = [];
@@ -453,15 +416,12 @@ export const PageRenderer = ({
         bumpSel();
     }, [bumpSel]);
 
-    // ── Click = clear selection (only if no drag just finished) ──────────────
     const handleClick = useCallback(() => {
         if (wasDragging.current) {
-            // This click is the tail of a drag — don't clear
             wasDragging.current = false;
             return;
         }
         if (activeTool === TOOLS.SELECT && committedRectsRef.current.length > 0) {
-            console.log('[click] clearing committed selection');
             committedRectsRef.current = [];
             bumpSel();
         }
@@ -480,12 +440,9 @@ export const PageRenderer = ({
         } catch (err) { console.error(err); alert('Failed: ' + err.message); }
     }, [scale, pageNode.id, onAnnotationAdded]);
 
-    // ── Derived display ───────────────────────────────────────────────────────
-
     const isDragTool = activeTool === TOOLS.HIGHLIGHT || activeTool === TOOLS.REDACT
                     || activeTool === TOOLS.SELECT   || activeTool === TOOLS.CROP;
 
-    // Live drag takes priority; fall back to committed
     const displayRects = liveRectsRef.current.length > 0
         ? liveRectsRef.current
         : committedRectsRef.current;
@@ -499,84 +456,91 @@ export const PageRenderer = ({
                     : activeTool === TOOLS.CROP    ? '2px solid #f39c12'
                     : '2px solid #cccc00';
 
-    // For the crop tool — the pending crop rect (only ever one rect)
     const cropRect = activeTool === TOOLS.CROP && committedRectsRef.current.length > 0
         ? committedRectsRef.current[0]
         : null;
 
+    // Masking values
+    const cropBox = pageNode.crop_box;
+    // Apply the mask continually as long as a crop box has been defined. 
+    const isCroppedView = cropBox && typeof cropBox.width === 'number';
+
+    const outerWidth   = isCroppedView ? cropBox.width * scale : fullDimensions.width;
+    const outerHeight  = isCroppedView ? cropBox.height * scale : fullDimensions.height;
+    const innerOffsetX = isCroppedView ? -(cropBox.x * scale) : 0;
+    const innerOffsetY = isCroppedView ? -(cropBox.y * scale) : 0;
+
     return (
         <div
             style={{
-                position: 'relative', width: `${dimensions.width}px`, height: `${dimensions.height}px`,
-                flexShrink: 0, backgroundColor: 'white', margin: '20px auto', overflow: 'visible',
+                position: 'relative', width: `${outerWidth}px`, height: `${outerHeight}px`,
+                flexShrink: 0, backgroundColor: 'white', margin: '20px auto', 
+                overflow: isCroppedView ? 'hidden' : 'visible',
                 boxShadow: hovered ? '0 6px 28px rgba(0,0,0,0.35)' : '0 4px 16px rgba(0,0,0,0.25)',
                 transition: 'box-shadow 0.18s ease', opacity: busy ? 0.7 : 1,
             }}
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
         >
-            <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: `${dimensions.width}px`, height: `${dimensions.height}px`, pointerEvents: 'none' }} />
+            <div style={{
+                position: 'absolute',
+                top: `${innerOffsetY}px`, left: `${innerOffsetX}px`,
+                width: `${fullDimensions.width}px`, height: `${fullDimensions.height}px`,
+            }}>
+                <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: `${fullDimensions.width}px`, height: `${fullDimensions.height}px`, pointerEvents: 'none' }} />
 
-            {/* Annotation layer */}
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5, overflow: 'hidden' }}>
-                {annotations.map(child => <NodeOverlay key={child.id} node={child} scale={scale} />)}
-            </div>
-
-            {/* Crop darkened-outside overlay — shown when a crop rect is committed */}
-            {cropRect && (
-                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 8 }}>
-                    {/* top */}
-                    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: `${cropRect.y * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
-                    {/* bottom */}
-                    <div style={{ position: 'absolute', left: 0, bottom: 0, right: 0, top: `${(cropRect.y + cropRect.height) * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
-                    {/* left */}
-                    <div style={{ position: 'absolute', left: 0, top: `${cropRect.y * scale}px`, width: `${cropRect.x * scale}px`, height: `${cropRect.height * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
-                    {/* right */}
-                    <div style={{ position: 'absolute', right: 0, top: `${cropRect.y * scale}px`, left: `${(cropRect.x + cropRect.width) * scale}px`, height: `${cropRect.height * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5, overflow: 'hidden' }}>
+                    {annotations.map(child => <NodeOverlay key={child.id} node={child} scale={scale} />)}
                 </div>
-            )}
 
-            {/* Interaction layer */}
-            <div
-                ref={overlayRef}
-                style={{ position: 'absolute', inset: 0, cursor: TOOL_CURSORS[activeTool] || 'default', userSelect: 'none', zIndex: 10 }}
-                onClick={activeTool === TOOLS.TEXT ? handleTextClick : handleClick}
-                onMouseDown={isDragTool ? onMouseDown : undefined}
-                onMouseMove={isDragTool ? onMouseMove : undefined}
-                onMouseUp={isDragTool   ? onMouseUp   : undefined}
-                onMouseLeave={isDragTool ? onMouseLeave : undefined}
-            >
-                {/* Selection / crop rects */}
-                {displayRects.map((rect, i) => (
-                    <div key={i} style={{
+                {cropRect && (
+                    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 8 }}>
+                        <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: `${cropRect.y * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                        <div style={{ position: 'absolute', left: 0, bottom: 0, right: 0, top: `${(cropRect.y + cropRect.height) * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                        <div style={{ position: 'absolute', left: 0, top: `${cropRect.y * scale}px`, width: `${cropRect.x * scale}px`, height: `${cropRect.height * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                        <div style={{ position: 'absolute', right: 0, top: `${cropRect.y * scale}px`, left: `${(cropRect.x + cropRect.width) * scale}px`, height: `${cropRect.height * scale}px`, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+                    </div>
+                )}
+
+                <div
+                    ref={overlayRef}
+                    style={{ position: 'absolute', inset: 0, cursor: TOOL_CURSORS[activeTool] || 'default', userSelect: 'none', zIndex: 10 }}
+                    onClick={activeTool === TOOLS.TEXT ? handleTextClick : handleClick}
+                    onMouseDown={isDragTool ? onMouseDown : undefined}
+                    onMouseMove={isDragTool ? onMouseMove : undefined}
+                    onMouseUp={isDragTool   ? onMouseUp   : undefined}
+                    onMouseLeave={isDragTool ? onMouseLeave : undefined}
+                >
+                    {displayRects.map((rect, i) => (
+                        <div key={i} style={{
+                            position: 'absolute',
+                            left: `${rect.x * scale}px`, top: `${rect.y * scale}px`,
+                            width: `${rect.width * scale}px`, height: `${rect.height * scale}px`,
+                            backgroundColor: selColor, border: selBorder,
+                            pointerEvents: 'none', borderRadius: '1px',
+                            boxSizing: 'border-box',
+                        }} />
+                    ))}
+                </div>
+
+                {cropRect && (
+                    <div style={{
                         position: 'absolute',
-                        left: `${rect.x * scale}px`, top: `${rect.y * scale}px`,
-                        width: `${rect.width * scale}px`, height: `${rect.height * scale}px`,
-                        backgroundColor: selColor, border: selBorder,
-                        pointerEvents: 'none', borderRadius: '1px',
-                        boxSizing: 'border-box',
-                    }} />
-                ))}
+                        bottom: `${(fullDimensions.height - (cropRect.y + cropRect.height) * scale) + 8}px`,
+                        left: '50%', transform: 'translateX(-50%)',
+                        display: 'flex', gap: '8px', zIndex: 30, pointerEvents: 'auto',
+                    }}>
+                        <button
+                            onClick={handleCropConfirm}
+                            style={{ padding: '6px 16px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: '5px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+                        >✓ Apply Crop</button>
+                        <button
+                            onClick={handleCropCancel}
+                            style={{ padding: '6px 16px', backgroundColor: '#c0392b', color: 'white', border: 'none', borderRadius: '5px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+                        >✕ Cancel</button>
+                    </div>
+                )}
             </div>
-
-            {/* Crop confirm / cancel bar */}
-            {cropRect && (
-                <div style={{
-                    position: 'absolute',
-                    bottom: `${(dimensions.height - (cropRect.y + cropRect.height) * scale) + 8}px`,
-                    left: '50%', transform: 'translateX(-50%)',
-                    display: 'flex', gap: '8px', zIndex: 30, pointerEvents: 'auto',
-                }}>
-                    <button
-                        onClick={handleCropConfirm}
-                        style={{ padding: '6px 16px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: '5px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
-                    >✓ Apply Crop</button>
-                    <button
-                        onClick={handleCropCancel}
-                        style={{ padding: '6px 16px', backgroundColor: '#c0392b', color: 'white', border: 'none', borderRadius: '5px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
-                    >✕ Cancel</button>
-                </div>
-            )}
 
             {hovered && !cropRect && <PageControls pageIndex={pageIndex} totalPages={totalPages} onRotateCW={handleRotateCW} onRotateCCW={handleRotateCCW} onDelete={handleDelete} onMoveUp={handleMoveUp} onMoveDown={handleMoveDown} />}
 
