@@ -1,29 +1,13 @@
-// Toolbar.tsx — h-20 tool strip.
-// Tool buttons: lucide icon + label, grouped by category with dividers.
-// Active tool = bg-[#4a90e2]. Category label below.
+// components/toolbar/Toolbar.tsx — h-20 tool strip.
+// Imports tool definitions from constants/tools.ts (single source of truth).
+// No emoji — all icons are Lucide React components.
 
-import {
-  Hand, MousePointer2, ZoomIn, Type, FileText, Image, Link2,
-  Highlighter, Underline, StickyNote, Stamp, FilePlus, Trash2,
-  RotateCw, FileDown, Undo2, Redo2, Volume2, Minus, Plus,
-} from 'lucide-react';
+import { Undo2, Redo2, Volume2, Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
+import { TOOL_DEFS, type ToolId } from '../../constants/tools';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export type ToolId =
-  | 'hand' | 'select' | 'zoom'
-  | 'addtext' | 'edittext' | 'addimage' | 'link'
-  | 'highlight' | 'underline' | 'stickynote' | 'stamp' | 'redact'
-  | 'insert' | 'delete' | 'rotate' | 'extract' | 'crop';
-
-interface ToolDef {
-  id: ToolId;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  icon: any;
-  label: string;
-  category: 'view' | 'edit' | 'comment' | 'pages';
-}
+// Re-export ToolId for components that import it from Toolbar
+export type { ToolId };
 
 interface ToolbarProps {
   activeTool: ToolId;
@@ -41,28 +25,15 @@ interface ToolbarProps {
   pageInfo?: { current: number; total: number } | null;
 }
 
-// ── Tool definitions — add new tools here ─────────────────────────────────────
-const TOOLS: ToolDef[] = [
-  { id: 'hand',      icon: Hand,          label: 'Hand',       category: 'view'    },
-  { id: 'select',    icon: MousePointer2, label: 'Select',     category: 'view'    },
-  { id: 'zoom',      icon: ZoomIn,        label: 'Zoom',       category: 'view'    },
-  { id: 'addtext',   icon: Type,          label: 'Add Text',   category: 'edit'    },
-  { id: 'edittext',  icon: FileText,      label: 'Edit Text',  category: 'edit'    },
-  { id: 'addimage',  icon: Image,         label: 'Add Image',  category: 'edit'    },
-  { id: 'link',      icon: Link2,         label: 'Link',       category: 'edit'    },
-  { id: 'highlight', icon: Highlighter,   label: 'Highlight',  category: 'comment' },
-  { id: 'underline', icon: Underline,     label: 'Underline',  category: 'comment' },
-  { id: 'stickynote',icon: StickyNote,    label: 'Sticky Note',category: 'comment' },
-  { id: 'stamp',     icon: Stamp,         label: 'Stamp',      category: 'comment' },
-  { id: 'redact',    icon: FileDown,      label: 'Redact',     category: 'comment' },
-  { id: 'insert',    icon: FilePlus,      label: 'Insert',     category: 'pages'   },
-  { id: 'delete',    icon: Trash2,        label: 'Delete',     category: 'pages'   },
-  { id: 'rotate',    icon: RotateCw,      label: 'Rotate',     category: 'pages'   },
-  { id: 'extract',   icon: FileDown,      label: 'Extract',    category: 'pages'   },
-];
-
 // ── Small zoom button ─────────────────────────────────────────────────────────
-const ZBtn = ({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) => (
+
+const ZBtn = ({
+  children, onClick, disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) => (
   <button
     onClick={onClick}
     disabled={disabled}
@@ -73,6 +44,7 @@ const ZBtn = ({ children, onClick, disabled }: { children: React.ReactNode; onCl
 );
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
+
 export function Toolbar({
   activeTool, onToolChange,
   scale, onZoomIn, onZoomOut, onZoomReset,
@@ -89,12 +61,12 @@ export function Toolbar({
   };
 
   const effectiveTool = activeTool ?? localActive;
-  const activeCategory = TOOLS.find(t => t.id === effectiveTool)?.category ?? 'view';
+  const activeCategory = TOOL_DEFS.find(t => t.id === effectiveTool)?.category ?? 'view';
 
   return (
     <div className="h-20 bg-[#2d3338] border-b border-[#1e2327] flex flex-col flex-shrink-0">
 
-      {/* ── Tool buttons ── */}
+      {/* ── Tool buttons row ── */}
       <div className="flex items-center gap-0.5 px-3 py-2 flex-1">
 
         {/* Undo / Redo */}
@@ -112,14 +84,15 @@ export function Toolbar({
         >
           <Redo2 size={17} />
         </button>
+
         <div className="w-px h-8 bg-[#1e2327] mx-1.5 flex-shrink-0" />
 
-        {/* Tool buttons with category dividers */}
-        {TOOLS.map((tool, idx) => {
+        {/* Tool buttons with automatic category dividers */}
+        {TOOL_DEFS.map((tool, idx) => {
           const Icon = tool.icon;
           const isActive = effectiveTool === tool.id;
-          const prevTool = TOOLS[idx - 1];
-          const showDivider = idx > 0 && prevTool.category !== tool.category;
+          const prev = TOOL_DEFS[idx - 1];
+          const showDivider = idx > 0 && prev.category !== tool.category;
 
           return (
             <div key={tool.id} className="flex items-center">
@@ -132,7 +105,7 @@ export function Toolbar({
                 className={`flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-colors
                   ${isActive
                     ? 'bg-[#4a90e2] text-white'
-                    : 'text-gray-300 hover:bg-[#3d4449] hover:text-white'
+                    : 'text-gray-400 hover:bg-[#3d4449] hover:text-white'
                   }`}
               >
                 <Icon size={17} />
@@ -167,7 +140,7 @@ export function Toolbar({
           disabled={ttsActive}
           title="Read current page aloud"
           className={`flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-colors
-            ${ttsActive ? 'opacity-40 cursor-not-allowed' : 'text-gray-300 hover:bg-[#3d4449] hover:text-white'}`}
+            ${ttsActive ? 'opacity-40 cursor-not-allowed' : 'text-gray-400 hover:bg-[#3d4449] hover:text-white'}`}
         >
           <Volume2 size={17} />
           <span className="text-[10px] font-normal leading-none">Read Page</span>
@@ -175,9 +148,9 @@ export function Toolbar({
         <button
           onClick={onReadSelection}
           disabled={ttsActive || !hasSelection}
-          title="Read selection"
+          title="Read selected text"
           className={`flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-colors
-            ${ttsActive || !hasSelection ? 'opacity-30 cursor-not-allowed' : 'text-gray-300 hover:bg-[#3d4449] hover:text-white'}`}
+            ${ttsActive || !hasSelection ? 'opacity-30 cursor-not-allowed' : 'text-gray-400 hover:bg-[#3d4449] hover:text-white'}`}
         >
           <Volume2 size={17} />
           <span className="text-[10px] font-normal leading-none">Selection</span>
@@ -185,18 +158,17 @@ export function Toolbar({
 
         {/* Page info — far right */}
         {pageInfo && (
-          <div className="ml-auto flex items-center pl-2">
+          <div className="ml-auto pl-2">
             <span className="text-[12px] text-gray-400 font-mono">
               <span className="text-white font-semibold">{pageInfo.current}</span>
-              {' / '}
-              {pageInfo.total}
+              {' / '}{pageInfo.total}
             </span>
           </div>
         )}
       </div>
 
       {/* ── Category label ── */}
-      <div className="px-4 pb-1.5 text-[10px] text-gray-500 uppercase tracking-wider font-medium">
+      <div className="px-4 pb-1.5 text-[10px] text-gray-600 uppercase tracking-widest font-medium">
         {activeCategory}
       </div>
     </div>

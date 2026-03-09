@@ -128,38 +128,44 @@ pdf_editor
 │   ├── package.json
 │   ├── src
 │   │   ├── api
-│   │   │   └── client.js
+│   │   │   └── client.ts
 │   │   ├── app
 │   │   │   └── App.tsx
 │   │   ├── components
-│   │   │   ├── Canvas.tsx
-│   │   │   ├── EmptyState.jsx
-│   │   │   ├── LeftPanel.jsx
-│   │   │   ├── LeftSidebar.tsx
-│   │   │   ├── Menubar.jsx
-│   │   │   ├── NodeOverlay.jsx
-│   │   │   ├── PageControls.jsx
-│   │   │   ├── PageRenderer.jsx
-│   │   │   ├── Primitives.jsx
-│   │   │   ├── RightPanel.tsx
-│   │   │   ├── Sidebar.jsx
-│   │   │   ├── StatusBar.tsx
-│   │   │   ├── Tabbar.jsx
-│   │   │   ├── Toolbar.tsx
-│   │   │   ├── TopBar.tsx
-│   │   │   └── TtsBar.tsx
+│   │   │   ├── canvas
+│   │   │   │   ├── Canvas.tsx
+│   │   │   │   ├── NodeOverlay.jsx
+│   │   │   │   ├── PageControls.jsx
+│   │   │   │   └── PageRenderer.jsx
+│   │   │   ├── layout
+│   │   │   │   ├── LeftSidebar.tsx
+│   │   │   │   ├── RightPanel.tsx
+│   │   │   │   ├── StatusBar.tsx
+│   │   │   │   ├── TopBar.tsx
+│   │   │   │   └── TtsBar.tsx
+│   │   │   ├── toolbar
+│   │   │   │   └── Toolbar.tsx
+│   │   │   └── ui
+│   │   │       ├── Button.tsx
+│   │   │       ├── Dropdown.tsx
+│   │   │       ├── EmptyState.tsx
+│   │   │       ├── Filetab.tsx
+│   │   │       ├── index.ts
+│   │   │       └── Primitives.tsx
+│   │   ├── constants
+│   │   │   ├── menuDefs.ts
+│   │   │   └── tools.ts
 │   │   ├── hooks
 │   │   │   ├── useDragSelection.js
 │   │   │   ├── usePageChars.js
 │   │   │   ├── usePdfCanvas.js
 │   │   │   └── useTts.js
 │   │   ├── main.tsx
-│   │   ├── styles
-│   │   │   ├── fonts.css
-│   │   │   ├── index.css
-│   │   │   ├── tailwind.css
-│   │   │   └── theme.css
-│   │   └── tools.js
+│   │   └── styles
+│   │       ├── fonts.css
+│   │       ├── index.css
+│   │       ├── tailwind.css
+│   │       └── theme.css
 │   └── vite.config.ts
 └── src
     ├── commands
