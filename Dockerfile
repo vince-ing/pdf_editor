@@ -2,10 +2,11 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install system dependencies required by sounddevice and soundfile
+# Install system dependencies required by sounddevice, soundfile, and OCR
 RUN apt-get update && apt-get install -y \
     libportaudio2 \
     libsndfile1 \
+    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

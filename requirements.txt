@@ -6,5 +6,6 @@ kokoro-onnx
 soundfile
 sounddevice
 numpy
-pymupdf
+PyMuPDF
 pytesseract
+Pillow

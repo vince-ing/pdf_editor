@@ -3,7 +3,7 @@ name: Sync to Hugging Face Space
 on:
   push:
     branches:
-      - port    # Update this if you are pushing to a different branch like 'main'
+      - port    # Now listening to your active branch!
 
 jobs:
   sync-to-hub:
@@ -17,6 +17,5 @@ jobs:
       - name: Push to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        # This forces your current GitHub code to overwrite the Space, keeping GitHub as the source of truth
         run: |
           git push --force https://vince-ing:$HF_TOKEN@huggingface.co/spaces/vince-ing/pdf-editor-backend HEAD:main
