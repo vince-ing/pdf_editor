@@ -48,12 +48,13 @@ pdf_editor
     │   │   ├── canvas
     │   │   │   ├── Canvas.tsx
     │   │   │   ├── InteractionLayer.tsx
-    │   │   │   ├── NodeOverlay.jsx
+    │   │   │   ├── NodeOverlay.tsx
     │   │   │   ├── PageControls.jsx
-    │   │   │   ├── PageRenderer.jsx
+    │   │   │   ├── PageRenderer.tsx
     │   │   │   ├── ResizeHandles.tsx
     │   │   │   ├── RichTextEditor.tsx
-    │   │   │   └── TransientTexBox.tsx
+    │   │   │   ├── TransientTextBox.tsx
+    │   │   │   └── types.tsx
     │   │   ├── layout
     │   │   │   ├── LeftSidebar.tsx
     │   │   │   ├── RightPanel.tsx
