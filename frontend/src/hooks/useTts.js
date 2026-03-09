@@ -106,11 +106,14 @@ export const useTts = () => {
     }, []);
 
     const pauseResume = useCallback(async () => {
-        // The backend TtsService has pause/resume, but there's no dedicated
-        // endpoint yet. For now we toggle a local visual state and send
-        // a stop/play if needed. Wire up a /pause endpoint when added to the plugin.
-        setIsPaused(p => !p);
-        // TODO: call /pause endpoint when added to tts_plugin.py
+        try {
+            const res = await fetch(`${API}/pause`, { method: 'POST' });
+            const data = await res.json();
+            // Use the authoritative paused state from the backend
+            setIsPaused(data.paused);
+        } catch (err) {
+            console.error('[useTts] pause error:', err);
+        }
     }, []);
 
     const setSpeed = useCallback((val) => {

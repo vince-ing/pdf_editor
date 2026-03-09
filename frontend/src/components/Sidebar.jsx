@@ -1,11 +1,15 @@
+// frontend/src/components/Sidebar.jsx
+// Left panel — page thumbnails with drag-to-reorder, rotate, delete.
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { engineApi } from '../api/client';
+import { theme as t } from '../theme';
+import { IconButton } from './Primitives';
 
-// ── Thumbnail canvas ─────────────────────────────────────────────────────────
-
+// ── Thumbnail canvas ──────────────────────────────────────────────────────────
 const Thumbnail = ({ pdfDoc, pageNode, pageIndex, rotation = 0 }) => {
-    const canvasRef = useRef(null);
-    const THUMB_WIDTH = 132;
+    const canvasRef  = useRef(null);
+    const THUMB_W    = t.sidebar.thumbWidth;
 
     useEffect(() => {
         if (!pdfDoc) return;
@@ -16,65 +20,50 @@ const Thumbnail = ({ pdfDoc, pageNode, pageIndex, rotation = 0 }) => {
             try {
                 const page = await pdfDoc.getPage((pageNode?.page_number ?? pageIndex) + 1);
                 if (!isMounted) return;
-
-                // Get the rotated viewport at scale=1 so we know the actual
-                // rendered width (swaps for 90/270 rotations).
-                const rotatedViewport = page.getViewport({ scale: 1, rotation });
-                const scale = THUMB_WIDTH / rotatedViewport.width;
-                const viewport = page.getViewport({ scale, rotation });
-
-                const canvas = canvasRef.current;
+                const rotatedVp = page.getViewport({ scale: 1, rotation });
+                const scale     = THUMB_W / rotatedVp.width;
+                const viewport  = page.getViewport({ scale, rotation });
+                const canvas    = canvasRef.current;
                 if (!canvas) return;
                 canvas.width  = viewport.width;
                 canvas.height = viewport.height;
-
-                renderTask = page.render({
-                    canvasContext: canvas.getContext('2d'),
-                    viewport,
-                });
+                renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport });
                 await renderTask.promise;
             } catch (err) {
                 if (err?.name !== 'RenderingCancelledException')
-                    console.error('Thumbnail render error:', err);
+                    console.error('Thumb render error:', err);
             }
         };
-
         render();
         return () => { isMounted = false; renderTask?.cancel(); };
-    }, [pdfDoc, pageIndex, rotation]);
+    }, [pdfDoc, pageIndex, rotation, pageNode]);
 
     return (
         <canvas
             ref={canvasRef}
-            style={{
-                width: `${THUMB_WIDTH}px`,
-                display: 'block',
-                borderRadius: '3px',
-                backgroundColor: 'white',
-            }}
+            style={{ width: `${THUMB_W}px`, display: 'block', borderRadius: t.radius.sm, backgroundColor: 'white' }}
         />
     );
 };
 
-// ── Page card ────────────────────────────────────────────────────────────────
-
+// ── Page card ─────────────────────────────────────────────────────────────────
 const PageCard = ({
     page, pdfDoc, pageIndex, isActive, isDragOver, isDragging,
     onClick, onRotate, onDelete, onDragStart, onDragOver, onDragEnd, onDrop,
 }) => {
-    const [hovered, setHovered] = useState(false);
-    const showControls = hovered || isActive;
+    const [hovered, setHov] = useState(false);
+    const showCtrl = hovered || isActive;
 
     return (
         <div
             draggable
-            onDragStart={(e) => onDragStart(e, pageIndex)}
-            onDragOver={(e) => onDragOver(e, pageIndex)}
+            onDragStart={e => onDragStart(e, pageIndex)}
+            onDragOver={e => onDragOver(e, pageIndex)}
             onDragEnd={onDragEnd}
-            onDrop={(e) => onDrop(e, pageIndex)}
+            onDrop={e => onDrop(e, pageIndex)}
             onClick={onClick}
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
+            onMouseEnter={() => setHov(true)}
+            onMouseLeave={() => setHov(false)}
             style={{
                 position: 'relative',
                 display: 'flex',
@@ -82,89 +71,81 @@ const PageCard = ({
                 alignItems: 'center',
                 gap: '6px',
                 padding: '8px 8px 10px',
-                borderRadius: '7px',
+                borderRadius: t.radius.lg,
                 cursor: isDragging ? 'grabbing' : 'pointer',
                 backgroundColor: isActive
-                    ? 'rgba(52, 152, 219, 0.18)'
-                    : hovered
-                    ? 'rgba(255,255,255,0.06)'
-                    : 'transparent',
-                border: isDragOver
-                    ? '2px solid #f39c12'
+                    ? t.colors.accentMuted
+                    : hovered ? t.colors.bgHover : 'transparent',
+                border: `1px solid ${isDragOver
+                    ? t.colors.crop
                     : isActive
-                    ? '2px solid #3498db'
-                    : '2px solid transparent',
-                transition: 'all 0.15s ease',
-                opacity: isDragging ? 0.45 : 1,
+                    ? t.colors.accent
+                    : 'transparent'}`,
+                transition: t.transitions.fast,
+                opacity: isDragging ? 0.4 : 1,
                 userSelect: 'none',
             }}
         >
-            {/* Drag indicator */}
+            {/* Drop indicator */}
             {isDragOver && (
                 <div style={{
                     position: 'absolute',
-                    top: '-2px', left: '12px', right: '12px',
-                    height: '3px',
-                    backgroundColor: '#f39c12',
-                    borderRadius: '2px',
+                    top: '-2px', left: '10px', right: '10px',
+                    height: '2px',
+                    backgroundColor: t.colors.crop,
+                    borderRadius: t.radius.pill,
                     zIndex: 10,
                 }} />
             )}
 
-            {/* Thumbnail wrapper */}
+            {/* Thumbnail with overlay controls */}
             <div style={{
                 position: 'relative',
                 boxShadow: isActive
-                    ? '0 0 0 2px #3498db, 0 4px 14px rgba(0,0,0,0.5)'
-                    : '0 2px 8px rgba(0,0,0,0.45)',
-                borderRadius: '3px',
+                    ? `0 0 0 2px ${t.colors.accent}, ${t.shadows.md}`
+                    : t.shadows.sm,
+                borderRadius: t.radius.sm,
                 overflow: 'visible',
             }}>
-                <Thumbnail
-                    pdfDoc={pdfDoc}
-                    pageNode={page}
-                    pageIndex={pageIndex}
-                    rotation={page.rotation ?? 0}
-                />
+                <Thumbnail pdfDoc={pdfDoc} pageNode={page} pageIndex={pageIndex} rotation={page.rotation ?? 0} />
 
-                {/* Hover controls overlay */}
+                {/* Hover controls */}
                 <div style={{
                     position: 'absolute',
                     top: '4px',
                     right: '4px',
                     display: 'flex',
-                    gap: '4px',
-                    opacity: showControls ? 1 : 0,
-                    transition: 'opacity 0.15s',
-                    pointerEvents: showControls ? 'auto' : 'none',
+                    flexDirection: 'column',
+                    gap: '3px',
+                    opacity: showCtrl ? 1 : 0,
+                    transition: t.transitions.fast,
+                    pointerEvents: showCtrl ? 'auto' : 'none',
                 }}>
-                    <ControlBtn
+                    <button
                         title="Rotate 90°"
-                        onClick={(e) => { e.stopPropagation(); onRotate(); }}
-                        color="#2980b9"
-                    >
-                        ↻
-                    </ControlBtn>
-                    <ControlBtn
+                        onClick={e => { e.stopPropagation(); onRotate(); }}
+                        style={miniBtn(t.colors.bgSurface, t.colors.textSecondary)}
+                    >↻</button>
+                    <button
                         title="Delete page"
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        color="#c0392b"
-                    >
-                        ✕
-                    </ControlBtn>
+                        onClick={e => { e.stopPropagation(); onDelete(); }}
+                        style={miniBtn(t.colors.bgSurface, t.colors.danger)}
+                    >✕</button>
                 </div>
 
                 {/* Rotation badge */}
                 {(page.rotation ?? 0) !== 0 && (
                     <div style={{
                         position: 'absolute',
-                        bottom: '4px', left: '4px',
-                        backgroundColor: 'rgba(41,128,185,0.9)',
+                        bottom: '4px',
+                        left: '4px',
+                        backgroundColor: t.colors.accent,
                         color: 'white',
                         fontSize: '9px',
                         fontWeight: '700',
                         padding: '1px 5px',
-                        borderRadius: '3px',
+                        borderRadius: t.radius.sm,
+                        fontFamily: t.fonts.mono,
                     }}>
                         {page.rotation}°
                     </div>
@@ -175,8 +156,9 @@ const PageCard = ({
             <span style={{
                 fontSize: '11px',
                 fontWeight: isActive ? '700' : '500',
-                color: isActive ? '#3498db' : '#7f8c8d',
-                letterSpacing: '0.02em',
+                color: isActive ? t.colors.accent : t.colors.textMuted,
+                fontFamily: t.fonts.mono,
+                letterSpacing: '0.04em',
             }}>
                 {pageIndex + 1}
             </span>
@@ -184,73 +166,50 @@ const PageCard = ({
     );
 };
 
-const ControlBtn = ({ children, onClick, title, color }) => (
-    <button
-        title={title}
-        onClick={onClick}
-        style={{
-            width: '22px',
-            height: '22px',
-            borderRadius: '4px',
-            border: 'none',
-            backgroundColor: color,
-            color: 'white',
-            fontSize: '12px',
-            fontWeight: '700',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-            lineHeight: 1,
-            padding: 0,
-        }}
-    >
-        {children}
-    </button>
-);
+const miniBtn = (bg, color) => ({
+    width: '22px', height: '22px',
+    borderRadius: t.radius.sm,
+    border: `1px solid ${t.colors.border}`,
+    backgroundColor: bg,
+    color,
+    fontSize: '13px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: t.shadows.sm,
+    lineHeight: 1,
+    padding: 0,
+});
 
-// ── Sidebar ──────────────────────────────────────────────────────────────────
-
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 export const Sidebar = ({ pdfDoc, documentState, activePage, onPageClick, onDocumentChanged }) => {
     const pages = documentState?.children ?? [];
     const [dragSrcIndex, setDragSrcIndex] = useState(null);
     const [dragOverIndex, setDragOverIndex] = useState(null);
     const [busy, setBusy] = useState(false);
-
     const busyRef = useRef(false);
 
     const withBusy = useCallback(async (fn) => {
         if (busyRef.current) return;
-        busyRef.current = true;
-        setBusy(true);
-        try { await fn(); }
-        finally { busyRef.current = false; setBusy(false); }
+        busyRef.current = true; setBusy(true);
+        try { await fn(); } finally { busyRef.current = false; setBusy(false); }
     }, []);
 
-    // ── Rotate ───────────────────────────────────────────────────────────────
     const handleRotate = useCallback((page) => {
-        withBusy(async () => {
-            await engineApi.rotatePage(page.id, 90);
-            await onDocumentChanged();
-        });
+        withBusy(async () => { await engineApi.rotatePage(page.id, 90); await onDocumentChanged(); });
     }, [withBusy, onDocumentChanged]);
 
-    // ── Delete ───────────────────────────────────────────────────────────────
     const handleDelete = useCallback((page, index) => {
         if (pages.length <= 1) { alert('Cannot delete the last page.'); return; }
         if (!window.confirm(`Delete page ${index + 1}?`)) return;
-        withBusy(async () => {
-            await engineApi.deletePage(page.id);
-            await onDocumentChanged();
-        });
+        withBusy(async () => { await engineApi.deletePage(page.id); await onDocumentChanged(); });
     }, [pages.length, withBusy, onDocumentChanged]);
 
-    // ── Drag-to-reorder ──────────────────────────────────────────────────────
     const handleDragStart = useCallback((e, index) => {
         setDragSrcIndex(index);
         e.dataTransfer.effectAllowed = 'move';
-        // ghost image
         e.dataTransfer.setDragImage(e.currentTarget, 60, 40);
     }, []);
 
@@ -261,30 +220,24 @@ export const Sidebar = ({ pdfDoc, documentState, activePage, onPageClick, onDocu
     }, [dragSrcIndex]);
 
     const handleDragEnd = useCallback(() => {
-        setDragSrcIndex(null);
-        setDragOverIndex(null);
+        setDragSrcIndex(null); setDragOverIndex(null);
     }, []);
 
     const handleDrop = useCallback((e, dropIndex) => {
         e.preventDefault();
         const src = dragSrcIndex;
-        setDragSrcIndex(null);
-        setDragOverIndex(null);
+        setDragSrcIndex(null); setDragOverIndex(null);
         if (src === null || src === dropIndex) return;
-
         const page = pages[src];
-        withBusy(async () => {
-            await engineApi.movePage(page.id, dropIndex);
-            await onDocumentChanged();
-        });
+        withBusy(async () => { await engineApi.movePage(page.id, dropIndex); await onDocumentChanged(); });
     }, [dragSrcIndex, pages, withBusy, onDocumentChanged]);
 
     return (
-        <div style={{
-            width: '172px',
+        <aside style={{
+            width: t.sidebar.width,
             flexShrink: 0,
-            backgroundColor: '#1a2535',
-            borderRight: '1px solid #0d1520',
+            backgroundColor: t.colors.bgSurface,
+            borderRight: `1px solid ${t.colors.border}`,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -292,33 +245,45 @@ export const Sidebar = ({ pdfDoc, documentState, activePage, onPageClick, onDocu
             {/* Header */}
             <div style={{
                 padding: '10px 12px',
-                fontSize: '10px',
-                fontWeight: '700',
-                color: '#546e7a',
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                borderBottom: '1px solid rgba(255,255,255,0.06)',
-                flexShrink: 0,
+                borderBottom: `1px solid ${t.colors.border}`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexShrink: 0,
             }}>
-                <span>Pages ({pages.length})</span>
-                {busy && (
-                    <span style={{ color: '#f39c12', fontSize: '10px' }}>…</span>
-                )}
+                <span style={{
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: t.colors.textMuted,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    fontFamily: t.fonts.ui,
+                }}>
+                    Pages
+                </span>
+                <span style={{
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    color: t.colors.accent,
+                    fontFamily: t.fonts.mono,
+                    backgroundColor: t.colors.accentMuted,
+                    padding: '1px 6px',
+                    borderRadius: t.radius.pill,
+                }}>
+                    {pages.length}
+                </span>
             </div>
 
-            {/* Help tip */}
+            {/* Hint */}
             {pages.length > 1 && (
                 <div style={{
-                    padding: '5px 10px',
+                    padding: '6px 12px',
                     fontSize: '10px',
-                    color: '#3d5166',
-                    borderBottom: '1px solid rgba(255,255,255,0.04)',
-                    lineHeight: 1.4,
+                    color: t.colors.textMuted,
+                    borderBottom: `1px solid ${t.colors.border}`,
+                    lineHeight: 1.5,
                 }}>
-                    Drag to reorder · hover for controls
+                    Drag to reorder
                 </div>
             )}
 
@@ -333,11 +298,12 @@ export const Sidebar = ({ pdfDoc, documentState, activePage, onPageClick, onDocu
             }}>
                 {!pdfDoc && (
                     <div style={{
-                        color: '#3d5166',
+                        color: t.colors.textMuted,
                         fontSize: '12px',
                         textAlign: 'center',
-                        marginTop: '32px',
-                        lineHeight: 1.6,
+                        marginTop: '40px',
+                        lineHeight: 1.7,
+                        fontFamily: t.fonts.ui,
                     }}>
                         No document<br />loaded
                     </div>
@@ -362,6 +328,6 @@ export const Sidebar = ({ pdfDoc, documentState, activePage, onPageClick, onDocu
                     />
                 ))}
             </div>
-        </div>
+        </aside>
     );
 };

@@ -131,10 +131,18 @@ pdf_editor
 │   │   │   └── client.js
 │   │   ├── App.jsx
 │   │   ├── components
+│   │   │   ├── EmptyState.jsx
+│   │   │   ├── LeftPanel.jsx
+│   │   │   ├── Menubar.jsx
 │   │   │   ├── NodeOverlay.jsx
 │   │   │   ├── PageControls.jsx
 │   │   │   ├── PageRenderer.jsx
+│   │   │   ├── Primitives.jsx
+│   │   │   ├── RightPanel.jsx
 │   │   │   ├── Sidebar.jsx
+│   │   │   ├── StatusBar.jsx
+│   │   │   ├── Tabbar.jsx
+│   │   │   ├── Toolbar.jsx
 │   │   │   └── TtsBar.jsx
 │   │   ├── hooks
 │   │   │   ├── useDragSelection.js
@@ -142,6 +150,7 @@ pdf_editor
 │   │   │   ├── usePdfCanvas.js
 │   │   │   └── useTts.js
 │   │   ├── main.jsx
+│   │   ├── theme.js
 │   │   └── tools.js
 │   └── vite.config.js
 └── src
