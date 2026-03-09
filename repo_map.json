@@ -1,0 +1,685 @@
+{
+  "files": {
+    "engine/src/api/main.py": {
+      "classes": {
+        "class CropPayload(BaseModel)": [],
+        "class MovePagePayload(BaseModel)": [],
+        "class RotatePayload(BaseModel)": [],
+        "class LoadPayload(BaseModel)": [],
+        "class ExportPayload(BaseModel)": [],
+        "class TextRunPayload(BaseModel)": [],
+        "class TextAnnotationPayload(BaseModel)": [],
+        "class UpdateAnnotationPayload(BaseModel)": [],
+        "class HighlightRect(BaseModel)": [],
+        "class HighlightPayload(BaseModel)": []
+      },
+      "functions": [
+        "def get_session(session_id)",
+        "def close_session(session_id)",
+        "def upload_and_load_document(file, session)",
+        "def get_document_state(session)",
+        "def node_to_dict(node)",
+        "def load_document(payload, session)",
+        "def export_document(payload, session)",
+        "def download_document(session)",
+        "def crop_page(page_id, payload, session)",
+        "def create_page(page_number, source_ref, session)",
+        "def rotate_page(page_id, payload, session)",
+        "def delete_page(page_id, session)",
+        "def move_page(page_id, payload, session)",
+        "def get_page_chars(page_id, session)",
+        "def update_annotation(node_id, payload, session)",
+        "def add_text_annotation(payload, session)",
+        "def add_highlight_annotation(payload, session)",
+        "def undo_last_action(session)",
+        "def redo_last_action(session)"
+      ]
+    },
+    "engine/src/commands/base.py": {
+      "classes": {
+        "class Command(ABC)": [
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ]
+      }
+    },
+    "engine/src/commands/node_commands.py": {
+      "classes": {
+        "class AddNodeCommand(Command)": [
+          "def __init__(self, parent_id, new_node)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ],
+        "class BatchAddNodeCommand(Command)": [
+          "def __init__(self, parent_id, new_nodes)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ],
+        "class DeleteNodeCommand(Command)": [
+          "def __init__(self, node_id)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ],
+        "class UpdateAnnotationCommand(Command)": [
+          "def __init__(self, page_id, node_id, updates)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ]
+      }
+    },
+    "engine/src/commands/page_commands.py": {
+      "classes": {
+        "class RotatePageCommand(Command)": [
+          "def __init__(self, page_id, degrees)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ],
+        "class DeletePageCommand(Command)": [
+          "def __init__(self, page_id)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ],
+        "class MovePageCommand(Command)": [
+          "def __init__(self, page_id, new_index)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ],
+        "class CropPageCommand(Command)": [
+          "def __init__(self, page_id, x, y, width, height)",
+          "def execute(self, session)",
+          "def undo(self, session)"
+        ]
+      }
+    },
+    "engine/src/core/annotation_nodes.py": {
+      "classes": {
+        "class TextRun(BaseModel)": [],
+        "class TextNode(Node)": [],
+        "class ImageNode(Node)": [],
+        "class HighlightNode(Node)": []
+      }
+    },
+    "engine/src/core/document.py": {
+      "classes": {
+        "class DocumentNode(Node)": [
+          "def add_page(self, page)",
+          "def get_page(self, page_number)",
+          "def pages(self)"
+        ]
+      }
+    },
+    "engine/src/core/node.py": {
+      "classes": {
+        "class BoundingBox(BaseModel)": [],
+        "class Node(BaseModel)": [
+          "def add_child(self, child)",
+          "def remove_child(self, child_id)",
+          "def get_child(self, child_id)"
+        ]
+      }
+    },
+    "engine/src/core/page_node.py": {
+      "classes": {
+        "class CropBox(BoundingBox)": [],
+        "class PageNode(Node)": [
+          "def get_annotations(self)"
+        ]
+      }
+    },
+    "engine/src/editor/editor_session.py": {
+      "classes": {
+        "class EditorSession": [
+          "def __init__(self, document)",
+          "def execute(self, command)",
+          "def undo(self)",
+          "def redo(self)"
+        ]
+      }
+    },
+    "engine/src/plugins/ocr_plugin.py": {
+      "classes": {
+        "class OCRRequest(BaseModel)": [],
+        "class OCRPlugin(Plugin)": [
+          "def name(self)",
+          "def version(self)",
+          "def register_routes(self, router, session)",
+          "def process_ocr(payload)"
+        ]
+      }
+    },
+    "engine/src/plugins/plugins.py": {
+      "classes": {
+        "class OCRRequest(BaseModel)": [],
+        "class OCRPlugin(Plugin)": [
+          "def name(self)",
+          "def version(self)",
+          "def register_routes(self, router, session)",
+          "def process_ocr(payload)"
+        ]
+      }
+    },
+    "engine/src/plugins/redact_plugin.py": {
+      "classes": {
+        "class BoundingBoxPayload(BaseModel)": [],
+        "class RedactRequest(BaseModel)": [],
+        "class RedactPlugin(Plugin)": [
+          "def name(self)",
+          "def version(self)",
+          "def register_routes(self, router, session)",
+          "def apply_redaction(payload)"
+        ]
+      }
+    },
+    "engine/src/plugins/tts_plugin.py": {
+      "classes": {
+        "class TTSRequest(BaseModel)": [],
+        "class TTSPlugin(Plugin)": [
+          "def __init__(self)",
+          "def name(self)",
+          "def version(self)",
+          "def register_routes(self, router, session)",
+          "def play_text(payload)",
+          "def stop_playback()",
+          "def pause_resume_playback()"
+        ]
+      }
+    },
+    "engine/src/plugin_system/plugin.py": {
+      "classes": {
+        "class Plugin(ABC)": [
+          "def name(self)",
+          "def version(self)",
+          "def register_routes(self, router, session)"
+        ]
+      }
+    },
+    "engine/src/plugin_system/plugin_manager.py": {
+      "classes": {
+        "class PluginManager": [
+          "def __init__(self, app, session)",
+          "def register_plugin(self, plugin_class)",
+          "def finalize(self)"
+        ]
+      }
+    },
+    "engine/src/services/annotation_service.py": {
+      "classes": {
+        "class AnnotationService": [
+          "def __init__(self, session)",
+          "def add_text(self, page_id, text, x, y, width, height, font_family, font_size, color, bold, italic, runs, **kwargs)",
+          "def add_highlight(self, page_id, x, y, width, height, color, border_width, opacity, **kwargs)",
+          "def add_highlights(self, page_id, rects, color, border_width, opacity, **kwargs)",
+          "def update_annotation(self, page_id, node_id, updates)",
+          "def delete_annotation(self, node_id)"
+        ]
+      }
+    },
+    "engine/src/services/document_service.py": {
+      "classes": {
+        "class DocumentService": [
+          "def __init__(self, session)",
+          "def load_document(self, file_path)",
+          "def export_document(self, output_path)",
+          "def export_to_bytes(self)"
+        ]
+      }
+    },
+    "engine/src/services/page_service.py": {
+      "classes": {
+        "class PageService": [
+          "def __init__(self, session)",
+          "def add_page(self, page_number, source_ref)",
+          "def rotate_page(self, page_id, degrees)",
+          "def delete_page(self, page_id)",
+          "def move_page(self, page_id, new_index)",
+          "def crop_page(self, page_id, x, y, width, height)",
+          "def get_page_chars(self, page_id)"
+        ]
+      }
+    },
+    "engine/src/services/redaction_service.py": {
+      "classes": {
+        "class RedactionService": [
+          "def add_redaction(self, document, page_index, rect, fill_color, replacement_text)",
+          "def add_redactions_bulk(self, document, page_index, rects, fill_color, replacement_text)",
+          "def find_text(self, document, page_index, query, case_sensitive)"
+        ]
+      }
+    },
+    "engine/src/services/tts_service.py": {
+      "classes": {
+        "class TtsService": [
+          "def __init__(self, on_start, on_playback_start, on_progress, on_stop, on_error)",
+          "def prewarm(self)",
+          "def speak(self, text)",
+          "def stop(self)",
+          "def pause(self)",
+          "def resume(self)",
+          "def toggle_pause(self)",
+          "def is_speaking(self)",
+          "def is_paused(self)",
+          "def voice(self)",
+          "def voice(self, value)",
+          "def speed(self)",
+          "def speed(self, value)",
+          "def clear_cache(self)"
+        ]
+      }
+    },
+    "frontend/src/api/client.ts": {
+      "functions": [
+        "function s()"
+      ]
+    },
+    "frontend/src/app/App.tsx": {
+      "functions": [
+        "function App()"
+      ]
+    },
+    "frontend/src/components/canvas/Canvas.tsx": {
+      "functions": [
+        "function Canvas()"
+      ]
+    },
+    "frontend/src/components/canvas/CopyToast.tsx": {
+      "functions": [
+        "function CopyToast()"
+      ]
+    },
+    "frontend/src/components/canvas/NodeOverlay.tsx": {
+      "functions": [
+        "function NodeOverlay()",
+        "function onMove()",
+        "function onUp()"
+      ]
+    },
+    "frontend/src/components/canvas/PageControls.tsx": {
+      "functions": [
+        "function PageControls()"
+      ]
+    },
+    "frontend/src/components/canvas/PageRenderer.tsx": {
+      "functions": [
+        "function PageRenderer()"
+      ]
+    },
+    "frontend/src/components/canvas/ResizeHandles.tsx": {
+      "functions": [
+        "function useResizeDrag()",
+        "function onMove()",
+        "function onUp()",
+        "function ResizeHandles()"
+      ]
+    },
+    "frontend/src/components/canvas/RichTextEditor.tsx": {
+      "functions": [
+        "function RichTextEditor()",
+        "function onKeyDown()",
+        "function walkAndWrap()"
+      ]
+    },
+    "frontend/src/components/canvas/TransientTextBox.tsx": {
+      "functions": [
+        "function TransientTextBox()",
+        "function onMove()",
+        "function onUp()"
+      ]
+    },
+    "frontend/src/components/layout/LeftSidebar.tsx": {
+      "functions": [
+        "function Thumbnail()",
+        "function PlaceholderView()",
+        "function SearchView()",
+        "function LeftSidebar()"
+      ]
+    },
+    "frontend/src/components/layout/RightPanel.tsx": {
+      "functions": [
+        "function bytes()",
+        "function getAuthorColor()",
+        "function Section()",
+        "function StyledSelect()",
+        "function PropRow()",
+        "function TextPropertiesContent()",
+        "function commitSize()",
+        "function adjustSize()",
+        "function PagePropertiesContent()",
+        "function AppearanceContent()",
+        "function RightPanel()",
+        "function toggle()"
+      ]
+    },
+    "frontend/src/components/layout/StatusBar.tsx": {
+      "functions": [
+        "function Chip()",
+        "function Sep()",
+        "function StatusBar()"
+      ]
+    },
+    "frontend/src/components/layout/TopBar.tsx": {
+      "functions": [
+        "function Kbd()",
+        "function DropdownItem()",
+        "function DropdownPanel()",
+        "function AppMenu()",
+        "function Tab()",
+        "function TopBar()",
+        "function handler()"
+      ]
+    },
+    "frontend/src/components/layout/TtsBar.tsx": {
+      "functions": [
+        "function TtsBar()"
+      ]
+    },
+    "frontend/src/components/toolbar/Toolbar.tsx": {
+      "functions": [
+        "function ToolBtn()",
+        "function SmallToolBtn()",
+        "function Rule()",
+        "function byId()",
+        "function ViewTab()",
+        "function EditTab()",
+        "function CommentTab()",
+        "function PagesTab()",
+        "function Toolbar()",
+        "function handleToolChange()"
+      ]
+    },
+    "frontend/src/components/ui/Button.tsx": {
+      "functions": [
+        "function IconButton()",
+        "function Button()"
+      ]
+    },
+    "frontend/src/components/ui/Dropdown.tsx": {
+      "functions": [
+        "function Kbd()",
+        "function MenuItem()",
+        "function DropdownMenu()",
+        "function handler()",
+        "function handler()",
+        "function DropdownTrigger()",
+        "function handler()"
+      ]
+    },
+    "frontend/src/components/ui/EmptyState.tsx": {
+      "functions": [
+        "function EmptyState()"
+      ]
+    },
+    "frontend/src/components/ui/FileTab.tsx": {
+      "functions": [
+        "function PdfIcon()",
+        "function Tab()",
+        "function TabStrip()"
+      ]
+    },
+    "frontend/src/components/ui/Primitives.tsx": {
+      "functions": [
+        "function IconButton()",
+        "function Button()",
+        "function Divider()",
+        "function Kbd()",
+        "function DropdownMenu()",
+        "function handler()",
+        "function MenuItem()",
+        "function Tag()",
+        "function Tooltip()",
+        "function PanelSection()",
+        "function PropRow()"
+      ]
+    },
+    "frontend/src/constants/menuDefs.ts": {
+      "functions": [
+        "function buildMenuDefs()"
+      ]
+    },
+    "frontend/src/core/tools/BaseTool.ts": {
+      "classes": {
+        "class BaseTool": []
+      }
+    },
+    "frontend/src/core/tools/DragTool.ts": {
+      "classes": {
+        "class DragTool(BaseTool)": []
+      }
+    },
+    "frontend/src/core/tools/PanTool.ts": {
+      "classes": {
+        "class PanTool(BaseTool)": [],
+        "class in": []
+      }
+    },
+    "frontend/src/core/tools/TextTool.ts": {
+      "classes": {
+        "class TextTool(BaseTool)": []
+      }
+    },
+    "frontend/src/core/tools/ToolManager.ts": {
+      "classes": {
+        "class ToolManager": []
+      }
+    },
+    "frontend/src/hooks/useActiveTool.ts": {
+      "functions": [
+        "function useActiveTool()"
+      ]
+    },
+    "frontend/src/hooks/useDragSelection.ts": {
+      "functions": [
+        "function lineBBox()",
+        "function buildLineRects()",
+        "function useDragSelection()",
+        "function onDown()",
+        "function onMove()",
+        "function onUp()",
+        "function onLeave()"
+      ]
+    },
+    "frontend/src/hooks/useEditorState.ts": {
+      "functions": [
+        "function makeSession()",
+        "function useEditorState()",
+        "function handler()"
+      ]
+    },
+    "frontend/src/hooks/usePageActions.ts": {
+      "functions": [
+        "function usePageActions()"
+      ]
+    },
+    "frontend/src/hooks/usePageChars.ts": {
+      "functions": [
+        "function usePageChars()"
+      ]
+    },
+    "frontend/src/hooks/usePdfCanvas.ts": {
+      "functions": [
+        "function usePdfCanvas()",
+        "function renderPage()"
+      ]
+    },
+    "frontend/src/hooks/useTts.ts": {
+      "functions": [
+        "function useTts()",
+        "function _clearPoll()"
+      ]
+    },
+    "frontend/src/utils/textUtils.ts": {
+      "functions": [
+        "function runToSpanStyle()",
+        "function domToRuns()",
+        "function walk()",
+        "function applyStyleToSelection()",
+        "function runsToHtml()"
+      ]
+    }
+  },
+  "dependencies": [
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/plugin_system/plugin_manager.py"
+    },
+    {
+      "source": "engine/src/services/page_service.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/editor/editor_session.py",
+      "target": "engine/src/commands/base.py"
+    },
+    {
+      "source": "engine/src/plugins/tts_plugin.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/plugins/redact_plugin.py",
+      "target": "engine/src/services/annotation_service.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
+      "target": "engine/src/core/annotation_nodes.py"
+    },
+    {
+      "source": "engine/src/plugins/tts_plugin.py",
+      "target": "engine/src/services/tts_service.py"
+    },
+    {
+      "source": "engine/src/plugins/redact_plugin.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/services/page_service.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/plugins/ocr_plugin.py"
+    },
+    {
+      "source": "engine/src/commands/page_commands.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/services/page_service.py",
+      "target": "engine/src/commands/page_commands.py"
+    },
+    {
+      "source": "engine/src/plugins/ocr_plugin.py",
+      "target": "engine/src/plugin_system/plugin.py"
+    },
+    {
+      "source": "engine/src/commands/node_commands.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/services/page_service.py",
+      "target": "engine/src/commands/node_commands.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/services/annotation_service.py"
+    },
+    {
+      "source": "engine/src/plugins/ocr_plugin.py",
+      "target": "engine/src/services/annotation_service.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
+      "target": "engine/src/core/document.py"
+    },
+    {
+      "source": "engine/src/services/annotation_service.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/plugins/ocr_plugin.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/services/annotation_service.py",
+      "target": "engine/src/core/annotation_nodes.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/services/page_service.py",
+      "target": "engine/src/core/page_node.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
+      "target": "engine/src/core/page_node.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/plugins/redact_plugin.py"
+    },
+    {
+      "source": "engine/src/plugin_system/plugin_manager.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/plugins/plugins.py",
+      "target": "engine/src/plugin_system/plugin.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/plugins/tts_plugin.py"
+    },
+    {
+      "source": "engine/src/plugins/plugins.py",
+      "target": "engine/src/services/annotation_service.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/services/document_service.py"
+    },
+    {
+      "source": "engine/src/commands/page_commands.py",
+      "target": "engine/src/commands/base.py"
+    },
+    {
+      "source": "engine/src/commands/node_commands.py",
+      "target": "engine/src/core/node.py"
+    },
+    {
+      "source": "engine/src/commands/page_commands.py",
+      "target": "engine/src/core/page_node.py"
+    },
+    {
+      "source": "engine/src/plugin_system/plugin.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/plugins/plugins.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/plugins/tts_plugin.py",
+      "target": "engine/src/plugin_system/plugin.py"
+    },
+    {
+      "source": "engine/src/services/annotation_service.py",
+      "target": "engine/src/commands/node_commands.py"
+    },
+    {
+      "source": "engine/src/services/annotation_service.py",
+      "target": "engine/src/core/node.py"
+    },
+    {
+      "source": "engine/src/plugins/redact_plugin.py",
+      "target": "engine/src/plugin_system/plugin.py"
+    },
+    {
+      "source": "engine/src/editor/editor_session.py",
+      "target": "engine/src/core/document.py"
+    }
+  ]
+}
