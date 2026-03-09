@@ -25,13 +25,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-current_session = EditorSession()
+# ── Session registry ──────────────────────────────────────────────────────────
 
-plugin_manager = PluginManager(app, current_session)
+from fastapi import Depends, Header
+
+sessions: dict[str, EditorSession] = {}
+
+def get_session(session_id: str = Header(default="default", alias="X-Session-Id")) -> EditorSession:
+    if session_id not in sessions:
+        sessions[session_id] = EditorSession()
+    return sessions[session_id]
+
+# Initialise plugin_manager with a stable default session instance
+_default_session = get_session("default")
+
+plugin_manager = PluginManager(app, _default_session)
 plugin_manager.register_plugin(OCRPlugin)
 plugin_manager.register_plugin(TTSPlugin)
 plugin_manager.register_plugin(RedactPlugin)
 plugin_manager.finalize()
+
+@app.delete("/api/session")
+def close_session(
+    session_id: str = Header(default="default", alias="X-Session-Id"),
+):
+    sessions.pop(session_id, None)
+    return {"status": "success", "message": f"Session '{session_id}' closed."}
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -106,7 +125,7 @@ class HighlightPayload(BaseModel):
 # ── Document endpoints ────────────────────────────────────────────────────────
 
 @app.post("/api/document/upload")
-def upload_and_load_document(file: UploadFile = File(...)):
+def upload_and_load_document(file: UploadFile = File(...), session: EditorSession = Depends(get_session)):
     import shutil, traceback
     print(f"--- Uploading: {file.filename} ---")
     try:
@@ -114,7 +133,7 @@ def upload_and_load_document(file: UploadFile = File(...)):
         temp_path = f".workspace/{file.filename}"
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        service = DocumentService(current_session)
+        service = DocumentService(session)
         doc_node = service.load_document(temp_path)
         return {"status": "success", "document": doc_node}
     except Exception as e:
@@ -122,16 +141,16 @@ def upload_and_load_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/document")
-def get_document_state():
+def get_document_state(session: EditorSession = Depends(get_session)):
     def node_to_dict(node):
         d = node.model_dump()
         d['children'] = [node_to_dict(c) for c in node.children]
         return d
-    return node_to_dict(current_session.document)
+    return node_to_dict(session.document)
 
 @app.post("/api/document/load")
-def load_document(payload: LoadPayload):
-    service = DocumentService(current_session)
+def load_document(payload: LoadPayload, session: EditorSession = Depends(get_session)):
+    service = DocumentService(session)
     try:
         doc_node = service.load_document(payload.file_path)
         return {"status": "success", "document": doc_node}
@@ -139,8 +158,8 @@ def load_document(payload: LoadPayload):
         raise HTTPException(status_code=404, detail=str(e))
 
 @app.post("/api/document/export")
-def export_document(payload: ExportPayload):
-    service = DocumentService(current_session)
+def export_document(payload: ExportPayload, session: EditorSession = Depends(get_session)):
+    service = DocumentService(session)
     try:
         saved_path = service.export_document(payload.output_path)
         return {"status": "success", "file_saved": saved_path}
@@ -148,14 +167,14 @@ def export_document(payload: ExportPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/document/download")
-def download_document():
+def download_document(session: EditorSession = Depends(get_session)):
     from fastapi.responses import Response
-    if not current_session.document or not current_session.document.file_name:
+    if not session.document or not session.document.file_name:
         raise HTTPException(status_code=400, detail="No document loaded.")
     try:
-        service = DocumentService(current_session)
+        service = DocumentService(session)
         pdf_bytes = service.export_to_bytes()
-        filename      = current_session.document.file_name
+        filename      = session.document.file_name
         download_name = f"edited_{filename}"
         return Response(
             content=pdf_bytes,
@@ -171,9 +190,9 @@ def download_document():
 # ── Page endpoints ────────────────────────────────────────────────────────────
 
 @app.post("/api/pages/{page_id}/crop")
-def crop_page(page_id: str, payload: CropPayload):
+def crop_page(page_id: str, payload: CropPayload, session: EditorSession = Depends(get_session)):
     try:
-        service = PageService(current_session)
+        service = PageService(session)
         service.crop_page(page_id, payload.x, payload.y, payload.width, payload.height)
         return {"status": "success", "message": "Page cropped."}
     except Exception as e:
@@ -181,13 +200,13 @@ def crop_page(page_id: str, payload: CropPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages")
-def create_page(page_number: int, source_ref: str = None):
-    service = PageService(current_session)
+def create_page(page_number: int, source_ref: str = None, session: EditorSession = Depends(get_session)):
+    service = PageService(session)
     return service.add_page(page_number, source_ref)
 
 @app.post("/api/pages/{page_id}/rotate")
-def rotate_page(page_id: str, payload: RotatePayload):
-    service = PageService(current_session)
+def rotate_page(page_id: str, payload: RotatePayload, session: EditorSession = Depends(get_session)):
+    service = PageService(session)
     try:
         updated_page = service.rotate_page(page_id, payload.degrees)
         return {"status": "success", "page": updated_page.model_dump()}
@@ -195,15 +214,15 @@ def rotate_page(page_id: str, payload: RotatePayload):
         raise HTTPException(status_code=404, detail=str(e))
 
 @app.delete("/api/pages/{page_id}")
-def delete_page(page_id: str):
+def delete_page(page_id: str, session: EditorSession = Depends(get_session)):
     try:
-        before     = len(current_session.document.children)
-        before_ids = [c.id for c in current_session.document.children]
+        before     = len(session.document.children)
+        before_ids = [c.id for c in session.document.children]
         print(f"[DELETE] page_id={page_id}, before={before}, ids={before_ids}")
-        service = PageService(current_session)
+        service = PageService(session)
         service.delete_page(page_id)
-        after     = len(current_session.document.children)
-        after_ids = [c.id for c in current_session.document.children]
+        after     = len(session.document.children)
+        after_ids = [c.id for c in session.document.children]
         print(f"[DELETE] after={after}, ids={after_ids}")
         return {"status": "success", "message": "Page deleted.", "before": before, "after": after}
     except Exception as e:
@@ -211,9 +230,9 @@ def delete_page(page_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages/{page_id}/move")
-def move_page(page_id: str, payload: MovePagePayload):
+def move_page(page_id: str, payload: MovePagePayload, session: EditorSession = Depends(get_session)):
     try:
-        service = PageService(current_session)
+        service = PageService(session)
         service.move_page(page_id, payload.new_index)
         return {"status": "success", "message": "Page moved."}
     except Exception as e:
@@ -221,8 +240,8 @@ def move_page(page_id: str, payload: MovePagePayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/pages/{page_id}/chars")
-def get_page_chars(page_id: str):
-    service = PageService(current_session)
+def get_page_chars(page_id: str, session: EditorSession = Depends(get_session)):
+    service = PageService(session)
     try:
         chars = service.get_page_chars(page_id)
         return {"status": "success", "chars": chars}
@@ -236,8 +255,8 @@ def get_page_chars(page_id: str):
 # ── Annotation endpoints ──────────────────────────────────────────────────────
 
 @app.patch("/api/annotations/{node_id}")
-def update_annotation(node_id: str, payload: UpdateAnnotationPayload):
-    service = AnnotationService(current_session)
+def update_annotation(node_id: str, payload: UpdateAnnotationPayload, session: EditorSession = Depends(get_session)):
+    service = AnnotationService(session)
     updates = payload.model_dump(exclude_unset=True)
     page_id = updates.pop("page_id", None)
     if not page_id:
@@ -250,15 +269,12 @@ def update_annotation(node_id: str, payload: UpdateAnnotationPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/annotations/text")
-def add_text_annotation(payload: TextAnnotationPayload):
-    page = current_session.document.get_child(payload.page_id)
+def add_text_annotation(payload: TextAnnotationPayload, session: EditorSession = Depends(get_session)):
+    page = session.document.get_child(payload.page_id)
     if not page or page.node_type != "page":
         raise HTTPException(status_code=404, detail="Page not found")
-    service = AnnotationService(current_session)
-
-    # Convert TextRunPayload → dicts for annotation_service
+    service = AnnotationService(session)
     runs_data = [r.model_dump() for r in payload.runs]
-
     node = service.add_text(
         page_id=payload.page_id,
         text=payload.text,
@@ -276,11 +292,11 @@ def add_text_annotation(payload: TextAnnotationPayload):
     return {"status": "success", "node": node}
 
 @app.post("/api/annotations/highlight")
-def add_highlight_annotation(payload: HighlightPayload):
-    page = current_session.document.get_child(payload.page_id)
+def add_highlight_annotation(payload: HighlightPayload, session: EditorSession = Depends(get_session)):
+    page = session.document.get_child(payload.page_id)
     if not page or page.node_type != "page":
         raise HTTPException(status_code=404, detail="Page not found")
-    service = AnnotationService(current_session)
+    service = AnnotationService(session)
     rect_dicts = [{"x": r.x, "y": r.y, "width": r.width, "height": r.height} for r in payload.rects]
     nodes = service.add_highlights(
         page_id=payload.page_id,
@@ -294,13 +310,13 @@ def add_highlight_annotation(payload: HighlightPayload):
 # ── Undo / Redo ───────────────────────────────────────────────────────────────
 
 @app.post("/api/undo")
-def undo_last_action():
-    if not current_session.undo():
+def undo_last_action(session: EditorSession = Depends(get_session)):
+    if not session.undo():
         raise HTTPException(status_code=400, detail="Nothing to undo.")
     return {"status": "success", "message": "Undo successful."}
 
 @app.post("/api/redo")
-def redo_last_action():
-    if not current_session.redo():
+def redo_last_action(session: EditorSession = Depends(get_session)):
+    if not session.redo():
         raise HTTPException(status_code=400, detail="Nothing to redo.")
     return {"status": "success", "message": "Redo successful."}

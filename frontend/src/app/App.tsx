@@ -36,14 +36,7 @@ export default function App() {
     <div className="h-screen flex flex-col bg-[#1e2327] text-white overflow-hidden">
       <TopBar
         tabs={editor.tabs} activeTabId={editor.activeTabId} onTabClick={editor.setActiveTabId}
-        onTabClose={id => {
-          editor.setTabs(prev => prev.filter(x => x.id !== id));
-          if (editor.activeTabId === id) { 
-            editor.setActiveTabId(null); 
-            editor.setDocumentState(null); 
-            editor.setPdfDoc(null); 
-          }
-        }}
+        onTabClose={editor.handleTabClose}
         onNewTab={editor.openFileDialog} onUndo={editor.handleUndo} onRedo={editor.handleRedo} menus={editor.menus}
       />
 

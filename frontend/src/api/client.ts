@@ -5,34 +5,43 @@ import type { TextRun } from '../types/textProps';
 
 const API_BASE = 'http://localhost:8000/api';
 
+// Build axios config with session header
+const s = (sessionId: string) => ({ headers: { 'X-Session-Id': sessionId } });
+
 export const engineApi = {
+  // --- Session ---
+  closeSession: async (sessionId: string) =>
+    (await axios.delete(`${API_BASE}/session`, s(sessionId))).data,
+
   // --- Document ---
-  uploadDocument: async (file: File) => {
+  uploadDocument: async (file: File, sessionId: string) => {
     const formData = new FormData();
     formData.append('file', file);
     const response = await axios.post(`${API_BASE}/document/upload`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { 'Content-Type': 'multipart/form-data', 'X-Session-Id': sessionId },
     });
     return response.data;
   },
-  getDocumentState: async () => (await axios.get(`${API_BASE}/document`)).data,
-  exportDocument:   async (outputPath: string) => (await axios.post(`${API_BASE}/document/export`, { output_path: outputPath })).data,
-  undo: async () => axios.post(`${API_BASE}/undo`),
-  redo: async () => axios.post(`${API_BASE}/redo`),
+  getDocumentState: async (sessionId: string) =>
+    (await axios.get(`${API_BASE}/document`, s(sessionId))).data,
+  exportDocument: async (outputPath: string, sessionId: string) =>
+    (await axios.post(`${API_BASE}/document/export`, { output_path: outputPath }, s(sessionId))).data,
+  undo: async (sessionId: string) => axios.post(`${API_BASE}/undo`, {}, s(sessionId)),
+  redo: async (sessionId: string) => axios.post(`${API_BASE}/redo`, {}, s(sessionId)),
 
   // --- Pages ---
-  rotatePage: async (pageId: string, degrees = 90) =>
-    (await axios.post(`${API_BASE}/pages/${pageId}/rotate`, { degrees })).data,
-  deletePage: async (pageId: string) =>
-    (await axios.delete(`${API_BASE}/pages/${pageId}`)).data,
-  movePage: async (pageId: string, newIndex: number) =>
-    (await axios.post(`${API_BASE}/pages/${pageId}/move`, { new_index: newIndex })).data,
-  cropPage: async (pageId: string, x: number, y: number, width: number, height: number) =>
-    (await axios.post(`${API_BASE}/pages/${pageId}/crop`, { x, y, width, height })).data,
-  clearCrop: async (pageId: string) =>
-    (await axios.delete(`${API_BASE}/pages/${pageId}/crop`)).data,
-  getPageChars: async (pageId: string) =>
-    (await axios.get(`${API_BASE}/pages/${pageId}/chars`)).data.chars,
+  rotatePage: async (pageId: string, sessionId: string, degrees = 90) =>
+    (await axios.post(`${API_BASE}/pages/${pageId}/rotate`, { degrees }, s(sessionId))).data,
+  deletePage: async (pageId: string, sessionId: string) =>
+    (await axios.delete(`${API_BASE}/pages/${pageId}`, s(sessionId))).data,
+  movePage: async (pageId: string, newIndex: number, sessionId: string) =>
+    (await axios.post(`${API_BASE}/pages/${pageId}/move`, { new_index: newIndex }, s(sessionId))).data,
+  cropPage: async (pageId: string, x: number, y: number, width: number, height: number, sessionId: string) =>
+    (await axios.post(`${API_BASE}/pages/${pageId}/crop`, { x, y, width, height }, s(sessionId))).data,
+  clearCrop: async (pageId: string, sessionId: string) =>
+    (await axios.delete(`${API_BASE}/pages/${pageId}/crop`, s(sessionId))).data,
+  getPageChars: async (pageId: string, sessionId: string) =>
+    (await axios.get(`${API_BASE}/pages/${pageId}/chars`, s(sessionId))).data.chars,
 
   // --- Annotations ---
   addTextAnnotation: async (
@@ -40,6 +49,7 @@ export const engineApi = {
     text:       string,
     x:          number,
     y:          number,
+    sessionId:  string,
     width  =    200,
     height =    30,
     fontFamily= 'Helvetica',
@@ -66,15 +76,15 @@ export const engineApi = {
         font_size:   r.fontSize    ?? fontSize,
         color:       r.color       ?? color,
       })),
-    });
+    }, s(sessionId));
     return response.data;
   },
 
   updateAnnotation: async (
     nodeId:     string,
     updates:    Record<string, unknown> & { runs?: TextRun[] },
+    sessionId:  string,
   ) => {
-    // Remap camelCase runs fields to snake_case for the backend
     const payload = { ...updates };
     if (payload.runs) {
       payload.runs = (payload.runs as TextRun[]).map(r => ({
@@ -86,22 +96,22 @@ export const engineApi = {
         color:       r.color       ?? '#000000',
       })) as unknown as TextRun[];
     }
-    return (await axios.patch(`${API_BASE}/annotations/${nodeId}`, payload)).data;
+    return (await axios.patch(`${API_BASE}/annotations/${nodeId}`, payload, s(sessionId))).data;
   },
 
-  addHighlight: async (pageId: string, x: number, y: number, width: number, height: number, color = '#FFFF00') =>
-    (await axios.post(`${API_BASE}/annotations/highlight`, { page_id: pageId, x, y, width, height, color })).data,
+  addHighlight: async (pageId: string, x: number, y: number, width: number, height: number, sessionId: string, color = '#FFFF00') =>
+    (await axios.post(`${API_BASE}/annotations/highlight`, { page_id: pageId, x, y, width, height, color }, s(sessionId))).data,
 
   // --- Plugins ---
-  applyRedaction: async (pageId: string, rects: { x: number; y: number; width: number; height: number }[]) =>
+  applyRedaction: async (pageId: string, rects: { x: number; y: number; width: number; height: number }[], sessionId: string) =>
     (await axios.post(`${API_BASE}/plugins/redact/apply`, {
       page_id: pageId,
       rects: rects.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height })),
-    })).data,
-  runOcr: async (pageId: string, language = 'eng') =>
-    (await axios.post(`${API_BASE}/plugins/ocr/process`, { page_id: pageId, language })).data,
+    }, s(sessionId))).data,
+  runOcr: async (pageId: string, sessionId: string, language = 'eng') =>
+    (await axios.post(`${API_BASE}/plugins/ocr/process`, { page_id: pageId, language }, s(sessionId))).data,
 
-  // --- TTS ---
+  // --- TTS (global, not session-scoped) ---
   ttsPlay: async (text: string, speed = 1.0) =>
     (await axios.post(`${API_BASE}/plugins/tts/play`, { text, speed })).data,
   ttsStop: async () =>
