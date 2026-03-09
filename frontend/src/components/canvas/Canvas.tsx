@@ -10,6 +10,7 @@ export interface CanvasProps {
   documentState?:     DocumentState | null;
   activeTool:         ToolId;
   scale:              number;
+  sessionId:          string;
   textProps?:         TextProps;
   onTextPropsChange?: (p: TextProps) => void;
   onAnnotationAdded?: () => Promise<void>;
@@ -19,7 +20,7 @@ export interface CanvasProps {
 }
 
 export function Canvas({
-  pdfDoc, documentState, activeTool = 'select', scale = 1.5,
+  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,
   textProps = DEFAULT_TEXT_PROPS, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,
 }: CanvasProps) {
@@ -44,7 +45,7 @@ export function Canvas({
             <PageRenderer
               pageNode={page} pdfDoc={pdfDoc!} pageIndex={i}
               totalPages={documentState.children?.length ?? 1}
-              scale={scale} activeTool={activeTool}
+              scale={scale} activeTool={activeTool} sessionId={sessionId}
               textProps={textProps} onTextPropsChange={onTextPropsChange}
               onAnnotationAdded={onAnnotationAdded} onDocumentChanged={onDocumentChanged}
               onTextSelected={onTextSelected}

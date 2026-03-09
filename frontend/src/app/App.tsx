@@ -69,6 +69,7 @@ export default function App() {
             <Canvas
               pdfDoc={editor.pdfDoc} documentState={editor.documentState}
               activeTool={editor.activeTool} scale={editor.scale}
+              sessionId={editor.activeTabId ?? ''}
               textProps={editor.textProps}
               onTextPropsChange={editor.setTextProps}
               onAnnotationAdded={editor.refreshDocumentState}

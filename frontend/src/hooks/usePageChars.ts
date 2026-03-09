@@ -13,10 +13,11 @@ export interface PageChar {
 interface UsePageCharsArgs {
     pageNodeId: string;
     localRotation: number;
+    sessionId: string;
     metadata?: { width: number; height: number };
 }
 
-export const usePageChars = ({ pageNodeId, localRotation, metadata }: UsePageCharsArgs) => {
+export const usePageChars = ({ pageNodeId, localRotation, sessionId, metadata }: UsePageCharsArgs) => {
     const [rawChars, setRawChars] = useState<PageChar[]>([]);
     const [pageChars, setPageChars] = useState<PageChar[]>([]);
 
@@ -24,7 +25,7 @@ export const usePageChars = ({ pageNodeId, localRotation, metadata }: UsePageCha
         let alive = true;
         if (!pageNodeId) return;
 
-        engineApi.getPageChars(pageNodeId)
+        engineApi.getPageChars(pageNodeId, sessionId)
             .then(chars => {
                 if (!alive) return;
                 setRawChars(chars || []);

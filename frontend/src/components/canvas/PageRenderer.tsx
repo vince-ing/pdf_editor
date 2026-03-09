@@ -36,6 +36,7 @@ export interface PageRendererProps {
   scale: number;
   activeTool: ToolId;
   textProps: TextProps;
+  sessionId: string;
   onTextPropsChange?: (p: TextProps) => void;
   onAnnotationAdded?: () => Promise<void>;
   onDocumentChanged?: () => Promise<void>;
@@ -44,7 +45,7 @@ export interface PageRendererProps {
 }
 
 export function PageRenderer({
-  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, onTextPropsChange,
+  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,
 }: PageRendererProps) {
   const clearSelRef = useRef<(() => void) | null>(null);
@@ -78,7 +79,7 @@ export function PageRenderer({
   }, [pageNode.id]);
 
   const { canvasRef, fullDimensions } = usePdfCanvas({ pdfDoc, pageNode, pageIndex, scale, localRotation });
-  const { pageChars } = usePageChars({ pageNodeId: pageNode.id, localRotation, metadata: pageNode.metadata });
+  const { pageChars } = usePageChars({ pageNodeId: pageNode.id, localRotation, sessionId, metadata: pageNode.metadata });
 
   const withBusy = useCallback(async (fn: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -93,7 +94,7 @@ export function PageRenderer({
 
   // Use the newly extracted hook!
   const { handleNodeUpdate, handleAction, handleTextCommit } = usePageActions({
-    pageNode, pageChars, activeTool, textProps, setAnnotations, setTransientPos,
+    pageNode, pageChars, activeTool, textProps, sessionId, setAnnotations, setTransientPos,
     onAnnotationAdded, onTextSelected, clearSelRef, toast,
     textToolNotifyCommitted: () => textTool.notifyCommitted()
   });
@@ -188,7 +189,7 @@ export function PageRenderer({
 
       {cropRect && (
         <div className="absolute z-30 flex gap-2" style={{ bottom: fullDimensions.height - (cropRect.y + cropRect.height) * scale + 10, left: '50%', transform: 'translateX(-50%)' }}>
-          <button onClick={() => withBusy(async () => { await engineApi.cropPage(pageNode.id, cropRect.x, cropRect.y, cropRect.width, cropRect.height); clearSelection(); await onDocumentChanged?.(); })}
+          <button onClick={() => withBusy(async () => { await engineApi.cropPage(pageNode.id, cropRect.x, cropRect.y, cropRect.width, cropRect.height, sessionId); clearSelection(); await onDocumentChanged?.(); })}
             className="h-7 px-4 bg-green-500 text-[#0a1f17] text-xs font-semibold rounded-md hover:bg-green-400 transition-colors">✓ Apply</button>
           <button onClick={clearSelection}
             className="h-7 px-3 bg-[#2d3338] text-gray-300 text-xs border border-white/10 rounded-md hover:bg-[#3d4449] transition-colors">Cancel</button>

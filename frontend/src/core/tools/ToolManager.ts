@@ -4,7 +4,7 @@ type Listener = (activeToolId: string) => void;
 
 class ToolManager {
   private tools: Map<string, BaseTool> = new Map();
-  private activeToolId: string = 'select';
+  private activeToolId: string = 'hand';
   private listeners: Set<Listener> = new Set();
 
   registerTool(tool: BaseTool) {

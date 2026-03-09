@@ -9,6 +9,7 @@ interface UsePageActionsProps {
   pageChars: any[];
   activeTool: ToolId;
   textProps: TextProps;
+  sessionId: string;
   setAnnotations: React.Dispatch<React.SetStateAction<AnnotationNode[]>>;
   setTransientPos: (pos: { x: number; y: number } | null) => void;
   onAnnotationAdded?: () => Promise<void>;
@@ -23,6 +24,7 @@ export function usePageActions({
   pageChars,
   activeTool,
   textProps,
+  sessionId,
   setAnnotations,
   setTransientPos,
   onAnnotationAdded,
@@ -43,9 +45,9 @@ export function usePageActions({
         height:       updatedNode.bbox?.height,
         text_content: updatedNode.text_content,
         runs:         updatedNode.runs,
-      });
+      }, sessionId);
     } catch (err) { console.error('Failed to update node:', err); }
-  }, [pageNode.id, setAnnotations]);
+  }, [pageNode.id, sessionId, setAnnotations]);
 
   const handleAction = useCallback(async (rects: { x: number; y: number; width: number; height: number }[]) => {
     if (activeTool === 'crop') return;
@@ -67,32 +69,31 @@ export function usePageActions({
     }
     try {
       if (activeTool === 'highlight') {
-        const res = await fetch('http://localhost:8000/api/annotations/highlight', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ page_id: pageNode.id, rects }),
-        }).then(r => r.json());
+        const res = await engineApi.addHighlight(
+          pageNode.id, rects[0].x, rects[0].y, rects[0].width, rects[0].height, sessionId,
+        );
         if (res?.node) { setAnnotations(p => [...p, res.node]); onAnnotationAdded?.(); }
       } else if (activeTool === 'redact') {
-        const res = await engineApi.applyRedaction(pageNode.id, rects);
+        const res = await engineApi.applyRedaction(pageNode.id, rects, sessionId);
         const nodes = res?.node ? [res.node] : (res?.nodes ?? []);
         if (nodes.length) { setAnnotations(p => [...p, ...nodes]); onAnnotationAdded?.(); }
       }
       clearSelRef.current?.();
     } catch (e) { console.error(e); }
-  }, [activeTool, pageNode.id, pageChars, toast, onAnnotationAdded, onTextSelected, setAnnotations, clearSelRef]);
+  }, [activeTool, pageNode.id, sessionId, pageChars, toast, onAnnotationAdded, onTextSelected, setAnnotations, clearSelRef]);
 
   const handleTextCommit = useCallback(async (runs: TextRun[], plain: string, x: number, y: number, w: number, h: number) => {
     setTransientPos(null);
     textToolNotifyCommitted();
     try {
       const res = await engineApi.addTextAnnotation(
-        pageNode.id, plain, x, y, w, h,
+        pageNode.id, plain, x, y, sessionId, w, h,
         textProps.fontFamily, textProps.fontSize, textProps.color,
         textProps.isBold, textProps.isItalic, runs,
       );
       if (res?.node) { setAnnotations(p => [...p, res.node]); onAnnotationAdded?.(); }
     } catch (err) { console.error(err); }
-  }, [pageNode.id, textProps, onAnnotationAdded, setAnnotations, setTransientPos, textToolNotifyCommitted]);
+  }, [pageNode.id, sessionId, textProps, onAnnotationAdded, setAnnotations, setTransientPos, textToolNotifyCommitted]);
 
   return { handleNodeUpdate, handleAction, handleTextCommit };
 }
