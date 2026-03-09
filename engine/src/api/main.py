@@ -130,13 +130,16 @@ class HighlightPayload(BaseModel):
 
 @app.post("/api/document/upload")
 def upload_and_load_document(file: UploadFile = File(...), session: EditorSession = Depends(get_session)):
-    import shutil, traceback
+    import shutil, traceback, tempfile, os
     print(f"--- Uploading: {file.filename} ---")
     try:
-        os.makedirs(".workspace", exist_ok=True)
-        temp_path = f".workspace/{file.filename}"
+        # Get the system's universal temporary directory (works on Windows, Mac, and Linux)
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, file.filename)
+        
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+            
         service = DocumentService(session)
         doc_node = service.load_document(temp_path)
         return {"status": "success", "document": doc_node}
