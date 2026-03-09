@@ -100,3 +100,40 @@ class DeleteNodeCommand(Command):
             parent = session.document.get_child(self._parent_id)
             if parent:
                 parent.add_child(self._deleted_node)
+
+class UpdateAnnotationCommand(Command):
+    def __init__(self, page_id: str, node_id: str, updates: dict):
+        self.page_id = page_id
+        self.node_id = node_id
+        self.updates = updates
+        self.previous_state = {}
+
+    def execute(self, session):
+        page = session.document.get_child(self.page_id)
+        if not page: raise ValueError(f"Page {self.page_id} not found")
+        
+        node = page.get_child(self.node_id)
+        if not node: raise ValueError(f"Annotation {self.node_id} not found")
+
+        # Save previous state for undo
+        for key in self.updates.keys():
+            if key in ['x', 'y', 'width', 'height'] and hasattr(node, 'bbox'):
+                self.previous_state[key] = getattr(node.bbox, key)
+            elif hasattr(node, key):
+                self.previous_state[key] = getattr(node, key)
+
+        # Apply updates
+        for key, value in self.updates.items():
+            if key in ['x', 'y', 'width', 'height'] and hasattr(node, 'bbox'):
+                setattr(node.bbox, key, value)
+            elif hasattr(node, key):
+                setattr(node, key, value)
+
+    def undo(self, session):
+        page = session.document.get_child(self.page_id)
+        node = page.get_child(self.node_id)
+        for key, value in self.previous_state.items():
+            if key in ['x', 'y', 'width', 'height'] and hasattr(node, 'bbox'):
+                setattr(node.bbox, key, value)
+            elif hasattr(node, key):
+                setattr(node, key, value)

@@ -58,6 +58,12 @@ export const engineApi = {
         });
         return response.data;
     },
+
+    updateAnnotation: async (nodeId, updates) => {
+        const response = await axios.patch(`${API_BASE}/annotations/${nodeId}`, updates);
+        return response.data;
+    },
+
     addHighlight: async (pageId, x, y, width, height, color = '#FFFF00') => {
         const response = await axios.post(`${API_BASE}/annotations/highlight`, {
             page_id: pageId, x, y, width, height, color

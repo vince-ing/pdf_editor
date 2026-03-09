@@ -1,3 +1,4 @@
+// frontend/src/components/canvas/Canvas.tsx
 // Canvas.tsx — PDF document area. bg-[#353a40], pages centered, annotations overlaid.
 
 import { useRef, useEffect, useState, useCallback } from 'react';
@@ -98,6 +99,9 @@ function PageRenderer({
   const [localRotation, setLocalRotation] = useState(pageNode.rotation ?? 0);
   const [showToast, setShowToast] = useState(false);
   const [showCtrl, setShowCtrl] = useState(false);
+  
+  // State to hold the temporary coordinates for the inline text box
+  const [transientText, setTransientText] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => { setAnnotations(pageNode.children ?? []); }, [pageNode.children]);
   useEffect(() => { if (typeof pageNode.rotation === 'number') setLocalRotation(pageNode.rotation); }, [pageNode.rotation, pageNode.id]);
@@ -116,6 +120,21 @@ function PageRenderer({
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setShowToast(false), 2000);
   }, []);
+
+  const handleNodeUpdate = useCallback(async (nodeId: string, updatedNode: Partial<AnnotationNode>) => {
+    setAnnotations(prev => prev.map(n => n.id === nodeId ? { ...n, ...updatedNode } as AnnotationNode : n));
+    try {
+      await engineApi.updateAnnotation(nodeId, {
+        page_id: pageNode.id,
+        x: updatedNode.bbox?.x,
+        y: updatedNode.bbox?.y,
+        width: updatedNode.bbox?.width,
+        height: updatedNode.bbox?.height,
+      });
+    } catch (err) {
+      console.error("Failed to update node:", err);
+    }
+  }, [pageNode.id]);
 
   const handleAction = useCallback(async (rects: { x: number; y: number; width: number; height: number }[]) => {
     if (activeTool === 'crop') return;
@@ -205,15 +224,11 @@ function PageRenderer({
       )}
 
       <div style={{ position: 'absolute', top: innerY, left: innerX, width: fullDimensions.width, height: fullDimensions.height }}>
-        {/* PDF canvas */}
+        
+        {/* Layer 1: PDF canvas */}
         <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ width: fullDimensions.width, height: fullDimensions.height }} />
 
-        {/* Annotation overlays */}
-        <div className="absolute inset-0 pointer-events-none z-[5] overflow-hidden">
-          {annotations.map(node => <NodeOverlay key={node.id} node={node} scale={scale} />)}
-        </div>
-
-        {/* Crop mask */}
+        {/* Layer 2: Crop mask */}
         {cropRect && (
           <div className="absolute inset-0 pointer-events-none z-[8]">
             {[
@@ -227,21 +242,15 @@ function PageRenderer({
           </div>
         )}
 
-        {/* Interaction overlay */}
+        {/* Layer 3: Interaction overlay (Listens for tool clicks and drags on the background) */}
         <div
           ref={overlayRef}
           className="absolute inset-0 z-10"
           style={{ cursor: CURSORS[activeTool] ?? 'default', userSelect: 'none' }}
-          onClick={activeTool === 'addtext' ? async (e) => {
-            if (!overlayRef.current) return;
+          onClick={activeTool === 'addtext' ? (e) => {
+            if (!overlayRef.current || transientText) return;
             const r = overlayRef.current.getBoundingClientRect();
-            const text = window.prompt('Enter text:');
-            if (!text) return;
-            try {
-              const res = await engineApi.addTextAnnotation(pageNode.id, text, (e.clientX - r.left) / scale, (e.clientY - r.top) / scale);
-              if (res?.node) setAnnotations(p => [...p, res.node]);
-              onAnnotationAdded?.();
-            } catch (err) { console.error(err); }
+            setTransientText({ x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale });
           } : handlers.onClick}
           onMouseDown={isDragTool ? handlers.onMouseDown : undefined}
           onMouseMove={isDragTool ? handlers.onMouseMove : undefined}
@@ -262,6 +271,54 @@ function PageRenderer({
             />
           ))}
         </div>
+
+        {/* Layer 4: Annotations (z-20 sits ABOVE the interaction layer, so it receives clicks first) */}
+        {annotations.map(node => (
+          <NodeOverlay 
+            key={node.id} 
+            node={node} 
+            scale={scale} 
+            activeTool={activeTool}
+            onUpdate={handleNodeUpdate}
+          />
+        ))}
+
+        {/* Layer 5: Transient inline text box (Top-most) */}
+        {transientText && (
+          <textarea
+            autoFocus
+            placeholder="Type here..."
+            className="absolute z-50 bg-white/90 border-2 border-[#4a90e2] outline-none text-black p-1 shadow-md resize"
+            style={{
+              left: transientText.x * scale,
+              top: transientText.y * scale,
+              minWidth: 150,
+              minHeight: 30,
+              fontSize: 12 * scale,
+              lineHeight: 1.2
+            }}
+            onMouseDown={e => e.stopPropagation()} 
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setTransientText(null);
+            }}
+            onBlur={async (e) => {
+              const text = e.target.value;
+              setTransientText(null);
+              if (!text.trim()) return;
+              try {
+                const width = e.target.offsetWidth / scale;
+                const height = e.target.offsetHeight / scale;
+                const res = await engineApi.addTextAnnotation(
+                  pageNode.id, text, transientText.x, transientText.y, width, height
+                );
+                if (res?.node) {
+                  setAnnotations(p => [...p, res.node]);
+                  onAnnotationAdded?.();
+                }
+              } catch (err) { console.error(err); }
+            }}
+          />
+        )}
       </div>
 
       {/* Crop confirm bar */}
@@ -298,27 +355,103 @@ function PageRenderer({
 }
 
 // ── Annotation overlay ────────────────────────────────────────────────────────
-function NodeOverlay({ node, scale }: { node: AnnotationNode; scale: number }) {
+function NodeOverlay({ 
+  node, scale, activeTool, onUpdate 
+}: { 
+  node: AnnotationNode; scale: number; activeTool?: ToolId; onUpdate?: (id: string, updates: Partial<AnnotationNode>) => void 
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [localPos, setLocalPos] = useState({ x: node.bbox?.x || 0, y: node.bbox?.y || 0 });
+
+  const dragRef = useRef({ isDragging: false, startX: 0, startY: 0, initialNodeX: 0, initialNodeY: 0 });
+
+  useEffect(() => {
+    if (!dragRef.current.isDragging && node.bbox) {
+      setLocalPos({ x: node.bbox.x, y: node.bbox.y });
+    }
+  }, [node.bbox]);
+
   if (!node.bbox) return null;
+
+  const isEditable = node.node_type === 'text' && (activeTool === 'select' || activeTool === 'addtext' || activeTool === 'edittext');
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!isEditable) return;
+    e.stopPropagation(); 
+    e.preventDefault(); 
+
+    setIsDragging(true);
+    dragRef.current = {
+      isDragging: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialNodeX: localPos.x,
+      initialNodeY: localPos.y
+    };
+
+    const handlePointerMove = (moveEv: PointerEvent) => {
+      if (!dragRef.current.isDragging) return;
+      const dx = (moveEv.clientX - dragRef.current.startX) / scale;
+      const dy = (moveEv.clientY - dragRef.current.startY) / scale;
+      setLocalPos({
+        x: dragRef.current.initialNodeX + dx,
+        y: dragRef.current.initialNodeY + dy
+      });
+    };
+
+    const handlePointerUp = (upEv: PointerEvent) => {
+      if (!dragRef.current.isDragging) return;
+      dragRef.current.isDragging = false;
+      setIsDragging(false);
+
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+
+      const dx = (upEv.clientX - dragRef.current.startX) / scale;
+      const dy = (upEv.clientY - dragRef.current.startY) / scale;
+
+      if (onUpdate && node.bbox) {
+        onUpdate(node.id, {
+          ...node,
+          bbox: { ...node.bbox, x: dragRef.current.initialNodeX + dx, y: dragRef.current.initialNodeY + dy }
+        });
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
   const style: React.CSSProperties = {
     position: 'absolute',
-    left: node.bbox.x * scale, top: node.bbox.y * scale,
-    width: node.bbox.width * scale, height: node.bbox.height * scale,
-    pointerEvents: 'none',
+    zIndex: 20,
+    left: localPos.x * scale, 
+    top: localPos.y * scale,
+    // Fail-safes to ensure the box is never 0 width/height
+    width: Math.max((node.bbox.width || 100) * scale, 10), 
+    height: Math.max((node.bbox.height || 30) * scale, 10), 
+    pointerEvents: isEditable ? 'auto' : 'none',
+    cursor: isEditable ? (isDragging ? 'grabbing' : 'grab') : 'default',
+    outline: isEditable ? '1px dashed rgba(74,144,226,0.6)' : 'none',
+    background: isEditable ? 'rgba(0,0,0,0.01)' : 'transparent', 
   };
+
   if (node.node_type === 'text') {
     return (
-      <div style={style}>
-        <span style={{ fontSize: (node.font_size ?? 12) * scale, fontFamily: node.font_family, color: node.color ?? '#000' }}>
+      <div style={style} onPointerDown={handlePointerDown}>
+        <span style={{ fontSize: (node.font_size ?? 12) * scale, fontFamily: node.font_family, color: node.color ?? '#000', pointerEvents: 'none', userSelect: 'none' }}>
           {node.text_content}
         </span>
       </div>
     );
   }
+  
   if (node.node_type === 'highlight') {
+    style.pointerEvents = 'none';
     if (node.color === '#000000') return <div style={{ ...style, background: '#000', borderRadius: 1 }} />;
     return <div style={{ ...style, background: node.color ?? '#f59e0b', opacity: node.opacity ?? 0.42, borderRadius: 1, mixBlendMode: 'multiply' }} />;
   }
+  
   return null;
 }
 
@@ -330,7 +463,6 @@ export function Canvas({
   return (
     <div className="flex-1 bg-[#353a40] overflow-auto flex flex-col items-center pt-8 pb-8 px-4">
       {!documentState ? (
-        // Empty state — reference floating comment style
         <div className="flex flex-col items-center justify-center h-full gap-5 select-none">
           <div className="w-16 h-16 bg-[#2d3338] rounded-xl flex items-center justify-center text-3xl border border-white/[0.05] shadow-2xl">📄</div>
           <div className="text-center">

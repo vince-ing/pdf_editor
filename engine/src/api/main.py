@@ -1,7 +1,7 @@
 # engine/src/api/main.py
 
 import os
-from typing import List
+from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -63,6 +63,16 @@ class TextAnnotationPayload(BaseModel):
     height: float = 30
     font_size: float = 12.0
     color: str = "#000000"
+
+class UpdateAnnotationPayload(BaseModel):
+    page_id: str
+    x: Optional[float] = None
+    y: Optional[float] = None
+    width: Optional[float] = None
+    height: Optional[float] = None
+    text_content: Optional[str] = None
+    font_size: Optional[float] = None
+    color: Optional[str] = None
 
 class HighlightRect(BaseModel):
     x: float
@@ -230,6 +240,24 @@ def get_page_chars(page_id: str):
 
 
 # ── Annotation endpoints ──────────────────────────────────────────────────────
+
+@app.patch("/api/annotations/{node_id}")
+def update_annotation(node_id: str, payload: UpdateAnnotationPayload):
+    service = AnnotationService(current_session)
+    # Convert payload to dict, ignoring fields that weren't sent
+    updates = payload.model_dump(exclude_unset=True)
+    page_id = updates.pop("page_id", None)
+    
+    if not page_id:
+        raise HTTPException(status_code=400, detail="page_id is required")
+        
+    try:
+        node = service.update_annotation(page_id, node_id, updates)
+        return {"status": "success", "node": node}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/annotations/text")
 def add_text_annotation(payload: TextAnnotationPayload):

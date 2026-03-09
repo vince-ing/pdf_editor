@@ -59,6 +59,14 @@ class AnnotationService:
         command = BatchAddNodeCommand(parent_id=page_id, new_nodes=nodes)
         self.session.execute(command)
         return nodes
+    
+    def update_annotation(self, page_id: str, node_id: str, updates: dict):
+        from engine.src.commands.node_commands import UpdateAnnotationCommand
+        cmd = UpdateAnnotationCommand(page_id, node_id, updates)
+        self.session.execute(cmd)
+        
+        page = self.session.document.get_child(page_id)
+        return page.get_child(node_id)
 
     def delete_annotation(self, node_id: str) -> None:
         """Removes an annotation by its ID."""
