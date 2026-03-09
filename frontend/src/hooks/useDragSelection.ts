@@ -17,7 +17,9 @@ interface UseDragSelectionArgs {
     pageChars: PageChar[];
     activeTool: ToolId;
     metadata?: { width: number; height: number };
-    onAction: (rects: GeoRect[]) => void;
+    highlightColor?: string;
+    highlightOpacity?: number;
+    onAction: (rects: GeoRect[], color?: string, opacity?: number) => void;
 }
 
 function lineBBox(lineChars: PageChar[]): GeoRect {
@@ -52,6 +54,8 @@ export const useDragSelection = ({
     pageChars,
     activeTool,
     metadata,
+    highlightColor,
+    highlightOpacity,
     onAction
 }: UseDragSelectionArgs) => {
     const liveRectsRef = useRef<GeoRect[]>([]);
@@ -66,6 +70,11 @@ export const useDragSelection = ({
     const onActionRef = useRef(onAction);
     useEffect(() => { onActionRef.current = onAction; }, [onAction]);
 
+    const highlightColorRef = useRef(highlightColor);
+    const highlightOpacityRef = useRef(highlightOpacity);
+    useEffect(() => { highlightColorRef.current = highlightColor; }, [highlightColor]);
+    useEffect(() => { highlightOpacityRef.current = highlightOpacity; }, [highlightOpacity]);
+
     const clearSelection = useCallback(() => {
         committedRectsRef.current = [];
         liveRectsRef.current = [];
@@ -73,7 +82,7 @@ export const useDragSelection = ({
     }, [bumpSel]);
 
     useEffect(() => {
-        if (activeTool !== 'select') {
+        if (activeTool === 'hand' || activeTool === 'zoom') {
             clearSelection();
         }
     }, [activeTool, clearSelection]);
@@ -170,7 +179,7 @@ export const useDragSelection = ({
             bumpSel();
 
             if (onActionRef.current) {
-                onActionRef.current(rects);
+                onActionRef.current(rects, highlightColorRef.current, highlightOpacityRef.current);
             }
         };
 

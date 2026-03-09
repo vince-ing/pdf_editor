@@ -518,31 +518,87 @@
   },
   "dependencies": [
     {
+      "source": "engine/src/plugin_system/plugin_manager.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/plugins/ocr_plugin.py",
+      "target": "engine/src/plugin_system/plugin.py"
+    },
+    {
       "source": "engine/src/api/main.py",
-      "target": "engine/src/plugin_system/plugin_manager.py"
+      "target": "engine/src/plugins/tts_plugin.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/plugins/redact_plugin.py"
+    },
+    {
+      "source": "engine/src/plugins/ocr_plugin.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/services/annotation_service.py",
+      "target": "engine/src/core/node.py"
+    },
+    {
+      "source": "engine/src/services/annotation_service.py",
+      "target": "engine/src/commands/node_commands.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
+      "target": "engine/src/core/page_node.py"
+    },
+    {
+      "source": "engine/src/commands/page_commands.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/services/annotation_service.py"
     },
     {
       "source": "engine/src/services/page_service.py",
       "target": "engine/src/editor/editor_session.py"
     },
     {
-      "source": "engine/src/editor/editor_session.py",
-      "target": "engine/src/commands/base.py"
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/editor/editor_session.py"
     },
     {
-      "source": "engine/src/plugins/tts_plugin.py",
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/services/document_service.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/plugin_system/plugin_manager.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
+      "target": "engine/src/core/annotation_nodes.py"
+    },
+    {
+      "source": "engine/src/commands/node_commands.py",
       "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/commands/page_commands.py",
+      "target": "engine/src/commands/base.py"
     },
     {
       "source": "engine/src/plugins/redact_plugin.py",
       "target": "engine/src/services/annotation_service.py"
     },
     {
-      "source": "engine/src/services/document_service.py",
-      "target": "engine/src/editor/editor_session.py"
+      "source": "engine/src/plugins/redact_plugin.py",
+      "target": "engine/src/plugin_system/plugin.py"
     },
     {
-      "source": "engine/src/services/document_service.py",
+      "source": "engine/src/services/page_service.py",
+      "target": "engine/src/commands/node_commands.py"
+    },
+    {
+      "source": "engine/src/services/annotation_service.py",
       "target": "engine/src/core/annotation_nodes.py"
     },
     {
@@ -554,95 +610,23 @@
       "target": "engine/src/editor/editor_session.py"
     },
     {
-      "source": "engine/src/api/main.py",
-      "target": "engine/src/services/page_service.py"
-    },
-    {
-      "source": "engine/src/api/main.py",
-      "target": "engine/src/plugins/ocr_plugin.py"
-    },
-    {
       "source": "engine/src/commands/page_commands.py",
-      "target": "engine/src/editor/editor_session.py"
+      "target": "engine/src/core/page_node.py"
     },
     {
-      "source": "engine/src/services/page_service.py",
-      "target": "engine/src/commands/page_commands.py"
-    },
-    {
-      "source": "engine/src/plugins/ocr_plugin.py",
+      "source": "engine/src/plugins/tts_plugin.py",
       "target": "engine/src/plugin_system/plugin.py"
     },
     {
-      "source": "engine/src/commands/node_commands.py",
-      "target": "engine/src/editor/editor_session.py"
-    },
-    {
-      "source": "engine/src/services/page_service.py",
-      "target": "engine/src/commands/node_commands.py"
-    },
-    {
-      "source": "engine/src/api/main.py",
-      "target": "engine/src/services/annotation_service.py"
-    },
-    {
-      "source": "engine/src/plugins/ocr_plugin.py",
-      "target": "engine/src/services/annotation_service.py"
-    },
-    {
-      "source": "engine/src/services/document_service.py",
+      "source": "engine/src/editor/editor_session.py",
       "target": "engine/src/core/document.py"
     },
     {
-      "source": "engine/src/services/annotation_service.py",
+      "source": "engine/src/plugins/tts_plugin.py",
       "target": "engine/src/editor/editor_session.py"
     },
     {
-      "source": "engine/src/plugins/ocr_plugin.py",
-      "target": "engine/src/editor/editor_session.py"
-    },
-    {
-      "source": "engine/src/services/annotation_service.py",
-      "target": "engine/src/core/annotation_nodes.py"
-    },
-    {
-      "source": "engine/src/api/main.py",
-      "target": "engine/src/editor/editor_session.py"
-    },
-    {
-      "source": "engine/src/services/page_service.py",
-      "target": "engine/src/core/page_node.py"
-    },
-    {
-      "source": "engine/src/services/document_service.py",
-      "target": "engine/src/core/page_node.py"
-    },
-    {
-      "source": "engine/src/api/main.py",
-      "target": "engine/src/plugins/redact_plugin.py"
-    },
-    {
-      "source": "engine/src/plugin_system/plugin_manager.py",
-      "target": "engine/src/editor/editor_session.py"
-    },
-    {
-      "source": "engine/src/plugins/plugins.py",
-      "target": "engine/src/plugin_system/plugin.py"
-    },
-    {
-      "source": "engine/src/api/main.py",
-      "target": "engine/src/plugins/tts_plugin.py"
-    },
-    {
-      "source": "engine/src/plugins/plugins.py",
-      "target": "engine/src/services/annotation_service.py"
-    },
-    {
-      "source": "engine/src/api/main.py",
-      "target": "engine/src/services/document_service.py"
-    },
-    {
-      "source": "engine/src/commands/page_commands.py",
+      "source": "engine/src/editor/editor_session.py",
       "target": "engine/src/commands/base.py"
     },
     {
@@ -650,36 +634,52 @@
       "target": "engine/src/core/node.py"
     },
     {
-      "source": "engine/src/commands/page_commands.py",
-      "target": "engine/src/core/page_node.py"
-    },
-    {
-      "source": "engine/src/plugin_system/plugin.py",
-      "target": "engine/src/editor/editor_session.py"
-    },
-    {
       "source": "engine/src/plugins/plugins.py",
       "target": "engine/src/editor/editor_session.py"
     },
     {
-      "source": "engine/src/plugins/tts_plugin.py",
-      "target": "engine/src/plugin_system/plugin.py"
+      "source": "engine/src/services/page_service.py",
+      "target": "engine/src/core/page_node.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/plugins/ocr_plugin.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
+      "target": "engine/src/editor/editor_session.py"
+    },
+    {
+      "source": "engine/src/plugins/plugins.py",
+      "target": "engine/src/services/annotation_service.py"
+    },
+    {
+      "source": "engine/src/api/main.py",
+      "target": "engine/src/services/page_service.py"
     },
     {
       "source": "engine/src/services/annotation_service.py",
-      "target": "engine/src/commands/node_commands.py"
+      "target": "engine/src/editor/editor_session.py"
     },
     {
-      "source": "engine/src/services/annotation_service.py",
-      "target": "engine/src/core/node.py"
+      "source": "engine/src/services/page_service.py",
+      "target": "engine/src/commands/page_commands.py"
     },
     {
-      "source": "engine/src/plugins/redact_plugin.py",
+      "source": "engine/src/plugins/plugins.py",
       "target": "engine/src/plugin_system/plugin.py"
     },
     {
-      "source": "engine/src/editor/editor_session.py",
+      "source": "engine/src/plugins/ocr_plugin.py",
+      "target": "engine/src/services/annotation_service.py"
+    },
+    {
+      "source": "engine/src/services/document_service.py",
       "target": "engine/src/core/document.py"
+    },
+    {
+      "source": "engine/src/plugin_system/plugin.py",
+      "target": "engine/src/editor/editor_session.py"
     }
   ]
 }

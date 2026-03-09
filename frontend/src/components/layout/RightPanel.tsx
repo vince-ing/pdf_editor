@@ -21,6 +21,10 @@ interface RightPanelProps {
   activeTool?:       ToolId;
   textProps:         TextProps;
   onTextPropsChange: (p: TextProps) => void;
+  highlightColor?: string;
+  highlightOpacity?: number;
+  onHighlightColorChange?: (color: string) => void;
+  onHighlightOpacityChange?: (opacity: number) => void;
 }
 
 type SectionId = 'text' | 'page' | 'appearance';
@@ -275,18 +279,35 @@ const PagePropertiesContent = ({ documentState, activePage }: {
 
 // ── AppearanceContent ──────────────────────────────────────────────────────────
 
-const AppearanceContent = () => (
+const HIGHLIGHT_SWATCHES = ['#FFFF00', '#f59e0b', '#4a90e2', '#22c55e', '#ef4444', '#a855f7'];
+
+const AppearanceContent = ({ color = '#FFFF00', opacity = 0.4, onColorChange, onOpacityChange }: {
+  color?: string; opacity?: number;
+  onColorChange?: (c: string) => void; onOpacityChange?: (o: number) => void;
+}) => (
   <div className="px-4 pb-3">
     <label className="text-[11px] text-gray-500 mb-2 block">Highlight Color</label>
     <div className="flex gap-2 mb-3 flex-wrap">
-      {['#f59e0b', '#4a90e2', '#22c55e', '#ef4444', '#a855f7', '#06b6d4'].map(c => (
-        <div key={c} title={c}
-          className="w-5 h-5 rounded cursor-pointer hover:ring-2 hover:ring-white/40 transition-all"
-          style={{ backgroundColor: c }} />
+      {HIGHLIGHT_SWATCHES.map(c => (
+        <button key={c} title={c} onClick={() => onColorChange?.(c)}
+          style={{ backgroundColor: c }}
+          className={`w-5 h-5 rounded cursor-pointer transition-all flex-shrink-0
+            ${color === c ? 'ring-2 ring-[#4a90e2] ring-offset-1 ring-offset-[#25292d]' : 'hover:ring-2 hover:ring-white/40'}`} />
       ))}
     </div>
-    <label className="text-[11px] text-gray-500 mb-1.5 block">Opacity</label>
-    <input type="range" min={0.1} max={1} step={0.05} defaultValue={0.45}
+    <div className="flex items-center gap-2 mb-3">
+      <div className="relative flex-shrink-0">
+        <div className="w-8 h-8 rounded-md border border-white/10" style={{ backgroundColor: color }} />
+        <input type="color" value={color} onChange={e => onColorChange?.(e.target.value)}
+          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+      </div>
+      <input type="text" value={color} maxLength={7}
+        onChange={e => { if (/^#[0-9a-fA-F]{0,6}$/.test(e.target.value)) onColorChange?.(e.target.value); }}
+        className="flex-1 bg-[#1e2327] text-white px-3 py-2 rounded-md text-xs font-mono focus:outline-none focus:ring-1 focus:ring-[#4a90e2]" />
+    </div>
+    <label className="text-[11px] text-gray-500 mb-1.5 block">Opacity — {Math.round(opacity * 100)}%</label>
+    <input type="range" min={0.1} max={1} step={0.05} value={opacity}
+      onChange={e => onOpacityChange?.(parseFloat(e.target.value))}
       className="w-full accent-[#4a90e2] cursor-pointer" />
   </div>
 );
@@ -295,6 +316,7 @@ const AppearanceContent = () => (
 
 export function RightPanel({
   documentState, activePage = 0, activeTool, textProps, onTextPropsChange,
+  highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,
 }: RightPanelProps) {
   const [openSection, setOpenSection] = useState<SectionId | null>(null);
   const [commentInput, setCommentInput] = useState('');
@@ -324,7 +346,10 @@ export function RightPanel({
         </Section>
 
         <Section title="Appearance" isOpen={openSection === 'appearance'} onToggle={() => toggle('appearance')}>
-          <AppearanceContent />
+          <AppearanceContent
+            color={highlightColor} opacity={highlightOpacity}
+            onColorChange={onHighlightColorChange} onOpacityChange={onHighlightOpacityChange}
+          />
         </Section>
 
       </div>

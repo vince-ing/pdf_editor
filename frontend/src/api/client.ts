@@ -99,8 +99,19 @@ export const engineApi = {
     return (await axios.patch(`${API_BASE}/annotations/${nodeId}`, payload, s(sessionId))).data;
   },
 
-  addHighlight: async (pageId: string, x: number, y: number, width: number, height: number, sessionId: string, color = '#FFFF00') =>
-    (await axios.post(`${API_BASE}/annotations/highlight`, { page_id: pageId, x, y, width, height, color }, s(sessionId))).data,
+  addHighlight: async (
+    pageId: string,
+    rects: { x: number; y: number; width: number; height: number }[],
+    color: string,
+    opacity: number,
+    sessionId: string,
+  ) =>
+    (await axios.post(`${API_BASE}/annotations/highlight`, {
+      page_id: pageId,
+      rects,
+      color,
+      opacity,
+    }, s(sessionId))).data,
 
   // --- Plugins ---
   applyRedaction: async (pageId: string, rects: { x: number; y: number; width: number; height: number }[], sessionId: string) =>

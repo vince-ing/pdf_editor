@@ -12,6 +12,8 @@ export interface CanvasProps {
   scale:              number;
   sessionId:          string;
   textProps?:         TextProps;
+  highlightColor?:    string;
+  highlightOpacity?:  number;
   onTextPropsChange?: (p: TextProps) => void;
   onAnnotationAdded?: () => Promise<void>;
   onDocumentChanged?: () => Promise<void>;
@@ -21,7 +23,7 @@ export interface CanvasProps {
 
 export function Canvas({
   pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,
-  textProps = DEFAULT_TEXT_PROPS, onTextPropsChange,
+  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,
 }: CanvasProps) {
   return (
@@ -46,7 +48,8 @@ export function Canvas({
               pageNode={page} pdfDoc={pdfDoc!} pageIndex={i}
               totalPages={documentState.children?.length ?? 1}
               scale={scale} activeTool={activeTool} sessionId={sessionId}
-              textProps={textProps} onTextPropsChange={onTextPropsChange}
+              textProps={textProps} highlightColor={highlightColor} highlightOpacity={highlightOpacity}
+              onTextPropsChange={onTextPropsChange}
               onAnnotationAdded={onAnnotationAdded} onDocumentChanged={onDocumentChanged}
               onTextSelected={onTextSelected}
             />

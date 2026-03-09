@@ -43,6 +43,8 @@ export function useEditorState() {
   const [rightPanelOpen,   setRightPanelOpen]   = useState(true);
   const [lastSelectedText, setLastSelectedText] = useState('');
   const [textProps,        setTextProps]        = useState<TextProps>(DEFAULT_TEXT_PROPS);
+  const [highlightColor,   setHighlightColor]   = useState('#f59e0b');
+  const [highlightOpacity, setHighlightOpacity] = useState(0.45);
   const [loading,          setLoading]          = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -129,7 +131,7 @@ export function useEditorState() {
       observers.push(obs);
     });
     return () => observers.forEach(o => o.disconnect());
-  }, [documentState, pdfDoc, activeTabId, patchSession]);
+  }, [pdfDoc, activeTabId, patchSession]);
 
   // ── File upload ─────────────────────────────────────────────────────────────
 
@@ -300,6 +302,8 @@ export function useEditorState() {
     rightPanelOpen, setRightPanelOpen,
     lastSelectedText, setLastSelectedText,
     textProps, setTextProps,
+    highlightColor, setHighlightColor,
+    highlightOpacity, setHighlightOpacity,
 
     // Refs
     fileInputRef, pageRefs,

@@ -37,6 +37,8 @@ export interface PageRendererProps {
   activeTool: ToolId;
   textProps: TextProps;
   sessionId: string;
+  highlightColor?: string;
+  highlightOpacity?: number;
   onTextPropsChange?: (p: TextProps) => void;
   onAnnotationAdded?: () => Promise<void>;
   onDocumentChanged?: () => Promise<void>;
@@ -45,7 +47,8 @@ export interface PageRendererProps {
 }
 
 export function PageRenderer({
-  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId, onTextPropsChange,
+  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId,
+  highlightColor, highlightOpacity, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,
 }: PageRendererProps) {
   const clearSelRef = useRef<(() => void) | null>(null);
@@ -95,6 +98,7 @@ export function PageRenderer({
   // Use the newly extracted hook!
   const { handleNodeUpdate, handleAction, handleTextCommit } = usePageActions({
     pageNode, pageChars, activeTool, textProps, sessionId, setAnnotations, setTransientPos,
+    highlightColor, highlightOpacity,
     onAnnotationAdded, onTextSelected, clearSelRef, toast,
     textToolNotifyCommitted: () => textTool.notifyCommitted()
   });

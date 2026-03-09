@@ -9,6 +9,8 @@ interface UsePageActionsProps {
   pageChars: any[];
   activeTool: ToolId;
   textProps: TextProps;
+  highlightColor?: string;
+  highlightOpacity?: number;
   sessionId: string;
   setAnnotations: React.Dispatch<React.SetStateAction<AnnotationNode[]>>;
   setTransientPos: (pos: { x: number; y: number } | null) => void;
@@ -20,13 +22,9 @@ interface UsePageActionsProps {
 }
 
 export function usePageActions({
-  pageNode,
-  pageChars,
-  activeTool,
-  textProps,
-  sessionId,
-  setAnnotations,
-  setTransientPos,
+  pageNode, pageChars, activeTool, textProps,
+  highlightColor = '#f59e0b', highlightOpacity = 0.45,
+  sessionId, setAnnotations, setTransientPos,
   onAnnotationAdded,
   onTextSelected,
   clearSelRef,
@@ -70,9 +68,10 @@ export function usePageActions({
     try {
       if (activeTool === 'highlight') {
         const res = await engineApi.addHighlight(
-          pageNode.id, rects[0].x, rects[0].y, rects[0].width, rects[0].height, sessionId,
+          pageNode.id, rects, highlightColor, highlightOpacity, sessionId,
         );
-        if (res?.node) { setAnnotations(p => [...p, res.node]); onAnnotationAdded?.(); }
+        const nodes = res?.nodes ?? (res?.node ? [res.node] : []);
+        if (nodes.length) { setAnnotations(p => [...p, ...nodes]); onAnnotationAdded?.(); }
       } else if (activeTool === 'redact') {
         const res = await engineApi.applyRedaction(pageNode.id, rects, sessionId);
         const nodes = res?.node ? [res.node] : (res?.nodes ?? []);
@@ -80,7 +79,7 @@ export function usePageActions({
       }
       clearSelRef.current?.();
     } catch (e) { console.error(e); }
-  }, [activeTool, pageNode.id, sessionId, pageChars, toast, onAnnotationAdded, onTextSelected, setAnnotations, clearSelRef]);
+  }, [activeTool, pageNode.id, sessionId, pageChars, highlightColor, highlightOpacity, toast, onAnnotationAdded, onTextSelected, setAnnotations, clearSelRef]);
 
   const handleTextCommit = useCallback(async (runs: TextRun[], plain: string, x: number, y: number, w: number, h: number) => {
     setTransientPos(null);

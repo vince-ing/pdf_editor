@@ -71,6 +71,8 @@ export default function App() {
               activeTool={editor.activeTool} scale={editor.scale}
               sessionId={editor.activeTabId ?? ''}
               textProps={editor.textProps}
+              highlightColor={editor.highlightColor}
+              highlightOpacity={editor.highlightOpacity}
               onTextPropsChange={editor.setTextProps}
               onAnnotationAdded={editor.refreshDocumentState}
               onDocumentChanged={editor.refreshDocumentState}
@@ -82,6 +84,10 @@ export default function App() {
                 documentState={editor.documentState} activePage={editor.activePage} activeTool={editor.activeTool}
                 textProps={editor.textProps}
                 onTextPropsChange={editor.setTextProps}
+                highlightColor={editor.highlightColor}
+                highlightOpacity={editor.highlightOpacity}
+                onHighlightColorChange={editor.setHighlightColor}
+                onHighlightOpacityChange={editor.setHighlightOpacity}
               />
             )}
           </div>
