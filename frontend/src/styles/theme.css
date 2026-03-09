@@ -1,0 +1,169 @@
+/* theme.css — Design tokens for PDFEdit.
+   Edit the hex values here to retheme the entire application.
+   These map directly to Tailwind's bg-background, text-foreground etc. */
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* ── App Chrome (reference palette) ────────────────────────── */
+  /* These are used as Tailwind arbitrary values: bg-[#1e2327]  */
+  /* Or as CSS vars: var(--color-chrome)                        */
+
+  --font-size: 14px;   /* reference uses smaller base than 16px */
+
+  /* Light mode vars (unused — app is dark-only) */
+  --background: #1e2327;
+  --foreground: #ffffff;
+  --card: #25292d;
+  --card-foreground: #ffffff;
+  --popover: #2d3338;
+  --popover-foreground: #ffffff;
+  --primary: #4a90e2;
+  --primary-foreground: #ffffff;
+  --secondary: #2d3338;
+  --secondary-foreground: #d1d5db;
+  --muted: #25292d;
+  --muted-foreground: #9ca3af;
+  --accent: #3d4449;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #1e2327;
+  --input: #1e2327;
+  --input-background: #1e2327;
+  --ring: #4a90e2;
+  --radius: 0.5rem;
+
+  /* ── App-specific tokens ──────────────────────────────────── */
+  --chrome:         #1e2327;   /* deepest: borders, rail bg */
+  --surface:        #25292d;   /* panels, sidebars, right panel */
+  --raised:         #2d3338;   /* topbar, toolbar */
+  --elevated:       #3d4449;   /* inputs, hover states */
+  --canvas-bg:      #353a40;   /* document area background */
+
+  --text-primary:   #ffffff;
+  --text-secondary: #d1d5db;   /* gray-300 */
+  --text-muted:     #9ca3af;   /* gray-400 */
+  --text-dim:       #6b7280;   /* gray-500 */
+
+  --blue:           #4a90e2;
+  --blue-hover:     #5a9fe8;
+  --amber:          #f59e0b;
+  --purple:         #a855f7;
+  --green:          #22c55e;
+
+  /* Sidebar vars (used by Tailwind sidebar utilities) */
+  --sidebar: #25292d;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #4a90e2;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #3d4449;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #1e2327;
+  --sidebar-ring: #4a90e2;
+}
+
+/* App is permanently dark — no .dark class needed */
+/* But keep this for Tailwind compatibility */
+.dark {
+  --background: #1e2327;
+  --foreground: #ffffff;
+  --card: #25292d;
+  --card-foreground: #ffffff;
+  --popover: #2d3338;
+  --popover-foreground: #ffffff;
+  --primary: #4a90e2;
+  --primary-foreground: #ffffff;
+  --secondary: #2d3338;
+  --secondary-foreground: #d1d5db;
+  --muted: #25292d;
+  --muted-foreground: #9ca3af;
+  --accent: #3d4449;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #1e2327;
+  --input: #1e2327;
+  --ring: #4a90e2;
+  --sidebar: #25292d;
+  --sidebar-foreground: #ffffff;
+  --sidebar-border: #1e2327;
+}
+
+@theme inline {
+  --color-background:    var(--background);
+  --color-foreground:    var(--foreground);
+  --color-card:          var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover:       var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary:       var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary:     var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:         var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent:        var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive:   var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border:        var(--border);
+  --color-input:         var(--input);
+  --color-ring:          var(--ring);
+  --radius-sm:   calc(var(--radius) - 4px);
+  --radius-md:   calc(var(--radius) - 2px);
+  --radius-lg:   var(--radius);
+  --radius-xl:   calc(var(--radius) + 4px);
+  --color-sidebar:         var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent:  var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border:  var(--sidebar-border);
+  --color-sidebar-ring:    var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Scrollbars — minimal dark */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3d4449; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+  /* Animations */
+  @keyframes spin        { to { transform: rotate(360deg); } }
+  @keyframes slideDown   { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes slideRight  { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes slideUp     { from { opacity: 0; transform: translateY(6px);  } to { opacity: 1; transform: translateY(0); } }
+  @keyframes ctrlIn      { from { opacity: 0; transform: translateX(-50%) translateY(4px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+  @keyframes fadeIn      { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes toastIn     { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Remove default select styling */
+  select { appearance: none; }
+}
+
+/* Utility classes for app-specific patterns */
+@layer utilities {
+  .animate-slide-down  { animation: slideDown 0.12s ease; }
+  .animate-slide-right { animation: slideRight 0.14s ease; }
+  .animate-slide-up    { animation: slideUp 0.14s ease; }
+  .animate-ctrl-in     { animation: ctrlIn 0.12s ease; }
+  .animate-toast-in    { animation: toastIn 0.16s ease; }
+  .animate-fade-in     { animation: fadeIn 0.15s ease; }
+  .animate-spin-slow   { animation: spin 0.7s linear infinite; }
+}

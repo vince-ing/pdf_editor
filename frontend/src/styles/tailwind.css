@@ -1,0 +1,5 @@
+/* tailwind.css — Tailwind v4 entrypoint. Do not modify. */
+@import 'tailwindcss' source(none);
+@source '../**/*.{js,ts,jsx,tsx}';
+
+@import 'tw-animate-css';

@@ -129,30 +129,38 @@ pdf_editor
 │   ├── src
 │   │   ├── api
 │   │   │   └── client.js
-│   │   ├── App.jsx
+│   │   ├── app
+│   │   │   └── App.tsx
 │   │   ├── components
+│   │   │   ├── Canvas.tsx
 │   │   │   ├── EmptyState.jsx
 │   │   │   ├── LeftPanel.jsx
+│   │   │   ├── LeftSidebar.tsx
 │   │   │   ├── Menubar.jsx
 │   │   │   ├── NodeOverlay.jsx
 │   │   │   ├── PageControls.jsx
 │   │   │   ├── PageRenderer.jsx
 │   │   │   ├── Primitives.jsx
-│   │   │   ├── RightPanel.jsx
+│   │   │   ├── RightPanel.tsx
 │   │   │   ├── Sidebar.jsx
-│   │   │   ├── StatusBar.jsx
+│   │   │   ├── StatusBar.tsx
 │   │   │   ├── Tabbar.jsx
-│   │   │   ├── Toolbar.jsx
-│   │   │   └── TtsBar.jsx
+│   │   │   ├── Toolbar.tsx
+│   │   │   ├── TopBar.tsx
+│   │   │   └── TtsBar.tsx
 │   │   ├── hooks
 │   │   │   ├── useDragSelection.js
 │   │   │   ├── usePageChars.js
 │   │   │   ├── usePdfCanvas.js
 │   │   │   └── useTts.js
-│   │   ├── main.jsx
-│   │   ├── theme.js
+│   │   ├── main.tsx
+│   │   ├── styles
+│   │   │   ├── fonts.css
+│   │   │   ├── index.css
+│   │   │   ├── tailwind.css
+│   │   │   └── theme.css
 │   │   └── tools.js
-│   └── vite.config.js
+│   └── vite.config.ts
 └── src
     ├── commands
     │   ├── annotate.py
