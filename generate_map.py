@@ -4,151 +4,247 @@ import json
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).parent.resolve()
-OUTPUT = ROOT / "repo_map.json"
-SCAN_DIRS = ["engine", "frontend"]
+EXCLUDE_DIRS = {
+    "__pycache__", "generate_map.py", ".git", "venv", "models",
+    "node_modules", "pytesseract", "generate_tree.py", ".gitignore",
+    "output", "testfiles", "speechtest.py", "structure.txt", "fonts",
+    "build_tools", "build", "dist", "installer.iss", "installer_output",
+    "tests", ".workspace",
+}
+EXCLUDE_SUFFIXES = {".pyc"}
+OUTPUT_FILE = "repo_map.json"
 
-# 1. EXPLICITLY IGNORE THESE FOLDERS
-EXCLUDE_DIRS = {"node_modules", "venv", ".venv", "env", "__pycache__", ".git", "dist", "build", ".next"}
 
-files_map = {}
-dependencies = set()
+# ── Python analysis ───────────────────────────────────────────────────────────
 
-def get_short_doc(node):
-    """Grabs only the first line of a docstring to save space."""
-    doc = ast.get_docstring(node)
-    return doc.strip().split('\n')[0][:100] if doc else None
-
-def get_signature(node):
-    """Extracts function arguments compactly."""
-    args = [arg.arg for arg in node.args.args]
-    if node.args.vararg: args.append("*" + node.args.vararg.arg)
-    if node.args.kwarg: args.append("**" + node.args.kwarg.arg)
-    return "(" + ", ".join(args) + ")"
-
-class RepoVisitor(ast.NodeVisitor):
-    def __init__(self):
-        self.classes = {}
-        self.functions = []
-        self.imports = set()
-        self.current_class = None
-
-    def visit_ClassDef(self, node):
-        bases = [b.id for b in node.bases if isinstance(b, ast.Name)]
-        base_str = f"({', '.join(bases)})" if bases else ""
-        class_sig = f"class {node.name}{base_str}"
-        
-        self.current_class = class_sig
-        self.classes[class_sig] = [] # List of method signatures
-        
-        self.generic_visit(node)
-        self.current_class = None
-
-    def _handle_func(self, node, is_async=False):
-        if node.name.startswith("_") and node.name != "__init__": 
-            return # Skip private methods
-            
-        prefix = "async def " if is_async else "def "
-        sig = f"{prefix}{node.name}{get_signature(node)}"
-        
-        if self.current_class:
-            self.classes[self.current_class].append(sig)
-        else:
-            self.functions.append(sig)
-
-    def visit_FunctionDef(self, node):
-        self._handle_func(node)
-        self.generic_visit(node)
-
-    def visit_AsyncFunctionDef(self, node):
-        self._handle_func(node, is_async=True)
-        self.generic_visit(node)
-
-    def visit_Import(self, node):
-        for alias in node.names:
-            if alias.name.startswith(tuple(SCAN_DIRS)): self.imports.add(alias.name)
-        self.generic_visit(node)
-
-    def visit_ImportFrom(self, node):
-        if node.module and node.module.startswith(tuple(SCAN_DIRS)): self.imports.add(node.module)
-        self.generic_visit(node)
-
-def analyze_python(path):
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        src = f.read()
+def analyze_python(path: Path) -> dict:
     try:
-        tree = ast.parse(src)
-    except SyntaxError:
-        return None
-
-    visitor = RepoVisitor()
-    visitor.visit(tree)
-    
-    return visitor.classes, visitor.functions, list(visitor.imports)
-
-def analyze_frontend(path):
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        src = f.read()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
     classes = {}
     functions = []
+    api_routes = []
 
-    for match in re.finditer(r'class\s+([A-Za-z0-9_]+)(?:\s+extends\s+([A-Za-z0-9_.]+))?', src):
-        name, base = match.groups()
-        class_sig = f"class {name}({base})" if base else f"class {name}"
-        classes[class_sig] = []
+    for node in ast.walk(tree):
+        # FastAPI route decorators → extract method + path
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for dec in node.decorator_list:
+                route = _extract_route(dec)
+                if route:
+                    params = _py_func_params(node)
+                    api_routes.append({
+                        "method": route["method"],
+                        "path": route["path"],
+                        "handler": node.name,
+                        "params": params,
+                    })
 
-    func_pattern = r'(?:function\s+([A-Za-z0-9_]+))|(?:(?:const|let|var)\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z0-9_]+)\s*=>)'
-    for match in re.finditer(func_pattern, src):
-        name = match.group(1) or match.group(2)
-        if name: functions.append(f"function {name}()")
+        # Top-level classes with their methods + signatures
+        if isinstance(node, ast.ClassDef):
+            methods = []
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    methods.append({
+                        "name": item.name,
+                        "params": _py_func_params(item),
+                    })
+            classes[f"class {node.name}"] = methods
 
-    return classes, functions, []
+        # Top-level functions
+        if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+            if _is_top_level(tree, node):
+                functions.append({
+                    "name": node.name,
+                    "params": _py_func_params(node),
+                })
 
-def scan():
-    for root_dir in SCAN_DIRS:
-        start = ROOT / root_dir
-        if not start.exists(): continue
+    result = {}
+    if classes:
+        result["classes"] = classes
+    if functions:
+        result["functions"] = functions
+    if api_routes:
+        result["api_routes"] = api_routes
+    return result
 
-        for root, dirs, filenames in os.walk(start):
-            # 2. MODIFY DIRS IN-PLACE TO SKIP JUNK FOLDERS
-            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
 
-            for f in filenames:
-                path = Path(root) / f
-                rel_path = path.relative_to(ROOT).as_posix()
-                
-                if f.endswith(".py"):
-                    result = analyze_python(path)
-                elif f.endswith((".js", ".jsx", ".ts", ".tsx")):
-                    result = analyze_frontend(path)
-                else:
-                    continue
+def _extract_route(dec):
+    """Extract HTTP method and path from a FastAPI decorator."""
+    HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
+    if isinstance(dec, ast.Call):
+        func = dec.func
+        method = None
+        if isinstance(func, ast.Attribute) and func.attr in HTTP_METHODS:
+            method = func.attr.upper()
+        elif isinstance(func, ast.Name) and func.id in HTTP_METHODS:
+            method = func.id.upper()
+        if method and dec.args:
+            path_node = dec.args[0]
+            if isinstance(path_node, ast.Constant):
+                return {"method": method, "path": path_node.value}
+    return None
 
-                if not result: continue
-                classes, functions, imports = result
 
-                # 3. ONLY ADD KEYS IF THEY ARE NOT EMPTY
-                if classes or functions:
-                    entry = {}
-                    if classes: entry["classes"] = classes
-                    if functions: entry["functions"] = functions
-                    files_map[rel_path] = entry
+def _py_func_params(node) -> list[str]:
+    """Return a list of 'param: type = default' strings, skipping 'self'."""
+    args = node.args
+    params = []
+    all_args = args.args + getattr(args, "posonlyargs", [])
+    defaults_offset = len(all_args) - len(args.defaults)
 
-                for imp in imports:
-                    target_file = imp.replace(".", "/") + ".py"
-                    dependencies.add((rel_path, target_file))
+    for i, arg in enumerate(all_args):
+        if arg.arg == "self":
+            continue
+        annotation = ast.unparse(arg.annotation) if arg.annotation else None
+        default_idx = i - defaults_offset
+        default = ast.unparse(args.defaults[default_idx]) if default_idx >= 0 else None
+        parts = arg.arg
+        if annotation:
+            parts += f": {annotation}"
+        if default:
+            parts += f" = {default}"
+        params.append(parts)
+    return params
 
-def write():
-    data = {
-        "files": files_map,
-        "dependencies": [{"source": src, "target": tgt} for src, tgt in dependencies]
-    }
 
-    with open(OUTPUT, "w", encoding="utf-8") as f:
-        # indent=2 keeps it readable, but the flattened structure prevents bloat
-        json.dump(data, f, indent=2)
+def _is_top_level(tree, target):
+    for node in ast.iter_child_nodes(tree):
+        if node is target:
+            return True
+    return False
+
+
+# ── TypeScript / JavaScript analysis ─────────────────────────────────────────
+
+def analyze_typescript(path: Path) -> dict:
+    try:
+        src = path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+
+    functions = []
+    interfaces = {}
+    api_calls = []
+
+    # Named exports and regular functions with their params
+    func_pattern = re.compile(
+        r'(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)',
+        re.MULTILINE
+    )
+    for m in func_pattern.finditer(src):
+        params = _ts_parse_params(m.group(2))
+        functions.append({"name": m.group(1), "params": params})
+
+    # Arrow function exports: export const foo = (...) =>
+    arrow_pattern = re.compile(
+        r'export\s+const\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*(?::\s*[\w<>\[\], |]+)?\s*=>',
+        re.MULTILINE
+    )
+    for m in arrow_pattern.finditer(src):
+        params = _ts_parse_params(m.group(2))
+        functions.append({"name": m.group(1), "params": params})
+
+    # Interfaces / types — capture their fields
+    iface_pattern = re.compile(
+        r'(?:export\s+)?interface\s+(\w+)[^{]*\{([^}]*)\}',
+        re.MULTILINE | re.DOTALL
+    )
+    for m in iface_pattern.finditer(src):
+        fields = []
+        for line in m.group(2).splitlines():
+            line = line.strip().rstrip(";").rstrip(",")
+            if line and not line.startswith("//"):
+                fields.append(line)
+        if fields:
+            interfaces[m.group(1)] = fields
+
+    # API calls: axios.get/post/patch/delete with their URL and payload shape
+    axios_pattern = re.compile(
+        r'axios\.(get|post|put|patch|delete)\s*\(\s*`([^`]+)`',
+        re.MULTILINE
+    )
+    for m in axios_pattern.finditer(src):
+        # Try to grab the payload object on the same line
+        after = src[m.end():m.end() + 200]
+        payload_match = re.search(r',\s*(\{[^}]+\})', after)
+        payload = payload_match.group(1).strip() if payload_match else None
+        api_calls.append({
+            "method": m.group(1).upper(),
+            "url": m.group(2),
+            "payload": payload,
+        })
+
+    result = {}
+    if interfaces:
+        result["interfaces"] = interfaces
+    if functions:
+        result["functions"] = [f["name"] + ("(" + ", ".join(f["params"]) + ")" if f["params"] else "()") for f in functions]
+    if api_calls:
+        result["api_calls"] = api_calls
+    return result
+
+
+def _ts_parse_params(raw: str) -> list[str]:
+    """Split a TS param string into individual param names (with types)."""
+    params = []
+    depth = 0
+    current = ""
+    for ch in raw:
+        if ch in "({[<":
+            depth += 1
+            current += ch
+        elif ch in ")}]>":
+            depth -= 1
+            current += ch
+        elif ch == "," and depth == 0:
+            p = current.strip()
+            if p:
+                params.append(p)
+            current = ""
+        else:
+            current += ch
+    if current.strip():
+        params.append(current.strip())
+    return params
+
+
+# ── File walker ───────────────────────────────────────────────────────────────
+
+ANALYZABLE = {".py", ".ts", ".tsx"}
+
+def build_map(start_path=".") -> dict:
+    start = Path(start_path).resolve()
+    files = {}
+
+    for root, dirs, filenames in os.walk(start):
+        # Prune excluded dirs in-place
+        dirs[:] = [
+            d for d in sorted(dirs)
+            if d not in EXCLUDE_DIRS and not d.startswith(".")
+        ]
+        for fname in sorted(filenames):
+            p = Path(root) / fname
+            if p.name in EXCLUDE_DIRS or p.suffix in EXCLUDE_SUFFIXES:
+                continue
+            rel = str(p.relative_to(start))
+
+            if p.suffix == ".py":
+                info = analyze_python(p)
+            elif p.suffix in {".ts", ".tsx"}:
+                info = analyze_typescript(p)
+            else:
+                info = {}
+
+            if info:
+                files[rel] = info
+
+    return {"files": files}
+
 
 if __name__ == "__main__":
-    scan()
-    write()
+    data = build_map()
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    print(f"Wrote {OUTPUT_FILE} ({len(data['files'])} files)")
