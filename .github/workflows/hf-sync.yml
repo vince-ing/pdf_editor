@@ -3,19 +3,37 @@ name: Sync to Hugging Face Space
 on:
   push:
     branches:
-      - port    # Now listening to your active branch!
+      - port
 
 jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          lfs: true
-          
-      - name: Push to Hugging Face
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Snapshot and Push to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git push --force https://vince-ing:$HF_TOKEN@huggingface.co/spaces/vince-ing/pdf-editor-backend HEAD:main
+          # 1. Create a clean temporary directory
+          mkdir deploy_snapshot
+          
+          # 2. Copy ONLY the files Hugging Face needs (ignores all history, workspace, and frontend)
+          cp -r engine/ deploy_snapshot/
+          cp requirements.txt deploy_snapshot/
+          cp Dockerfile deploy_snapshot/
+          
+          # 3. Enter the clean directory and start a fresh Git repository
+          cd deploy_snapshot
+          git init
+          git checkout -b main
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # 4. Commit this clean snapshot
+          git add .
+          git commit -m "Clean snapshot deployment from GitHub Actions"
+          
+          # 5. Force push the clean snapshot to Hugging Face
+          git push --force https://vince-ing:$HF_TOKEN@huggingface.co/spaces/vince-ing/pdf-editor-backend main:main
