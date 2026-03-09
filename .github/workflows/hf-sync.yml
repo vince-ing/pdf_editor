@@ -19,7 +19,7 @@ jobs:
           # 1. Create a clean temporary directory
           mkdir deploy_snapshot
           
-          # 2. Copy ONLY the files Hugging Face needs (ignores all history, workspace, and frontend)
+          # 2. Copy ONLY the files Hugging Face needs
           cp -r engine/ deploy_snapshot/
           cp requirements.txt deploy_snapshot/
           cp Dockerfile deploy_snapshot/
@@ -31,9 +31,22 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # 4. Commit this clean snapshot
+          # 4. Generate the Hugging Face configuration README
+          cat <<EOF > README.md
+          ---
+          title: Pdf Editor Backend
+          emoji: 🐳
+          colorFrom: blue
+          colorTo: green
+          sdk: docker
+          app_file: Dockerfile
+          pinned: false
+          ---
+          EOF
+          
+          # 5. Commit this clean snapshot
           git add .
           git commit -m "Clean snapshot deployment from GitHub Actions"
           
-          # 5. Force push the clean snapshot to Hugging Face
+          # 6. Force push the clean snapshot to Hugging Face
           git push --force https://vince-ing:$HF_TOKEN@huggingface.co/spaces/vince-ing/pdf-editor-backend main:main
