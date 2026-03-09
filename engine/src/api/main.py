@@ -22,7 +22,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173", 
         "http://127.0.0.1:5173",
-        "https://pdf-editor-web.vercel.app", # Replace this string with your actual Vercel URL once generated
+        "https://pdfeditor-h8c5dzjdl-vince-ings-projects.vercel.app/", # Replace this string with your actual Vercel URL once generated
     ],
     allow_credentials=True,
     allow_methods=["*"],

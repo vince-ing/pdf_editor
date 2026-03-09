@@ -203,12 +203,15 @@ export function useEditorState() {
   // ── Export ──────────────────────────────────────────────────────────────────
 
   const handleExportPdf = useCallback(async () => {
-    if (!documentState || !activeTabId) return;
-    try {
-      const res = await fetch('http://localhost:8000/api/document/download', {
-        headers: { 'X-Session-Id': activeTabId },
-      });
-      if (!res.ok) throw new Error(await res.text());
+  if (!documentState || !activeTabId) return;
+  try {
+    // Determine base URL dynamically
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+    
+    const res = await fetch(`${apiBase}/document/download`, {
+      headers: { 'X-Session-Id': activeTabId },
+    });
+    if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = Object.assign(document.createElement('a'), { href: url, download: `edited_${documentState.file_name}` });
