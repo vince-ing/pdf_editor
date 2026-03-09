@@ -1,5 +1,5 @@
-// frontend/src/hooks/useDragSelection.js
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { highlightTool, redactTool, selectTool, cropTool, underlineTool } from '../core/tools/DragTool';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -33,9 +33,8 @@ function buildLineRects(chars) {
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export const useDragSelection = ({
-    overlayRef,
+    pageId,
     pageChars,
-    scale,
     activeTool,
     metadata,
     onAction
@@ -50,7 +49,6 @@ export const useDragSelection = ({
     const startPos = useRef(null);
     const startIdx = useRef(-1);
 
-    // Keep onAction fresh without triggering dependency changes in mouse handlers
     const onActionRef = useRef(onAction);
     useEffect(() => { onActionRef.current = onAction; }, [onAction]);
 
@@ -60,7 +58,6 @@ export const useDragSelection = ({
         bumpSel();
     }, [bumpSel]);
 
-    // Clear stale selection when tool changes
     useEffect(() => {
         if (activeTool !== 'select') {
             clearSelection();
@@ -78,97 +75,109 @@ export const useDragSelection = ({
         return best;
     }, [pageChars]);
 
-    const toPdf = useCallback((e) => {
-        if (!overlayRef.current) return null;
-        const r = overlayRef.current.getBoundingClientRect();
-        return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
-    }, [scale, overlayRef]);
-
-    const onMouseDown = useCallback((e) => {
-        e.preventDefault();
-        const pt = toPdf(e);
-        if (!pt) return;
-        isDragging.current = true;
-        wasDragging.current = false;
-        startPos.current = pt;
-        startIdx.current = nearestCharIdx(pt);
-        liveRectsRef.current = [];
-        bumpSel();
-    }, [toPdf, nearestCharIdx, bumpSel]);
-
-    const onMouseMove = useCallback((e) => {
-        if (!isDragging.current || !startPos.current) return;
-        const cur = toPdf(e);
-        if (!cur) return;
-
-        const dx = Math.abs(cur.x - startPos.current.x);
-        const dy = Math.abs(cur.y - startPos.current.y);
-        if (dx < 3 && dy < 3) return;
-
-        wasDragging.current = true;
-
-        if (activeTool === 'crop') {
-            const W = metadata?.width || 612;
-            const H = metadata?.height || 792;
-            liveRectsRef.current = [{
-                x: Math.max(0, Math.min(startPos.current.x, cur.x)),
-                y: Math.max(0, Math.min(startPos.current.y, cur.y)),
-                width: Math.min(Math.abs(cur.x - startPos.current.x), W),
-                height: Math.min(Math.abs(cur.y - startPos.current.y), H),
-            }];
-            bumpSel();
-            return;
+    // Map tool names to the tool instances so we can listen to the right one
+    const getActiveToolInstance = useCallback(() => {
+        switch(activeTool) {
+            case 'highlight': return highlightTool;
+            case 'redact': return redactTool;
+            case 'select': return selectTool;
+            case 'crop': return cropTool;
+            case 'underline': return underlineTool;
+            default: return null;
         }
+    }, [activeTool]);
 
-        if (startIdx.current !== -1 && pageChars.length > 0) {
-            const endIdx = nearestCharIdx(cur);
-            if (endIdx !== -1) {
-                const lo = Math.min(startIdx.current, endIdx);
-                const hi = Math.max(startIdx.current, endIdx);
-                liveRectsRef.current = buildLineRects(pageChars.slice(lo, hi + 1));
+    useEffect(() => {
+        const tool = getActiveToolInstance();
+        if (!tool) return;
+
+        const onDown = (ctx) => {
+            if (ctx.pageId !== pageId || ctx.originalEvent.button !== 0) return;
+            
+            // Clear selections on normal click if using select tool
+            if (activeTool === 'select' && committedRectsRef.current.length > 0) {
+                clearSelection();
+            }
+
+            isDragging.current = true;
+            wasDragging.current = false;
+            startPos.current = { x: ctx.x, y: ctx.y };
+            startIdx.current = nearestCharIdx(startPos.current);
+            liveRectsRef.current = [];
+            bumpSel();
+        };
+
+        const onMove = (ctx) => {
+            if (!isDragging.current || !startPos.current || ctx.pageId !== pageId) return;
+            
+            const dx = Math.abs(ctx.x - startPos.current.x);
+            const dy = Math.abs(ctx.y - startPos.current.y);
+            if (dx < 3 && dy < 3) return;
+
+            wasDragging.current = true;
+
+            if (activeTool === 'crop') {
+                const W = metadata?.width || 612;
+                const H = metadata?.height || 792;
+                liveRectsRef.current = [{
+                    x: Math.max(0, Math.min(startPos.current.x, ctx.x)),
+                    y: Math.max(0, Math.min(startPos.current.y, ctx.y)),
+                    width: Math.min(Math.abs(ctx.x - startPos.current.x), W),
+                    height: Math.min(Math.abs(ctx.y - startPos.current.y), H),
+                }];
                 bumpSel();
                 return;
             }
-        }
-        liveRectsRef.current = [];
-        bumpSel();
-    }, [toPdf, nearestCharIdx, pageChars, bumpSel, activeTool, metadata]);
 
-    const onMouseUp = useCallback((e) => {
-        if (!isDragging.current) return;
-        isDragging.current = false;
-
-        const rects = liveRectsRef.current;
-        const r = rects[0];
-
-        if (!r || (r.width < 4 && r.height < 4)) {
+            if (startIdx.current !== -1 && pageChars.length > 0) {
+                const endIdx = nearestCharIdx({ x: ctx.x, y: ctx.y });
+                if (endIdx !== -1) {
+                    const lo = Math.min(startIdx.current, endIdx);
+                    const hi = Math.max(startIdx.current, endIdx);
+                    liveRectsRef.current = buildLineRects(pageChars.slice(lo, hi + 1));
+                    bumpSel();
+                    return;
+                }
+            }
             liveRectsRef.current = [];
             bumpSel();
-            return;
-        }
+        };
 
-        committedRectsRef.current = rects;
-        liveRectsRef.current = [];
-        bumpSel();
+        const onUp = (ctx) => {
+            if (!isDragging.current || ctx.pageId !== pageId) return;
+            isDragging.current = false;
 
-        if (onActionRef.current) {
-            onActionRef.current(rects);
-        }
-    }, [bumpSel]);
+            const rects = liveRectsRef.current;
+            const r = rects[0];
 
-    const onMouseLeave = useCallback((e) => {
-        if (isDragging.current) onMouseUp(e);
-    }, [onMouseUp]);
+            if (!r || (r.width < 4 && r.height < 4)) {
+                liveRectsRef.current = [];
+                bumpSel();
+                return;
+            }
 
-    const onClick = useCallback(() => {
-        if (wasDragging.current) {
-            wasDragging.current = false;
-            return;
-        }
-        if (activeTool === 'select' && committedRectsRef.current.length > 0) {
-            clearSelection();
-        }
-    }, [activeTool, clearSelection]);
+            committedRectsRef.current = rects;
+            liveRectsRef.current = [];
+            bumpSel();
+
+            if (onActionRef.current) {
+                onActionRef.current(rects);
+            }
+        };
+
+        const onLeave = (ctx) => {
+            if (ctx.pageId === pageId) onUp(ctx);
+        };
+
+        const unsubDown = tool.onDown(onDown);
+        const unsubMove = tool.onMove(onMove);
+        const unsubUp = tool.onUp(onUp);
+        const unsubLeave = tool.onLeave(onLeave);
+
+        return () => {
+            unsubDown(); unsubMove(); unsubUp(); unsubLeave();
+        };
+    }, [activeTool, pageId, getActiveToolInstance, nearestCharIdx, metadata, pageChars, clearSelection, bumpSel]);
 
     return {
         liveRects: liveRectsRef.current,
@@ -177,13 +186,6 @@ export const useDragSelection = ({
         setCommittedRects: (rects) => {
             committedRectsRef.current = rects;
             bumpSel();
-        },
-        handlers: {
-            onMouseDown,
-            onMouseMove,
-            onMouseUp,
-            onMouseLeave,
-            onClick
         }
     };
 };

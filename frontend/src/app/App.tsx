@@ -18,6 +18,8 @@ import { Canvas }      from '../components/canvas/Canvas';
 
 import { toolManager } from '../core/tools/ToolManager';
 import type { ToolId } from '../constants/tools';
+import '../core/tools/DragTool';
+import '../core/tools/PanTool';
 import type { SidebarView } from '../components/layout/LeftSidebar';
 import type { FileTab } from '../components/layout/TopBar';
 

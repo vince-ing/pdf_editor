@@ -49,7 +49,6 @@ export function PageRenderer({
   pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,
 }: PageRendererProps) {
-  const overlayRef  = useRef<HTMLDivElement>(null);
   const clearSelRef = useRef<(() => void) | null>(null);
   const toastTimer  = useRef<ReturnType<typeof setTimeout>>();
   const busyRef     = useRef(false);
@@ -152,7 +151,14 @@ export function PageRenderer({
   }, [activeTool, pageNode.id, pageChars, toast, onAnnotationAdded]);
 
   const isDragTool = ['highlight', 'redact', 'select', 'crop', 'underline'].includes(activeTool);
-  const { liveRects, committedRects, clearSelection, handlers } = useDragSelection({ overlayRef, pageChars, scale, activeTool, metadata: pageNode.metadata, onAction: handleAction });
+  const { liveRects, committedRects, clearSelection } = useDragSelection({ 
+    pageId: pageNode.id, 
+    pageChars, 
+    activeTool, 
+    metadata: pageNode.metadata, 
+    onAction: handleAction 
+  });
+  
   useEffect(() => { clearSelRef.current = clearSelection; }, [clearSelection]);
 
   const displayRects = liveRects.length > 0 ? liveRects : committedRects;
@@ -221,29 +227,14 @@ export function PageRenderer({
           </div>
         )}
 
-        <div
-          ref={overlayRef}
-          className="absolute inset-0 z-10"
-          style={{ cursor: CURSORS[activeTool] ?? 'default', userSelect: 'none' }}
-          onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => {
-            if (transientPos) justCommittedRef.current = true;
-            if (activeNodeBlurRef.current) activeNodeBlurRef.current();
-            if (isDragTool) handlers.onMouseDown?.(e);
-          }}
-          onClick={handlers.onClick}
-          onMouseMove={isDragTool ? handlers.onMouseMove : undefined}
-          onMouseUp={isDragTool ? handlers.onMouseUp : undefined}
-          onMouseLeave={isDragTool ? handlers.onMouseLeave : undefined}
-        >
-          {displayRects.map((rect, i) => (
-            <div key={i} className="absolute pointer-events-none" style={{
-              left: rect.x * scale, top: rect.y * scale,
-              width: rect.width * scale, height: rect.height * scale,
-              background: SEL_COLOR[activeTool] ?? 'rgba(74,144,226,0.2)',
-              border: activeTool === 'crop' ? '2px dashed #f97316' : 'none', borderRadius: 1,
-            }} />
-          ))}
-        </div>
+        {displayRects.map((rect, i) => (
+          <div key={i} className="absolute pointer-events-none z-10" style={{
+            left: rect.x * scale, top: rect.y * scale,
+            width: rect.width * scale, height: rect.height * scale,
+            background: SEL_COLOR[activeTool] ?? 'rgba(74,144,226,0.2)',
+            border: activeTool === 'crop' ? '2px dashed #f97316' : 'none', borderRadius: 1,
+          }} />
+        ))}
 
         <InteractionLayer 
           scale={scale} 

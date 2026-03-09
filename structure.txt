@@ -76,6 +76,7 @@ pdf_editor
     │   ├── core
     │   │   └── tools
     │   │       ├── BaseTool.ts
+    │   │       ├── DragTool.ts
     │   │       ├── PanTool.ts
     │   │       ├── SelectTool.ts
     │   │       ├── TextTool.ts
