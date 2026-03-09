@@ -1,5 +1,5 @@
+// frontend/src/hooks/useDragSelection.js
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { TOOLS } from '../tools';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ export const useDragSelection = ({
 
     // Clear stale selection when tool changes
     useEffect(() => {
-        if (activeTool !== TOOLS.SELECT) {
+        if (activeTool !== 'select') {
             clearSelection();
         }
     }, [activeTool, clearSelection]);
@@ -107,7 +107,7 @@ export const useDragSelection = ({
 
         wasDragging.current = true;
 
-        if (activeTool === TOOLS.CROP) {
+        if (activeTool === 'crop') {
             const W = metadata?.width || 612;
             const H = metadata?.height || 792;
             liveRectsRef.current = [{
@@ -165,7 +165,7 @@ export const useDragSelection = ({
             wasDragging.current = false;
             return;
         }
-        if (activeTool === TOOLS.SELECT && committedRectsRef.current.length > 0) {
+        if (activeTool === 'select' && committedRectsRef.current.length > 0) {
             clearSelection();
         }
     }, [activeTool, clearSelection]);

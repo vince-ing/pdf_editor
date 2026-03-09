@@ -1,5 +1,6 @@
 // frontend/src/hooks/useTts.js
 import { useState, useRef, useCallback } from 'react';
+import { engineApi } from '../api/client';
 
 const API = 'http://localhost:8000/api/plugins/tts';
 
@@ -7,21 +8,6 @@ const API = 'http://localhost:8000/api/plugins/tts';
  * useTts — manages all TTS state.
  *
  * Mirrors TtsController from the desktop app.
- *
- * The backend TtsService drives its own playback pipeline and fires callbacks
- * internally, so the frontend just needs to:
- *   1. POST /play   → triggers generation + playback in the engine
- *   2. POST /stop   → stops engine, clears bar
- *
- * Since the backend is a fire-and-forget pipeline (no WebSocket here), we
- * transition from 'loading' → 'playing' via a short poll after /play is called,
- * checking whether the engine has started audio output.  This keeps the
- * frontend simple without requiring a WebSocket.
- *
- * Phase transitions:
- *   idle → loading  (after /play called, engine is generating chunks)
- *   loading → playing  (after first audio chunk begins, detected via poll)
- *   playing → idle  (after /stop called or playback ends naturally)
  */
 export const useTts = () => {
     const [visible,  setVisible]  = useState(false);
@@ -43,12 +29,7 @@ export const useTts = () => {
 
     /**
      * Start a poll that transitions phase from 'loading' → 'playing' after
-     * a short delay. Since the backend starts playing almost immediately for
-     * cached/warm models, 1.5s is a safe minimum; for cold starts it may take
-     * longer, but the loading bar will still show during that time.
-     *
-     * A smarter approach would be a WebSocket, but this matches the app's
-     * current architecture (pure REST).
+     * a short delay.
      */
     const _startPlaybackTransitionPoll = useCallback(() => {
         _clearPoll();
@@ -79,11 +60,7 @@ export const useTts = () => {
         setVisible(true);
 
         try {
-            await fetch(`${API}/play`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text.trim(), speed }),
-            });
+            await engineApi.ttsPlay(text.trim(), speed);
             _startPlaybackTransitionPoll();
         } catch (err) {
             console.error('[useTts] speak error:', err);
@@ -96,7 +73,7 @@ export const useTts = () => {
     const stop = useCallback(async () => {
         _clearPoll();
         try {
-            await fetch(`${API}/stop`, { method: 'POST' });
+            await engineApi.ttsStop();
         } catch (err) {
             console.error('[useTts] stop error:', err);
         }
@@ -107,6 +84,7 @@ export const useTts = () => {
 
     const pauseResume = useCallback(async () => {
         try {
+            // Note: Keeping native fetch here since ttsPause isn't defined in client.ts yet
             const res = await fetch(`${API}/pause`, { method: 'POST' });
             const data = await res.json();
             // Use the authoritative paused state from the backend

@@ -1,4 +1,6 @@
+// frontend/src/hooks/usePageChars.js
 import { useState, useEffect } from 'react';
+import { engineApi } from '../api/client';
 
 export const usePageChars = ({ pageNodeId, localRotation, metadata }) => {
     const [rawChars, setRawChars] = useState([]);
@@ -9,11 +11,10 @@ export const usePageChars = ({ pageNodeId, localRotation, metadata }) => {
         let alive = true;
         if (!pageNodeId) return;
 
-        fetch(`http://localhost:8000/api/pages/${pageNodeId}/chars`)
-            .then(r => r.json())
-            .then(data => {
-                if (!alive || data.status !== 'success') return;
-                setRawChars(data.chars || []);
+        engineApi.getPageChars(pageNodeId)
+            .then(chars => {
+                if (!alive) return;
+                setRawChars(chars || []);
             })
             .catch(err => console.error('[usePageChars] fetch error:', err));
             

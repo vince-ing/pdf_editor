@@ -1,10 +1,10 @@
 // Canvas.tsx — PDF document area. bg-[#353a40], pages centered, annotations overlaid.
 
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { engineApi } from "../api/client";
-import { usePdfCanvas } from '../hooks/usePdfCanvas';
-import { usePageChars } from '../hooks/usePageChars';
-import { useDragSelection } from '../hooks/useDragSelection';
+import { engineApi } from "../../api/client";
+import { usePdfCanvas } from '../../hooks/usePdfCanvas';
+import { usePageChars } from '../../hooks/usePageChars';
+import { useDragSelection } from '../../hooks/useDragSelection';
 import * as pdfjsLib from 'pdfjs-dist';
 
 type ToolId = import('./Toolbar').ToolId;

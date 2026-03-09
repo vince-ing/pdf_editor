@@ -1,3 +1,4 @@
+// frontend/src/hooks/usePdfCanvas.js
 import { useEffect, useRef, useState } from 'react';
 
 export const usePdfCanvas = ({ pdfDoc, pageNode, pageIndex, scale, localRotation }) => {
@@ -18,7 +19,7 @@ export const usePdfCanvas = ({ pdfDoc, pageNode, pageIndex, scale, localRotation
         const renderPage = async () => {
             try {
                 // PDF.js uses 1-based indexing
-                const pageNum = (pageNode.page_number ?? pageIndex) + 1;
+                const pageNum = (pageNode?.page_number ?? pageIndex) + 1;
                 if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
                 
                 const page = await pdfDoc.getPage(pageNum);
