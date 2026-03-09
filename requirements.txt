@@ -7,3 +7,4 @@ soundfile
 sounddevice
 numpy
 pymupdf
+pytesseract
