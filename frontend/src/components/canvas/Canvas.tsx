@@ -315,13 +315,14 @@ interface RichTextEditorProps {
   onCommit:      (runs: TextRun[], plainText: string) => void;
   onCancel:      () => void;
   onPropsChange?:(p: TextProps) => void; // reflect selection style back to panel
+  blurRef?:      React.MutableRefObject<(() => void) | null>; // imperative blur handle
 }
 
 // ID used to identify the right panel — blur is suppressed when focus moves there
 const RIGHT_PANEL_ID = 'text-props-panel';
 
 function RichTextEditor({
-  initialHtml, scale, textProps, isTransient, onCommit, onCancel, onPropsChange,
+  initialHtml, scale, textProps, isTransient, onCommit, onCancel, onPropsChange, blurRef,
 }: RichTextEditorProps) {
   const editorRef     = useRef<HTMLDivElement>(null);
   // Keep a live ref to textProps so event handlers always see current values
@@ -394,7 +395,16 @@ function RichTextEditor({
     else onCancel();
   }, [onCommit, onCancel]);
 
-  // Guard blur: if focus moved into the panel, refocus the editor instead of committing
+  // Expose blur imperatively so parent can trigger commit by blurring the editor.
+  // Set once on mount — editorRef.current is stable for the lifetime of this instance.
+  useEffect(() => {
+    if (blurRef) blurRef.current = () => editorRef.current?.blur();
+    return () => { if (blurRef) blurRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Guard blur: only suppress when focus moves into the right-panel (for style changes).
+  // All other blur events — including clicks on the canvas, toolbar, sidebar — should commit.
   const handleBlur = useCallback((e: React.FocusEvent) => {
     const relatedTarget = e.relatedTarget as HTMLElement | null;
     if (relatedTarget && document.getElementById(RIGHT_PANEL_ID)?.contains(relatedTarget)) {
@@ -654,9 +664,10 @@ interface TransientBoxProps {
   onPropsChange?: (p: TextProps) => void;
   onCommit: (runs: TextRun[], plain: string, x: number, y: number, w: number, h: number) => void;
   onCancel: () => void;
+  blurRef?: React.MutableRefObject<(() => void) | null>;
 }
 
-function TransientTextBox({ initialX, initialY, scale, textProps, onPropsChange, onCommit, onCancel }: TransientBoxProps) {
+function TransientTextBox({ initialX, initialY, scale, textProps, onPropsChange, onCommit, onCancel, blurRef }: TransientBoxProps) {
   const INIT_W = 160;
   const INIT_H = Math.ceil(textProps.fontSize * 1.2) + 2;
   const [geo, setGeo] = useState<GeoRect>({ x: initialX, y: initialY, w: INIT_W, h: INIT_H });
@@ -673,6 +684,10 @@ function TransientTextBox({ initialX, initialY, scale, textProps, onPropsChange,
   }, [geo.x, geo.y, scale]);
 
   const handleResize = useResizeDrag(scale, setGeo);
+
+  // Keep geo accessible inside commit callback via ref
+  const geoRef = useRef(geo);
+  useEffect(() => { geoRef.current = geo; }, [geo]);
 
   return (
     <div
@@ -692,7 +707,11 @@ function TransientTextBox({ initialX, initialY, scale, textProps, onPropsChange,
         textProps={textProps}
         isTransient
         onPropsChange={onPropsChange}
-        onCommit={(runs, plain) => onCommit(runs, plain, geo.x, geo.y, geo.w, geo.h)}
+        blurRef={blurRef}
+        onCommit={(runs, plain) => {
+          const g = geoRef.current;
+          onCommit(runs, plain, g.x, g.y, g.w, g.h);
+        }}
         onCancel={onCancel}
       />
       <ResizeHandles geo={geo} scale={scale} onResize={handleResize} />
@@ -704,13 +723,14 @@ function TransientTextBox({ initialX, initialY, scale, textProps, onPropsChange,
 // NodeOverlay — committed annotations
 // ══════════════════════════════════════════════════════════════════════════════
 
-function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange, onUpdate }: {
+function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange, onUpdate, onRegisterBlur }: {
   node:          AnnotationNode;
   scale:         number;
   activeTool?:   ToolId;
   textProps:     TextProps;
   onPropsChange?:(p: TextProps) => void;
   onUpdate?:     (id: string, updates: Partial<AnnotationNode & { runs: TextRun[] }>) => void;
+  onRegisterBlur?:(fn: (() => void) | null) => void;
 }) {
   const isTextTool = activeTool === 'select' || activeTool === 'addtext' || activeTool === 'edittext';
   const isEditable = node.node_type === 'text' && isTextTool;
@@ -719,6 +739,7 @@ function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange, onUpda
   const [isEditing, setEdit] = useState(false);
   const [editKey, setEditKey]= useState(0); // bump to force RichTextEditor remount
   const dragging             = useRef(false);
+  const nodeBlurRef          = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!dragging.current && node.bbox)
@@ -740,6 +761,26 @@ function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange, onUpda
   // Only run when edit state or editability changes, not on every textProps update
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditable]);
+
+  // Register our blur fn with the parent while editing so the overlay's
+  // onMouseDown can commit us when the user clicks outside this node.
+  useEffect(() => {
+    if (isEditing) {
+      onRegisterBlur?.(() => nodeBlurRef.current?.());
+    } else {
+      onRegisterBlur?.(null);
+    }
+    return () => { onRegisterBlur?.(null); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing]);
+
+  // If the user switches to a non-text tool while editing, commit.
+  useEffect(() => {
+    if (isEditing && !isEditable) {
+      nodeBlurRef.current?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool]);
 
   const startMove = useCallback((e: React.PointerEvent) => {
     if (!isEditable || isEditing) return;
@@ -823,6 +864,7 @@ function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange, onUpda
           textProps={textProps}
           isTransient={false}
           onPropsChange={onPropsChange}
+          blurRef={nodeBlurRef}
           onCommit={commitEdit}
           onCancel={() => setEdit(false)}
         />
@@ -859,6 +901,13 @@ function PageRenderer({
   const clearSelRef = useRef<(() => void) | null>(null);
   const toastTimer  = useRef<ReturnType<typeof setTimeout>>();
   const busyRef     = useRef(false);
+  // Suppresses the overlay onClick that fires on the same click that blurred the editor
+  const justCommittedRef    = useRef(false);
+  // Imperative handle to blur/commit the transient editor (e.g. on tool change)
+  const transientBlurRef    = useRef<(() => void) | null>(null);
+  // Shared blur handle — whichever NodeOverlay is currently being edited registers here,
+  // so the overlay's onMouseDown can commit it when the user clicks outside the node.
+  const activeNodeBlurRef   = useRef<(() => void) | null>(null);
 
   const [annotations,    setAnnotations]   = useState<AnnotationNode[]>(pageNode.children ?? []);
   const [hovered,        setHovered]       = useState(false);
@@ -870,6 +919,15 @@ function PageRenderer({
 
   useEffect(() => { setAnnotations(pageNode.children ?? []); }, [pageNode.children]);
   useEffect(() => { if (typeof pageNode.rotation === 'number') setLocalRotation(pageNode.rotation); }, [pageNode.rotation, pageNode.id]);
+
+  // When the user switches away from addtext while a transient box is open, blur it to commit.
+  useEffect(() => {
+    if (activeTool !== 'addtext' && transientPos) {
+      transientBlurRef.current?.();
+    }
+  // We only want to react to tool changes, not transientPos changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool]);
 
   const { canvasRef, fullDimensions } = usePdfCanvas({ pdfDoc, pageNode, pageIndex, scale, localRotation });
   const { pageChars } = usePageChars({ pageNodeId: pageNode.id, localRotation, metadata: pageNode.metadata });
@@ -950,6 +1008,8 @@ function PageRenderer({
 
   const handleTextCommit = useCallback(async (runs: TextRun[], plain: string, x: number, y: number, w: number, h: number) => {
     setTransientPos(null);
+    // Suppress the overlay onClick that fires on the same pointer event that caused the blur
+    justCommittedRef.current = true;
     try {
       const res = await engineApi.addTextAnnotation(
         pageNode.id, plain, x, y, w, h,
@@ -1006,12 +1066,29 @@ function PageRenderer({
           ref={overlayRef}
           className="absolute inset-0 z-10"
           style={{ cursor: CURSORS[activeTool] ?? 'default', userSelect: 'none' }}
+          onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => {
+            // If a transient box is open, this mousedown will cause it to blur+commit.
+            // Pre-emptively set the flag so the onClick that follows doesn't open a new box.
+            if (transientPos) {
+              justCommittedRef.current = true;
+            }
+            // If a node is being edited and the user clicks on the bare canvas
+            // (not on the editor itself — that stops propagation), commit the edit.
+            if (activeNodeBlurRef.current) {
+              activeNodeBlurRef.current();
+            }
+            if (isDragTool) handlers.onMouseDown?.(e);
+          }}
           onClick={activeTool === 'addtext' ? (e) => {
+            // If a commit just happened on this same click, skip opening a new box
+            if (justCommittedRef.current) {
+              justCommittedRef.current = false;
+              return;
+            }
             if (transientPos || !overlayRef.current) return;
             const r = overlayRef.current.getBoundingClientRect();
             setTransientPos({ x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale });
           } : handlers.onClick}
-          onMouseDown={isDragTool ? handlers.onMouseDown : undefined}
           onMouseMove={isDragTool ? handlers.onMouseMove : undefined}
           onMouseUp={isDragTool ? handlers.onMouseUp : undefined}
           onMouseLeave={isDragTool ? handlers.onMouseLeave : undefined}
@@ -1032,6 +1109,7 @@ function PageRenderer({
             activeTool={activeTool} textProps={textProps}
             onPropsChange={onTextPropsChange}
             onUpdate={handleNodeUpdate}
+            onRegisterBlur={fn => { activeNodeBlurRef.current = fn; }}
           />
         ))}
 
@@ -1040,6 +1118,7 @@ function PageRenderer({
             initialX={transientPos.x} initialY={transientPos.y}
             scale={scale} textProps={textProps}
             onPropsChange={onTextPropsChange}
+            blurRef={transientBlurRef}
             onCommit={handleTextCommit}
             onCancel={() => setTransientPos(null)}
           />
