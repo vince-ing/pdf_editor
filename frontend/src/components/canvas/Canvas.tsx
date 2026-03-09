@@ -372,14 +372,6 @@ function RichTextEditor({
       editorRef.current.contains(sel.anchorNode);
     const hasSelection = rangeToUse || liveNonCollapsed;
 
-      changes,
-      hasSavedRange: !!rangeToUse,
-      savedRangeText: rangeToUse?.toString(),
-      liveNonCollapsed,
-      liveSelectionText: liveNonCollapsed ? sel?.toString() : null,
-      editorHTML: editorRef.current.innerHTML.slice(0, 200),
-    });
-
     if (hasSelection) {
       if (rangeToUse && sel) {
         sel.removeAllRanges();
@@ -388,6 +380,8 @@ function RichTextEditor({
       applyStyleToSelection(editorRef.current, changes, scale);
       savedRange.current = null;
     } else {
+      // No selection — queue for next typed character only.
+      // Do NOT update existing content in the editor.
       pendingStyle.current = { ...pendingStyle.current, ...changes };
     }
   }, [textProps, scale]);
@@ -435,8 +429,8 @@ function RichTextEditor({
   const makeStyledSpan = useCallback((): HTMLSpanElement => {
     const tp = textPropsRef.current;
     const ps = pendingStyle.current;
-    const bold       = ps.bold       ?? tp.isBold;
-    const italic     = ps.italic     ?? tp.isItalic;
+    const bold       = ps.bold       !== undefined ? ps.bold       : tp.isBold;
+    const italic     = ps.italic     !== undefined ? ps.italic     : tp.isItalic;
     const fontFamily = ps.fontFamily ?? tp.fontFamily;
     const fontSize   = ps.fontSize   ?? tp.fontSize;
     const color      = ps.color      ?? tp.color;
@@ -528,55 +522,71 @@ function RichTextEditor({
   // Wrap any bare text nodes in the editor into styled spans immediately after
   // the browser inserts them. This prevents defaultStyle CSS from cascading into
   // unstyled text and causing the "first word changes color" bug.
+  //
+  // IMPORTANT: Only wrap text nodes that are NOT already inside a [data-run] span.
+  // We check this by walking only direct children of the editor root and any
+  // non-[data-run] elements — we never recurse into [data-run] spans.
   const handleInput = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
     const sel = window.getSelection();
-    const cursorNode  = sel?.anchorNode ?? null;
+    const cursorNode   = sel?.anchorNode ?? null;
     const cursorOffset = sel?.anchorOffset ?? 0;
 
     let wrapped: Node | null = null;
 
-    // Walk all direct and nested children, find bare text nodes not in a [data-run]
+    // Walk nodes that are direct children of the editor (or nested in non-run
+    // elements like <div>/<p> inserted by the browser on Enter). Stop descent
+    // as soon as we reach a [data-run] span — never recurse into them.
     const walkAndWrap = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        if (!(node.parentElement?.closest('[data-run]'))) {
-          // This text node is bare — wrap it
-          const tp = textPropsRef.current;
-          const ps = pendingStyle.current;
-          const bold       = ps.bold       !== undefined ? ps.bold       : tp.isBold;
-          const italic     = ps.italic     !== undefined ? ps.italic     : tp.isItalic;
-          const fontFamily = ps.fontFamily ?? tp.fontFamily;
-          const fontSize   = ps.fontSize   ?? tp.fontSize;
-          const color      = ps.color      ?? tp.color;
-          const cssFont    = FONT_TO_CSS[fontFamily] ?? 'Helvetica, Arial, sans-serif';
-
-          const span = document.createElement('span');
-          span.dataset.run        = '1';
-          span.dataset.bold       = String(bold);
-          span.dataset.italic     = String(italic);
-          span.dataset.fontFamily = fontFamily;
-          span.dataset.fontSize   = String(fontSize);
-          span.dataset.color      = color;
-          Object.assign(span.style, {
-            fontFamily: cssFont,
-            fontWeight: bold   ? 'bold'   : 'normal',
-            fontStyle:  italic ? 'italic' : 'normal',
-            fontSize:   `${fontSize * scale}px`,
-            color,
-            lineHeight: '1.2',
-            whiteSpace: 'pre-wrap',
-          });
-
-          node.parentNode!.insertBefore(span, node);
-          span.appendChild(node);
-          if (node === cursorNode) wrapped = span;
-          pendingStyle.current = {};
+        // Only wrap if this text node's nearest [data-run] ancestor is NOT
+        // inside the editor — i.e. the text is truly bare.
+        const parentRun = (node.parentElement as HTMLElement | null)?.closest('[data-run]');
+        if (parentRun && editor.contains(parentRun)) {
+          // Already inside a styled span — leave it alone.
+          return;
         }
+
+        // Bare text node — wrap it with current style.
+        const tp = textPropsRef.current;
+        const ps = pendingStyle.current;
+        const bold       = ps.bold       !== undefined ? ps.bold       : tp.isBold;
+        const italic     = ps.italic     !== undefined ? ps.italic     : tp.isItalic;
+        const fontFamily = ps.fontFamily ?? tp.fontFamily;
+        const fontSize   = ps.fontSize   ?? tp.fontSize;
+        const color      = ps.color      ?? tp.color;
+        const cssFont    = FONT_TO_CSS[fontFamily] ?? 'Helvetica, Arial, sans-serif';
+
+        const span = document.createElement('span');
+        span.dataset.run        = '1';
+        span.dataset.bold       = String(bold);
+        span.dataset.italic     = String(italic);
+        span.dataset.fontFamily = fontFamily;
+        span.dataset.fontSize   = String(fontSize);
+        span.dataset.color      = color;
+        Object.assign(span.style, {
+          fontFamily: cssFont,
+          fontWeight: bold   ? 'bold'   : 'normal',
+          fontStyle:  italic ? 'italic' : 'normal',
+          fontSize:   `${fontSize * scale}px`,
+          color,
+          lineHeight: '1.2',
+          whiteSpace: 'pre-wrap',
+        });
+
+        node.parentNode!.insertBefore(span, node);
+        span.appendChild(node);
+        if (node === cursorNode) wrapped = span;
+        // Consume pendingStyle now that we've used it
+        pendingStyle.current = {};
         return;
       }
-      // Don't recurse into existing [data-run] spans
+
+      // Element node: stop recursion at [data-run] spans.
       if ((node as HTMLElement).dataset?.run) return;
+
+      // Recurse into non-run elements (e.g. <div>, <p> from browser Enter behaviour).
       node.childNodes.forEach(walkAndWrap);
     };
 
