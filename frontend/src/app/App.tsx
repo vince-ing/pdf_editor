@@ -1,8 +1,5 @@
-// app/App.tsx — Root layout. Owns all top-level state.
-// Layout: TopBar → [LeftSidebar | Toolbar+Canvas | RightPanel] → TtsBar → StatusBar
-//
-// Menu definitions live in constants/menuDefs.ts
-// Tool definitions live in constants/tools.ts
+// app/App.tsx — Root layout.
+// RightPanel now receives activeTool so it can auto-expand the right section.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -11,24 +8,19 @@ import { engineApi } from '../api/client';
 import { useTts } from '../hooks/useTts';
 import { buildMenuDefs } from '../constants/menuDefs';
 
-// Layout components
 import { TopBar }      from '../components/layout/TopBar';
 import { LeftSidebar } from '../components/layout/LeftSidebar';
 import { RightPanel }  from '../components/layout/RightPanel';
 import { TtsBar }      from '../components/layout/TtsBar';
 import { StatusBar }   from '../components/layout/StatusBar';
-
-// Toolbar + canvas
-import { Toolbar } from '../components/toolbar/Toolbar';
-import { Canvas }  from '../components/canvas/Canvas';
+import { Toolbar }     from '../components/toolbar/Toolbar';
+import { Canvas }      from '../components/canvas/Canvas';
 
 import type { ToolId } from '../constants/tools';
 import type { SidebarView } from '../components/layout/LeftSidebar';
 import type { FileTab } from '../components/layout/TopBar';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface PageNode {
   id: string;
@@ -46,28 +38,24 @@ interface DocumentState {
   children?: PageNode[];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function App() {
-  // ── State ──────────────────────────────────────────────────────────────────
-  const [documentState,  setDocumentState]  = useState<DocumentState | null>(null);
-  const [pdfDoc,         setPdfDoc]         = useState<pdfjsLib.PDFDocumentProxy | null>(null);
-  const [loading,        setLoading]        = useState(false);
-  const [scale,          setScale]          = useState(1.5);
-  const [activeTool,     setActiveTool]     = useState<ToolId>('hand');
-  const [activePage,     setActivePage]     = useState(0);
-  const [sidebarView,    setSidebarView]    = useState<SidebarView>('pages');
-  const [showThumbnails, setShowThumbnails] = useState(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [documentState,    setDocumentState]    = useState<DocumentState | null>(null);
+  const [pdfDoc,           setPdfDoc]           = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [loading,          setLoading]          = useState(false);
+  const [scale,            setScale]            = useState(1.5);
+  const [activeTool,       setActiveTool]       = useState<ToolId>('hand');
+  const [activePage,       setActivePage]       = useState(0);
+  const [sidebarView,      setSidebarView]      = useState<SidebarView>('pages');
+  const [showThumbnails,   setShowThumbnails]   = useState(true);
+  const [rightPanelOpen,   setRightPanelOpen]   = useState(true);
   const [lastSelectedText, setLastSelectedText] = useState('');
-  const [tabs,            setTabs]          = useState<FileTab[]>([]);
-  const [activeTabId,     setActiveTabId]   = useState<string | null>(null);
+  const [tabs,             setTabs]             = useState<FileTab[]>([]);
+  const [activeTabId,      setActiveTabId]      = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRefs     = useRef<(HTMLDivElement | null)[]>([]);
   const { tts, speak, stop: ttsStop, pauseResume, setSpeed } = useTts();
 
-  // ── Document state ─────────────────────────────────────────────────────────
   const refreshDocumentState = useCallback(async () => {
     try {
       const data = await engineApi.getDocumentState();
@@ -77,7 +65,6 @@ export default function App() {
 
   useEffect(() => { refreshDocumentState(); }, [refreshDocumentState]);
 
-  // ── Intersection observer for active page ──────────────────────────────────
   useEffect(() => {
     if (!documentState) return;
     const observers: IntersectionObserver[] = [];
@@ -93,7 +80,6 @@ export default function App() {
     return () => observers.forEach(o => o.disconnect());
   }, [documentState, pdfDoc]);
 
-  // ── File open ──────────────────────────────────────────────────────────────
   const openFileDialog = () => fileInputRef.current?.click();
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,7 +105,6 @@ export default function App() {
     }
   };
 
-  // ── Export ─────────────────────────────────────────────────────────────────
   const handleExportPdf = async () => {
     if (!documentState) return;
     try {
@@ -128,19 +113,16 @@ export default function App() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = Object.assign(document.createElement('a'), {
-        href: url,
-        download: `edited_${documentState.file_name}`,
+        href: url, download: `edited_${documentState.file_name}`,
       });
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: unknown) { alert('Export failed: ' + (err as Error).message); }
   };
 
-  // ── Undo / Redo ────────────────────────────────────────────────────────────
   const handleUndo = async () => { try { await engineApi.undo(); await refreshDocumentState(); } catch { alert('Nothing to undo!'); } };
   const handleRedo = async () => { try { await engineApi.redo(); await refreshDocumentState(); } catch { alert('Nothing to redo!'); } };
 
-  // ── TTS ────────────────────────────────────────────────────────────────────
   const handleReadPage = useCallback(async () => {
     if (!documentState || !pdfDoc) return alert('Open a document first.');
     const pageNode = documentState.children?.[activePage];
@@ -158,12 +140,10 @@ export default function App() {
     await speak(lastSelectedText.trim(), 'Reading selection');
   }, [lastSelectedText, speak]);
 
-  // ── Zoom ───────────────────────────────────────────────────────────────────
   const zoomIn    = () => setScale(s => Math.min(+(s + 0.25).toFixed(2), 4.0));
   const zoomOut   = () => setScale(s => Math.max(+(s - 0.25).toFixed(2), 0.25));
   const zoomReset = () => setScale(1.0);
 
-  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -178,26 +158,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   });
 
-  // ── Menu definitions (extracted to constants/menuDefs.ts) ─────────────────
   const menus = buildMenuDefs({
-    openFileDialog,
-    handleExportPdf,
-    handleUndo,
-    handleRedo,
-    handleReadPage,
-    handleReadSelection,
-    ttsStop,
-    setShowThumbnails,
-    setRightPanelOpen,
-    zoomIn,
-    zoomOut,
-    zoomReset,
-    documentState,
+    openFileDialog, handleExportPdf, handleUndo, handleRedo,
+    handleReadPage, handleReadSelection, ttsStop,
+    setShowThumbnails, setRightPanelOpen,
+    zoomIn, zoomOut, zoomReset, documentState,
   });
 
   const pageCount = documentState?.children?.length ?? 0;
 
-  // ── Loading screen ─────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-[#1e2327] gap-3">
@@ -210,7 +179,6 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-[#1e2327] text-white overflow-hidden">
 
-      {/* ── Top bar ── */}
       <TopBar
         tabs={tabs}
         activeTabId={activeTabId}
@@ -224,13 +192,13 @@ export default function App() {
           }
         }}
         onNewTab={openFileDialog}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
         menus={menus}
       />
 
-      {/* ── Main body ── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
-        {/* Left sidebar */}
         <LeftSidebar
           showThumbnails={showThumbnails}
           onToggleThumbnails={() => setShowThumbnails(v => !v)}
@@ -246,8 +214,7 @@ export default function App() {
           onDocumentChanged={refreshDocumentState}
         />
 
-        {/* Center: toolbar + canvas */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <Toolbar
             activeTool={activeTool}
             onToolChange={setActiveTool}
@@ -263,28 +230,29 @@ export default function App() {
             ttsActive={tts.visible}
             pageInfo={documentState ? { current: activePage + 1, total: pageCount } : null}
           />
-          <Canvas
-            pdfDoc={pdfDoc}
-            documentState={documentState}
-            activeTool={activeTool}
-            scale={scale}
-            onAnnotationAdded={refreshDocumentState}
-            onDocumentChanged={refreshDocumentState}
-            onTextSelected={setLastSelectedText}
-            pageRefs={pageRefs}
-          />
-        </div>
 
-        {/* Right panel */}
-        {rightPanelOpen && (
-          <RightPanel
-            documentState={documentState}
-            activePage={activePage}
-          />
-        )}
+          <div className="flex-1 flex overflow-hidden min-h-0">
+            <Canvas
+              pdfDoc={pdfDoc}
+              documentState={documentState}
+              activeTool={activeTool}
+              scale={scale}
+              onAnnotationAdded={refreshDocumentState}
+              onDocumentChanged={refreshDocumentState}
+              onTextSelected={setLastSelectedText}
+              pageRefs={pageRefs}
+            />
+            {rightPanelOpen && (
+              <RightPanel
+                documentState={documentState}
+                activePage={activePage}
+                activeTool={activeTool}
+              />
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* ── TTS bar ── */}
       <TtsBar
         visible={tts.visible}
         status={tts.status}
@@ -297,7 +265,6 @@ export default function App() {
         onSpeedChange={setSpeed}
       />
 
-      {/* ── Status bar ── */}
       <StatusBar
         activeTool={activeTool}
         scale={scale}
@@ -307,14 +274,8 @@ export default function App() {
         documentState={documentState}
       />
 
-      {/* Hidden file input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/pdf"
-        className="hidden"
-        onChange={handleFileUpload}
-      />
+      <input ref={fileInputRef} type="file" accept="application/pdf"
+        className="hidden" onChange={handleFileUpload} />
     </div>
   );
 }

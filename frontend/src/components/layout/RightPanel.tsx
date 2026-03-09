@@ -1,12 +1,21 @@
-// components/layout/RightPanel.tsx — Properties + comments side panel.
-// All icons: Lucide React. No emoji.
+// components/layout/RightPanel.tsx
+// Collapsed by default. Active tool auto-expands the relevant section.
+// Comments pinned at bottom. Everything else scrollable.
+//
+// Tool → section mapping:
+//   addtext, edittext          → Text Properties
+//   highlight, underline,
+//   stickynote, stamp, redact  → Appearance
+//   insert, delete, rotate,
+//   extract, crop              → Page Properties
+//   hand, select, zoom         → nothing (all collapsed)
 
 import {
-  ChevronDown, AlignLeft, AlignCenter, AlignRight,
-  MoreVertical, Sparkles, ChevronUp, Maximize2, Minimize2,
-  RotateCw, Crop,
+  ChevronDown, ChevronUp, AlignLeft, AlignCenter, AlignRight,
+  MoreVertical, Sparkles, RotateCw, Crop, Maximize2, Minimize2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import type { ToolId } from '../../constants/tools';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,7 +36,27 @@ interface DocumentState {
 interface RightPanelProps {
   documentState?: DocumentState | null;
   activePage?: number;
+  activeTool?: ToolId;
 }
+
+type SectionId = 'text' | 'page' | 'appearance';
+
+// ── Which section should auto-open for each tool ──────────────────────────────
+
+const TOOL_SECTION: Partial<Record<ToolId, SectionId>> = {
+  addtext:    'text',
+  edittext:   'text',
+  highlight:  'appearance',
+  underline:  'appearance',
+  stickynote: 'appearance',
+  stamp:      'appearance',
+  redact:     'appearance',
+  insert:     'page',
+  delete:     'page',
+  rotate:     'page',
+  extract:    'page',
+  crop:       'page',
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,42 +78,36 @@ const getAuthorColor = (a: string) => AUTHOR_COLORS[a] ?? 'bg-gray-500';
 // ── Section wrapper ───────────────────────────────────────────────────────────
 
 const Section = ({
-  title, children, collapsible = false, action,
+  title, isOpen, onToggle, children,
 }: {
   title: string;
+  isOpen: boolean;
+  onToggle: () => void;
   children: React.ReactNode;
-  collapsible?: boolean;
-  action?: React.ReactNode;
-}) => {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="border-b border-[#1e2327]">
-      <div
-        className={`px-4 py-3 flex items-center justify-between ${collapsible ? 'cursor-pointer select-none' : ''}`}
-        onClick={collapsible ? () => setOpen(o => !o) : undefined}
-      >
-        <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">{title}</h3>
-        {collapsible
-          ? open
-            ? <ChevronUp size={14} className="text-gray-500" />
-            : <ChevronDown size={14} className="text-gray-500" />
-          : action
-        }
+}) => (
+  <div className="border-b border-[#1e2327]">
+    <button
+      onClick={onToggle}
+      className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#2d3338]/40 transition-colors"
+    >
+      <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">{title}</h3>
+      {isOpen
+        ? <ChevronUp size={14} className="text-gray-500 flex-shrink-0" />
+        : <ChevronDown size={14} className="text-gray-500 flex-shrink-0" />
+      }
+    </button>
+    {isOpen && (
+      <div className="animate-fade-in">
+        {children}
       </div>
-      {open && children}
-    </div>
-  );
-};
+    )}
+  </div>
+);
 
 // ── Styled select ─────────────────────────────────────────────────────────────
 
-const StyledSelect = ({
-  value, onChange, options, label,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  label: string;
+const StyledSelect = ({ value, onChange, options, label }: {
+  value: string; onChange: (v: string) => void; options: string[]; label: string;
 }) => (
   <div>
     <label className="text-[11px] text-gray-500 mb-1.5 block">{label}</label>
@@ -101,8 +124,6 @@ const StyledSelect = ({
   </div>
 );
 
-// ── PropRow ───────────────────────────────────────────────────────────────────
-
 const PropRow = ({ label, value }: { label: string; value: string }) => (
   <div className="flex items-center justify-between gap-2 mb-1.5">
     <span className="text-[11px] text-gray-500 flex-shrink-0">{label}</span>
@@ -110,18 +131,114 @@ const PropRow = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
-// ── RightPanel ────────────────────────────────────────────────────────────────
+// ── Section content ───────────────────────────────────────────────────────────
 
-export function RightPanel({ documentState, activePage = 0 }: RightPanelProps) {
+const TextPropertiesContent = () => {
   const [font, setFont] = useState('Inter');
   const [fontWeight, setFontWeight] = useState('Semibold');
   const [fontSize, setFontSize] = useState('12pt');
   const [alignment, setAlignment] = useState<'left' | 'center' | 'right'>('left');
-  const [commentInput, setCommentInput] = useState('');
 
+  return (
+    <div className="px-4 pb-4 space-y-3">
+      <StyledSelect label="Font" value={font} onChange={setFont}
+        options={['Inter', 'DM Sans', 'Arial', 'Helvetica', 'Georgia', 'Times New Roman']} />
+      <StyledSelect label="Weight" value={fontWeight} onChange={setFontWeight}
+        options={['Regular', 'Medium', 'Semibold', 'Bold']} />
+      <div>
+        <label className="text-[11px] text-gray-500 mb-1.5 block">Size</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="text" value={fontSize} onChange={e => setFontSize(e.target.value)}
+            className="flex-1 bg-[#1e2327] text-white px-3 py-2 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-[#4a90e2]"
+          />
+          <button className="bg-[#1e2327] text-gray-500 p-2 rounded-md hover:text-white hover:bg-[#3d4449] transition-colors"><Maximize2 size={13} /></button>
+          <button className="bg-[#1e2327] text-gray-500 p-2 rounded-md hover:text-white hover:bg-[#3d4449] transition-colors"><Minimize2 size={13} /></button>
+        </div>
+      </div>
+      <div>
+        <label className="text-[11px] text-gray-500 mb-1.5 block">Alignment</label>
+        <div className="grid grid-cols-3 gap-1.5">
+          {([
+            { id: 'left',   Icon: AlignLeft   },
+            { id: 'center', Icon: AlignCenter  },
+            { id: 'right',  Icon: AlignRight   },
+          ] as const).map(({ id, Icon }) => (
+            <button key={id} onClick={() => setAlignment(id)}
+              className={`py-2 rounded-md flex items-center justify-center transition-colors
+                ${alignment === id ? 'bg-[#4a90e2] text-white' : 'bg-[#1e2327] text-gray-500 hover:text-white hover:bg-[#3d4449]'}`}>
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="text-[11px] text-gray-500 mb-1.5 block">Spacing</label>
+        <div className="grid grid-cols-2 gap-1.5">
+          <input defaultValue="12pt" className="bg-[#1e2327] text-white px-3 py-2 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-[#4a90e2]" />
+          <input defaultValue="0" className="bg-[#1e2327] text-white px-3 py-2 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-[#4a90e2]" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PagePropertiesContent = ({ documentState, activePage }: {
+  documentState?: DocumentState | null; activePage: number;
+}) => {
   const page = documentState?.children?.[activePage];
   const w = page?.metadata?.width;
   const h = page?.metadata?.height;
+  return (
+    <div className="px-4 pb-3">
+      <PropRow label="Number"    value={String(activePage + 1)} />
+      <PropRow label="Size"      value={w && h ? `${Math.round(w)} × ${Math.round(h)} pt` : '—'} />
+      <PropRow label="Rotation"  value={`${page?.rotation ?? 0}°`} />
+      <PropRow label="Document"  value={documentState?.file_name ?? 'None'} />
+      <PropRow label="Pages"     value={String(documentState?.children?.length ?? '—')} />
+      <PropRow label="File size" value={bytes(documentState?.file_size)} />
+      <div className="flex gap-1.5 mt-2">
+        <button className="flex-1 h-7 text-[11px] bg-[#1e2327] text-gray-500 hover:text-white hover:bg-[#3d4449] rounded-md transition-colors flex items-center justify-center gap-1.5">
+          <RotateCw size={12} /> Rotate
+        </button>
+        <button className="flex-1 h-7 text-[11px] bg-[#1e2327] text-gray-500 hover:text-white hover:bg-[#3d4449] rounded-md transition-colors flex items-center justify-center gap-1.5">
+          <Crop size={12} /> Crop
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const AppearanceContent = () => (
+  <div className="px-4 pb-3">
+    <label className="text-[11px] text-gray-500 mb-2 block">Highlight Color</label>
+    <div className="flex gap-2 mb-3 flex-wrap">
+      {['#f59e0b', '#4a90e2', '#22c55e', '#ef4444', '#a855f7', '#06b6d4'].map(c => (
+        <div key={c} title={c}
+          className="w-5 h-5 rounded cursor-pointer hover:ring-2 hover:ring-white/40 transition-all"
+          style={{ backgroundColor: c }} />
+      ))}
+    </div>
+    <label className="text-[11px] text-gray-500 mb-1.5 block">Opacity</label>
+    <input type="range" min={0.1} max={1} step={0.05} defaultValue={0.45}
+      className="w-full accent-[#4a90e2] cursor-pointer" />
+  </div>
+);
+
+// ── RightPanel ────────────────────────────────────────────────────────────────
+
+export function RightPanel({ documentState, activePage = 0, activeTool }: RightPanelProps) {
+  const [openSection, setOpenSection] = useState<SectionId | null>(null);
+  const [commentInput, setCommentInput] = useState('');
+
+  // Auto-expand the relevant section when tool changes
+  useEffect(() => {
+    const section = activeTool ? TOOL_SECTION[activeTool] ?? null : null;
+    setOpenSection(section);
+  }, [activeTool]);
+
+  const toggle = (id: SectionId) =>
+    setOpenSection(prev => prev === id ? null : id);
 
   const recentComments = [
     { id: 1, author: 'JD', time: '2 hours ago', text: 'Lorem ipsum dolor sit amet.' },
@@ -130,129 +247,38 @@ export function RightPanel({ documentState, activePage = 0 }: RightPanelProps) {
   ];
 
   return (
-    <div className="w-72 bg-[#25292d] border-l border-[#1e2327] flex flex-col flex-shrink-0 overflow-hidden">
+    <div className="w-64 bg-[#25292d] border-l border-[#1e2327] flex flex-col flex-shrink-0 overflow-hidden">
 
-      {/* ── Text Properties ── */}
-      <Section title="Text Properties" collapsible>
-        <div className="px-4 pb-4 space-y-3">
-          <StyledSelect label="Font" value={font} onChange={setFont}
-            options={['Inter', 'DM Sans', 'Arial', 'Helvetica', 'Georgia', 'Times New Roman']} />
-          <StyledSelect label="Weight" value={fontWeight} onChange={setFontWeight}
-            options={['Regular', 'Medium', 'Semibold', 'Bold']} />
+      {/* ── Scrollable properties area ── */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <Section title="Text Properties" isOpen={openSection === 'text'} onToggle={() => toggle('text')}>
+          <TextPropertiesContent />
+        </Section>
 
-          {/* Font size */}
-          <div>
-            <label className="text-[11px] text-gray-500 mb-1.5 block">Size</label>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
-                <input
-                  type="text"
-                  value={fontSize}
-                  onChange={e => setFontSize(e.target.value)}
-                  className="w-full bg-[#1e2327] text-white px-3 py-2 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-[#4a90e2] transition-all"
-                />
-              </div>
-              <button className="bg-[#1e2327] text-gray-500 p-2 rounded-md hover:text-white hover:bg-[#3d4449] transition-colors" title="Expand">
-                <Maximize2 size={13} />
-              </button>
-              <button className="bg-[#1e2327] text-gray-500 p-2 rounded-md hover:text-white hover:bg-[#3d4449] transition-colors" title="Shrink">
-                <Minimize2 size={13} />
-              </button>
-            </div>
-          </div>
+        <Section title="Page Properties" isOpen={openSection === 'page'} onToggle={() => toggle('page')}>
+          <PagePropertiesContent documentState={documentState} activePage={activePage} />
+        </Section>
 
-          {/* Alignment */}
-          <div>
-            <label className="text-[11px] text-gray-500 mb-1.5 block">Alignment</label>
-            <div className="grid grid-cols-3 gap-1.5">
-              {([
-                { id: 'left',   Icon: AlignLeft   },
-                { id: 'center', Icon: AlignCenter  },
-                { id: 'right',  Icon: AlignRight   },
-              ] as const).map(({ id, Icon }) => (
-                <button
-                  key={id}
-                  onClick={() => setAlignment(id)}
-                  className={`py-2 rounded-md flex items-center justify-center transition-colors
-                    ${alignment === id
-                      ? 'bg-[#4a90e2] text-white'
-                      : 'bg-[#1e2327] text-gray-500 hover:text-white hover:bg-[#3d4449]'
-                    }`}
-                >
-                  <Icon size={14} />
-                </button>
-              ))}
-            </div>
-          </div>
+        <Section title="Appearance" isOpen={openSection === 'appearance'} onToggle={() => toggle('appearance')}>
+          <AppearanceContent />
+        </Section>
+      </div>
 
-          {/* Spacing */}
-          <div>
-            <label className="text-[11px] text-gray-500 mb-1.5 block">Spacing</label>
-            <div className="grid grid-cols-2 gap-1.5">
-              <input defaultValue="12pt" className="bg-[#1e2327] text-white px-3 py-2 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-[#4a90e2]" />
-              <input defaultValue="0" className="bg-[#1e2327] text-white px-3 py-2 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-[#4a90e2]" />
-            </div>
-          </div>
-        </div>
-      </Section>
-
-      {/* ── Page Properties ── */}
-      <Section title="Page Properties" collapsible>
-        <div className="px-4 pb-3">
-          <PropRow label="Number"    value={String(activePage + 1)} />
-          <PropRow label="Size"      value={w && h ? `${Math.round(w)} × ${Math.round(h)} pt` : '—'} />
-          <PropRow label="Rotation"  value={`${page?.rotation ?? 0}°`} />
-          <PropRow label="Document"  value={documentState?.file_name ?? 'None'} />
-          <PropRow label="Pages"     value={String(documentState?.children?.length ?? '—')} />
-          <PropRow label="File size" value={bytes(documentState?.file_size)} />
-          <div className="flex gap-1.5 mt-2">
-            <button className="flex-1 h-7 text-[11px] bg-[#1e2327] text-gray-500 hover:text-white hover:bg-[#3d4449] rounded-md transition-colors flex items-center justify-center gap-1.5">
-              <RotateCw size={12} /> Rotate
-            </button>
-            <button className="flex-1 h-7 text-[11px] bg-[#1e2327] text-gray-500 hover:text-white hover:bg-[#3d4449] rounded-md transition-colors flex items-center justify-center gap-1.5">
-              <Crop size={12} /> Crop
-            </button>
-          </div>
-        </div>
-      </Section>
-
-      {/* ── Appearance ── */}
-      <Section title="Appearance" collapsible>
-        <div className="px-4 pb-3">
-          <label className="text-[11px] text-gray-500 mb-2 block">Highlight Color</label>
-          <div className="flex gap-2 mb-3 flex-wrap">
-            {['#f59e0b', '#4a90e2', '#22c55e', '#ef4444', '#a855f7', '#06b6d4'].map(c => (
-              <div
-                key={c}
-                title={c}
-                className="w-5 h-5 rounded cursor-pointer hover:ring-2 hover:ring-white/40 transition-all"
-                style={{ backgroundColor: c }}
-              />
-            ))}
-          </div>
-          <label className="text-[11px] text-gray-500 mb-1.5 block">Opacity</label>
-          <input
-            type="range" min={0.1} max={1} step={0.05} defaultValue={0.45}
-            className="w-full accent-[#4a90e2] cursor-pointer"
-          />
-        </div>
-      </Section>
-
-      {/* ── Recent Comments ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-4 py-3 flex items-center justify-between border-b border-[#1e2327] flex-shrink-0">
+      {/* ── Comments — pinned at bottom ── */}
+      <div className="flex flex-col border-t border-[#1e2327] flex-shrink-0" style={{ maxHeight: '45%' }}>
+        {/* Header */}
+        <div className="px-4 py-3 flex items-center justify-between flex-shrink-0">
           <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Comments</h3>
           <button className="text-gray-500 hover:text-white transition-colors">
             <MoreVertical size={14} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        {/* Comment list — scrollable within its zone */}
+        <div className="overflow-y-auto flex-1 min-h-0">
           {recentComments.map(comment => (
-            <div
-              key={comment.id}
-              className="px-4 py-3 border-b border-[#1e2327] hover:bg-[#2d3338] cursor-pointer transition-colors"
-            >
+            <div key={comment.id}
+              className="px-4 py-3 border-b border-[#1e2327] hover:bg-[#2d3338] cursor-pointer transition-colors">
               <div className="flex items-start gap-2">
                 <div className={`w-6 h-6 rounded-full ${getAuthorColor(comment.author)} flex items-center justify-center flex-shrink-0`}>
                   <span className="text-white text-[10px] font-bold">{comment.author}</span>
@@ -266,13 +292,11 @@ export function RightPanel({ documentState, activePage = 0 }: RightPanelProps) {
           ))}
         </div>
 
-        {/* Add comment */}
-        <div className="p-3 border-t border-[#1e2327] flex-shrink-0">
+        {/* Add comment input — always visible */}
+        <div className="p-3 flex-shrink-0">
           <div className="relative">
             <input
-              type="text"
-              value={commentInput}
-              onChange={e => setCommentInput(e.target.value)}
+              type="text" value={commentInput} onChange={e => setCommentInput(e.target.value)}
               placeholder="Add a comment…"
               className="w-full bg-[#1e2327] text-white placeholder-gray-600 px-3 py-2 pr-9 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-[#4a90e2] transition-all"
             />

@@ -1,12 +1,10 @@
-// components/toolbar/Toolbar.tsx — h-20 tool strip.
-// Imports tool definitions from constants/tools.ts (single source of truth).
-// No emoji — all icons are Lucide React components.
+// components/toolbar/Toolbar.tsx — Ribbon-style tabbed toolbar.
+// Active tool tab: text turns blue instead of showing a dot indicator.
 
 import { Undo2, Redo2, Volume2, Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { TOOL_DEFS, type ToolId } from '../../constants/tools';
 
-// Re-export ToolId for components that import it from Toolbar
 export type { ToolId };
 
 interface ToolbarProps {
@@ -25,25 +23,192 @@ interface ToolbarProps {
   pageInfo?: { current: number; total: number } | null;
 }
 
-// ── Small zoom button ─────────────────────────────────────────────────────────
+type TabId = 'view' | 'edit' | 'comment' | 'pages';
 
-const ZBtn = ({
-  children, onClick, disabled,
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'view',    label: 'View'    },
+  { id: 'edit',    label: 'Edit'    },
+  { id: 'comment', label: 'Comment' },
+  { id: 'pages',   label: 'Pages'   },
+];
+
+// ── Tall tool button ──────────────────────────────────────────────────────────
+
+const ToolBtn = ({
+  icon: Icon, label, isActive, onClick,
 }: {
-  children: React.ReactNode;
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  isActive: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    onClick={onClick}
+    title={label}
+    className={`flex flex-col items-center justify-center gap-1.5 px-4 rounded-lg transition-all duration-100 flex-shrink-0 h-full min-w-[60px]
+      ${isActive
+        ? 'bg-[#4a90e2] text-white shadow-sm'
+        : 'text-gray-300 hover:bg-[#3d4449] hover:text-white'
+      }`}
+  >
+    <Icon size={19} />
+    <span className={`text-[11px] font-normal leading-none whitespace-nowrap`}>{label}</span>
+  </button>
+);
+
+// ── Small stacked button ──────────────────────────────────────────────────────
+
+const SmallToolBtn = ({
+  icon: Icon, label, isActive, onClick, disabled,
+}: {
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  isActive: boolean;
   onClick: () => void;
   disabled?: boolean;
 }) => (
   <button
     onClick={onClick}
     disabled={disabled}
-    className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-[#2d3338] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+    title={label}
+    className={`flex items-center gap-2 px-3 py-[6px] rounded transition-all duration-100 w-full
+      ${disabled
+        ? 'opacity-30 cursor-not-allowed text-gray-500'
+        : isActive
+          ? 'bg-[#4a90e2] text-white'
+          : 'text-gray-300 hover:bg-[#3d4449] hover:text-white'
+      }`}
   >
-    {children}
+    <Icon size={14} />
+    <span className="text-[11px] font-normal leading-none whitespace-nowrap">{label}</span>
   </button>
 );
 
-// ── Toolbar ───────────────────────────────────────────────────────────────────
+// ── Vertical rule ─────────────────────────────────────────────────────────────
+
+const Rule = () => (
+  <div className="w-px bg-[#1e2327] mx-3 my-2 flex-shrink-0 self-stretch" />
+);
+
+// ── Pair column ───────────────────────────────────────────────────────────────
+
+const PairCol = ({ tools, activeTool, onToolChange }: {
+  tools: (typeof TOOL_DEFS[number])[];
+  activeTool: ToolId;
+  onToolChange: (id: ToolId) => void;
+}) => (
+  <div className="flex flex-col gap-0.5 justify-center h-full py-1.5 min-w-[110px]">
+    {tools.map(t => (
+      <SmallToolBtn
+        key={t.id}
+        icon={t.icon}
+        label={t.label}
+        isActive={activeTool === t.id}
+        onClick={() => onToolChange(t.id)}
+      />
+    ))}
+  </div>
+);
+
+const byId = (ids: ToolId[]) =>
+  ids.map(id => TOOL_DEFS.find(t => t.id === id)!).filter(Boolean);
+
+// ── Tab content ───────────────────────────────────────────────────────────────
+
+function ViewTab({ activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset }: {
+  activeTool: ToolId; onToolChange: (id: ToolId) => void;
+  scale: number; onZoomIn: () => void; onZoomOut: () => void; onZoomReset: () => void;
+}) {
+  return (
+    <>
+      {byId(['hand', 'select', 'zoom']).map(t => (
+        <ToolBtn key={t.id} icon={t.icon} label={t.label}
+          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+      ))}
+      <Rule />
+      <div className="flex items-center gap-0.5 bg-[#1e2327] rounded-lg px-1.5 self-center">
+        <button onClick={onZoomOut} disabled={scale <= 0.25}
+          className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-[#3d4449] hover:text-white disabled:opacity-30 transition-colors">
+          <Minus size={13} />
+        </button>
+        <button onClick={onZoomReset}
+          className="min-w-[46px] h-7 text-white text-[11px] font-semibold font-mono px-1 hover:bg-[#3d4449] rounded transition-colors">
+          {Math.round(scale * 100)}%
+        </button>
+        <button onClick={onZoomIn} disabled={scale >= 4.0}
+          className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-[#3d4449] hover:text-white disabled:opacity-30 transition-colors">
+          <Plus size={13} />
+        </button>
+      </div>
+    </>
+  );
+}
+
+function EditTab({ activeTool, onToolChange, onUndo, onRedo }: {
+  activeTool: ToolId; onToolChange: (id: ToolId) => void;
+  onUndo: () => void; onRedo: () => void;
+}) {
+  return (
+    <>
+      <div className="flex flex-col gap-0.5 justify-center h-full py-1.5 min-w-[90px]">
+        <SmallToolBtn icon={Undo2} label="Undo" isActive={false} onClick={onUndo} />
+        <SmallToolBtn icon={Redo2} label="Redo" isActive={false} onClick={onRedo} />
+      </div>
+      <Rule />
+      {byId(['addtext', 'edittext']).map(t => (
+        <ToolBtn key={t.id} icon={t.icon} label={t.label}
+          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+      ))}
+      <Rule />
+      <PairCol tools={byId(['addimage', 'link'])} activeTool={activeTool} onToolChange={onToolChange} />
+    </>
+  );
+}
+
+function CommentTab({ activeTool, onToolChange, onReadPage, onReadSelection, ttsActive, hasSelection }: {
+  activeTool: ToolId; onToolChange: (id: ToolId) => void;
+  onReadPage: () => void; onReadSelection: () => void;
+  ttsActive: boolean; hasSelection: boolean;
+}) {
+  return (
+    <>
+      {byId(['highlight', 'underline']).map(t => (
+        <ToolBtn key={t.id} icon={t.icon} label={t.label}
+          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+      ))}
+      <Rule />
+      <PairCol tools={byId(['stickynote', 'stamp'])} activeTool={activeTool} onToolChange={onToolChange} />
+      <ToolBtn icon={TOOL_DEFS.find(t => t.id === 'redact')!.icon} label="Redact"
+        isActive={activeTool === 'redact'} onClick={() => onToolChange('redact')} />
+      <Rule />
+      <div className="flex flex-col gap-0.5 justify-center h-full py-1.5 min-w-[110px]">
+        <SmallToolBtn icon={Volume2} label="Read Page"
+          isActive={false} onClick={onReadPage} disabled={ttsActive} />
+        <SmallToolBtn icon={Volume2} label="Read Selection"
+          isActive={false} onClick={onReadSelection} disabled={ttsActive || !hasSelection} />
+      </div>
+    </>
+  );
+}
+
+function PagesTab({ activeTool, onToolChange }: {
+  activeTool: ToolId; onToolChange: (id: ToolId) => void;
+}) {
+  return (
+    <>
+      {byId(['insert', 'delete']).map(t => (
+        <ToolBtn key={t.id} icon={t.icon} label={t.label}
+          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+      ))}
+      <Rule />
+      <PairCol tools={byId(['rotate', 'extract'])} activeTool={activeTool} onToolChange={onToolChange} />
+      <ToolBtn icon={TOOL_DEFS.find(t => t.id === 'crop')!.icon} label="Crop"
+        isActive={activeTool === 'crop'} onClick={() => onToolChange('crop')} />
+    </>
+  );
+}
+
+// ── Toolbar root ──────────────────────────────────────────────────────────────
 
 export function Toolbar({
   activeTool, onToolChange,
@@ -53,124 +218,57 @@ export function Toolbar({
   hasSelection, ttsActive,
   pageInfo,
 }: ToolbarProps) {
-  const [localActive, setLocalActive] = useState<ToolId>(activeTool);
+  const [activeTab, setActiveTab] = useState<TabId>('view');
 
-  const handleTool = (id: ToolId) => {
-    setLocalActive(id);
+  const handleToolChange = (id: ToolId) => {
     onToolChange(id);
+    const cat = TOOL_DEFS.find(t => t.id === id)?.category as TabId | undefined;
+    if (cat && TABS.some(t => t.id === cat)) setActiveTab(cat);
   };
 
-  const effectiveTool = activeTool ?? localActive;
-  const activeCategory = TOOL_DEFS.find(t => t.id === effectiveTool)?.category ?? 'view';
-
   return (
-    <div className="h-20 bg-[#2d3338] border-b border-[#1e2327] flex flex-col flex-shrink-0">
+    <div className="bg-[#2d3338] border-b border-[#1e2327] flex-shrink-0 flex flex-col">
 
-      {/* ── Tool buttons row ── */}
-      <div className="flex items-center gap-0.5 px-3 py-2 flex-1">
-
-        {/* Undo / Redo */}
-        <button
-          onClick={onUndo}
-          title="Undo (Ctrl+Z)"
-          className="w-9 h-9 flex items-center justify-center rounded text-gray-400 hover:bg-[#3d4449] hover:text-white transition-colors"
-        >
-          <Undo2 size={17} />
-        </button>
-        <button
-          onClick={onRedo}
-          title="Redo (Ctrl+Y)"
-          className="w-9 h-9 flex items-center justify-center rounded text-gray-400 hover:bg-[#3d4449] hover:text-white transition-colors"
-        >
-          <Redo2 size={17} />
-        </button>
-
-        <div className="w-px h-8 bg-[#1e2327] mx-1.5 flex-shrink-0" />
-
-        {/* Tool buttons with automatic category dividers */}
-        {TOOL_DEFS.map((tool, idx) => {
-          const Icon = tool.icon;
-          const isActive = effectiveTool === tool.id;
-          const prev = TOOL_DEFS[idx - 1];
-          const showDivider = idx > 0 && prev.category !== tool.category;
-
+      {/* ── Tab strip ── */}
+      <div className="flex items-end px-3 pt-1.5 gap-0.5">
+        {TABS.map(tab => {
+          const hasActiveTool = TOOL_DEFS.some(t => t.category === tab.id && t.id === activeTool);
+          const isOpen = activeTab === tab.id;
           return (
-            <div key={tool.id} className="flex items-center">
-              {showDivider && (
-                <div className="w-px h-8 bg-[#1e2327] mx-1.5 flex-shrink-0" />
-              )}
-              <button
-                onClick={() => handleTool(tool.id)}
-                title={tool.label}
-                className={`flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-colors
-                  ${isActive
-                    ? 'bg-[#4a90e2] text-white'
-                    : 'text-gray-400 hover:bg-[#3d4449] hover:text-white'
-                  }`}
-              >
-                <Icon size={17} />
-                <span className="text-[10px] font-normal leading-none whitespace-nowrap">
-                  {tool.label}
-                </span>
-              </button>
-            </div>
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-1.5 text-xs font-medium rounded-t-md transition-all duration-100 border-t border-x flex-shrink-0
+                ${isOpen
+                  ? 'bg-[#252a2e] border-[#1e2327] text-white'
+                  : hasActiveTool
+                    ? 'bg-transparent border-transparent text-[#4a90e2] hover:bg-[#252a2e]/40'
+                    : 'bg-transparent border-transparent text-gray-500 hover:text-gray-300 hover:bg-[#252a2e]/40'
+                }`}
+            >
+              {tab.label}
+            </button>
           );
         })}
 
-        <div className="w-px h-8 bg-[#1e2327] mx-1.5 flex-shrink-0" />
-
-        {/* Zoom control */}
-        <div className="flex items-center gap-0.5 bg-[#3d4449] rounded-lg px-1 h-9">
-          <ZBtn onClick={onZoomOut} disabled={scale <= 0.25}><Minus size={13} /></ZBtn>
-          <button
-            onClick={onZoomReset}
-            title="Reset zoom (100%)"
-            className="min-w-[46px] h-7 text-white text-[11px] font-semibold font-mono px-1 hover:bg-[#2d3338] rounded transition-colors"
-          >
-            {Math.round(scale * 100)}%
-          </button>
-          <ZBtn onClick={onZoomIn} disabled={scale >= 4.0}><Plus size={13} /></ZBtn>
-        </div>
-
-        <div className="w-px h-8 bg-[#1e2327] mx-1.5 flex-shrink-0" />
-
-        {/* Read aloud */}
-        <button
-          onClick={onReadPage}
-          disabled={ttsActive}
-          title="Read current page aloud"
-          className={`flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-colors
-            ${ttsActive ? 'opacity-40 cursor-not-allowed' : 'text-gray-400 hover:bg-[#3d4449] hover:text-white'}`}
-        >
-          <Volume2 size={17} />
-          <span className="text-[10px] font-normal leading-none">Read Page</span>
-        </button>
-        <button
-          onClick={onReadSelection}
-          disabled={ttsActive || !hasSelection}
-          title="Read selected text"
-          className={`flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-colors
-            ${ttsActive || !hasSelection ? 'opacity-30 cursor-not-allowed' : 'text-gray-400 hover:bg-[#3d4449] hover:text-white'}`}
-        >
-          <Volume2 size={17} />
-          <span className="text-[10px] font-normal leading-none">Selection</span>
-        </button>
-
-        {/* Page info — far right */}
         {pageInfo && (
-          <div className="ml-auto pl-2">
-            <span className="text-[12px] text-gray-400 font-mono">
-              <span className="text-white font-semibold">{pageInfo.current}</span>
+          <div className="ml-auto flex items-center pb-1.5 pr-1">
+            <span className="text-[12px] text-gray-500 font-mono">
+              <span className="text-gray-200 font-semibold">{pageInfo.current}</span>
               {' / '}{pageInfo.total}
             </span>
           </div>
         )}
       </div>
 
-      {/* ── Category label ── */}
-      <div className="px-4 pb-1.5 text-[10px] text-gray-600 uppercase tracking-widest font-medium">
-        {activeCategory}
+      {/* ── Ribbon body ── */}
+      <div className="bg-[#252a2e] border-t border-[#1e2327] px-4 flex items-stretch h-[58px] gap-1">
+        {activeTab === 'view'    && <ViewTab    activeTool={activeTool} onToolChange={handleToolChange} scale={scale} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />}
+        {activeTab === 'edit'    && <EditTab    activeTool={activeTool} onToolChange={handleToolChange} onUndo={onUndo} onRedo={onRedo} />}
+        {activeTab === 'comment' && <CommentTab activeTool={activeTool} onToolChange={handleToolChange} onReadPage={onReadPage} onReadSelection={onReadSelection} ttsActive={ttsActive} hasSelection={hasSelection} />}
+        {activeTab === 'pages'   && <PagesTab   activeTool={activeTool} onToolChange={handleToolChange} />}
       </div>
+
     </div>
   );
 }

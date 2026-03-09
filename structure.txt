@@ -149,7 +149,7 @@ pdf_editor
 │   │   │       ├── Button.tsx
 │   │   │       ├── Dropdown.tsx
 │   │   │       ├── EmptyState.tsx
-│   │   │       ├── FileTab.tsx
+│   │   │       ├── Filetab.tsx
 │   │   │       ├── index.ts
 │   │   │       └── Primitives.tsx
 │   │   ├── constants
