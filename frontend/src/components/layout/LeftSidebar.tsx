@@ -118,10 +118,26 @@ export function LeftSidebar({
   const pages = documentState?.children ?? [];
   const [localActivePage, setLocalActivePage] = useState(0);
   const [dragSrc, setDragSrc] = useState<number | null>(null);
-  const [dragOver, setDragOver] = useState<number | null>(null);
+  const [insertBefore, setInsertBefore] = useState<number | null>(null);
   const busyRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const thumbRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const effectivePage = activePage ?? localActivePage;
+
+  // Scroll the active thumbnail into view when the page changes
+  useEffect(() => {
+    const el = thumbRefs.current[effectivePage];
+    const container = scrollContainerRef.current;
+    if (!el || !container) return;
+    const elTop      = el.offsetTop;
+    const elBottom   = elTop + el.offsetHeight;
+    const contTop    = container.scrollTop;
+    const contBottom = contTop + container.clientHeight;
+    if (elTop < contTop || elBottom > contBottom) {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [effectivePage]);
 
   const withBusy = useCallback(async (fn: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -174,7 +190,7 @@ export function LeftSidebar({
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto py-2 px-3 space-y-2">
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto py-2 px-3 space-y-2">
             {drawerView === 'pages' && (
               <>
                 {!pdfDoc && pages.length === 0 && (
@@ -194,14 +210,21 @@ export function LeftSidebar({
                 {pdfDoc && pages.map((page, i) => (
                   <div
                     key={page.id}
+                    ref={el => { thumbRefs.current[i] = el; }}
                     draggable
                     onDragStart={e => { setDragSrc(i); e.dataTransfer.effectAllowed = 'move'; }}
-                    onDragOver={e => { e.preventDefault(); if (i !== dragSrc) setDragOver(i); }}
-                    onDragEnd={() => { setDragSrc(null); setDragOver(null); }}
+                    onDragOver={e => {
+                      e.preventDefault();
+                      if (dragSrc === null || i === dragSrc) return;
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const mid  = rect.top + rect.height / 2;
+                      setInsertBefore(e.clientY < mid ? i : i + 1);
+                    }}
+                    onDragEnd={() => { setDragSrc(null); setInsertBefore(null); }}
                     onDrop={async e => {
                       e.preventDefault();
                       const src = dragSrc;
-                      setDragSrc(null); setDragOver(null);
+                      setDragSrc(null); setInsertBefore(null);
                       if (src !== null && src !== i) {
                         await withBusy(async () => {
                           const { engineApi } = await import('../../api/client');
@@ -212,9 +235,17 @@ export function LeftSidebar({
                     }}
                     onClick={() => { setLocalActivePage(i); onPageClick?.(i); }}
                     className={`group relative cursor-pointer rounded-lg transition-all
-                      ${dragOver === i && dragSrc !== i ? 'ring-2 ring-amber-400' : ''}
                       ${dragSrc === i ? 'opacity-40' : ''}`}
                   >
+                    {/* Drop insertion line — above */}
+                    {insertBefore === i && dragSrc !== i && (
+                      <div className="absolute -top-[5px] left-2 right-2 h-[3px] bg-[#4a90e2] rounded-full z-20 pointer-events-none" />
+                    )}
+
+                    {/* Drop insertion line — below (after last item) */}
+                    {insertBefore === i + 1 && dragSrc !== i && (
+                      <div className="absolute -bottom-[5px] left-2 right-2 h-[3px] bg-[#4a90e2] rounded-full z-20 pointer-events-none" />
+                    )}
                     {/* Drag handle */}
                     <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 text-white/40">
                       <GripVertical size={12} />
