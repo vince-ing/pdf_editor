@@ -1,10 +1,19 @@
-// frontend/src/hooks/usePdfCanvas.js
+// frontend/src/hooks/usePdfCanvas.ts
 import { useEffect, useRef, useState } from 'react';
+import * as pdfjsLib from 'pdfjs-dist';
+import type { PageNode } from '../components/canvas/types';
 
-export const usePdfCanvas = ({ pdfDoc, pageNode, pageIndex, scale, localRotation }) => {
-    const canvasRef = useRef(null);
+interface UsePdfCanvasArgs {
+    pdfDoc: pdfjsLib.PDFDocumentProxy | null;
+    pageNode: PageNode;
+    pageIndex: number;
+    scale: number;
+    localRotation: number;
+}
+
+export const usePdfCanvas = ({ pdfDoc, pageNode, pageIndex, scale, localRotation }: UsePdfCanvasArgs) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
     
-    // Explicitly track full page dimensions, distinct from cropped visible bounds
     const [fullDimensions, setFullDimensions] = useState({
         width:  (pageNode?.metadata?.width  || 612) * scale,
         height: (pageNode?.metadata?.height || 792) * scale,
@@ -14,11 +23,10 @@ export const usePdfCanvas = ({ pdfDoc, pageNode, pageIndex, scale, localRotation
         if (!pdfDoc) return;
         
         let alive = true;
-        let renderTask = null;
+        let renderTask: pdfjsLib.RenderTask | null = null;
         
         const renderPage = async () => {
             try {
-                // PDF.js uses 1-based indexing
                 const pageNum = (pageNode?.page_number ?? pageIndex) + 1;
                 if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
                 
@@ -41,13 +49,16 @@ export const usePdfCanvas = ({ pdfDoc, pageNode, pageIndex, scale, localRotation
                 
                 setFullDimensions({ width: cssW, height: cssH });
                 
+                const canvasContext = canvas.getContext('2d');
+                if (!canvasContext) return;
+
                 renderTask = page.render({ 
-                    canvasContext: canvas.getContext('2d'), 
+                    canvasContext, 
                     viewport: vp 
                 });
                 
                 await renderTask.promise;
-            } catch (err) { 
+            } catch (err: any) { 
                 if (err?.name !== 'RenderingCancelledException') {
                     console.error('[usePdfCanvas] Rendering error:', err);
                 }

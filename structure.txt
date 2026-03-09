@@ -47,9 +47,10 @@ pdf_editor
     │   ├── components
     │   │   ├── canvas
     │   │   │   ├── Canvas.tsx
+    │   │   │   ├── CopyToast.tsx
     │   │   │   ├── InteractionLayer.tsx
     │   │   │   ├── NodeOverlay.tsx
-    │   │   │   ├── PageControls.jsx
+    │   │   │   ├── PageControls.tsx
     │   │   │   ├── PageRenderer.tsx
     │   │   │   ├── ResizeHandles.tsx
     │   │   │   ├── RichTextEditor.tsx
@@ -83,10 +84,12 @@ pdf_editor
     │   │       └── ToolManager.ts
     │   ├── hooks
     │   │   ├── useActiveTool.ts
-    │   │   ├── useDragSelection.js
-    │   │   ├── usePageChars.js
-    │   │   ├── usePdfCanvas.js
-    │   │   └── useTts.js
+    │   │   ├── useDragSelection.ts
+    │   │   ├── useEditorState.ts
+    │   │   ├── usePageActions.ts
+    │   │   ├── usePageChars.ts
+    │   │   ├── usePdfCanvas.ts
+    │   │   └── useTts.ts
     │   ├── main.tsx
     │   ├── styles
     │   │   ├── fonts.css

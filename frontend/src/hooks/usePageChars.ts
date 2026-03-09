@@ -1,12 +1,25 @@
-// frontend/src/hooks/usePageChars.js
+// frontend/src/hooks/usePageChars.ts
 import { useState, useEffect } from 'react';
 import { engineApi } from '../api/client';
 
-export const usePageChars = ({ pageNodeId, localRotation, metadata }) => {
-    const [rawChars, setRawChars] = useState([]);
-    const [pageChars, setPageChars] = useState([]);
+export interface PageChar {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    text: string;
+}
 
-    // 1. Fetch the raw character bounding boxes (in original PDF space)
+interface UsePageCharsArgs {
+    pageNodeId: string;
+    localRotation: number;
+    metadata?: { width: number; height: number };
+}
+
+export const usePageChars = ({ pageNodeId, localRotation, metadata }: UsePageCharsArgs) => {
+    const [rawChars, setRawChars] = useState<PageChar[]>([]);
+    const [pageChars, setPageChars] = useState<PageChar[]>([]);
+
     useEffect(() => {
         let alive = true;
         if (!pageNodeId) return;
@@ -21,14 +34,12 @@ export const usePageChars = ({ pageNodeId, localRotation, metadata }) => {
         return () => { alive = false; };
     }, [pageNodeId]);
 
-    // 2. Transform the raw characters to match the current visual rotation
     useEffect(() => {
         if (!rawChars.length) { 
             setPageChars([]); 
             return; 
         }
 
-        // Page dimensions in the *original* (unrotated) orientation
         const W = metadata?.width  || 612;
         const H = metadata?.height || 792;
 
@@ -53,7 +64,6 @@ export const usePageChars = ({ pageNodeId, localRotation, metadata }) => {
             }
         });
 
-        // Sort into reading order for the *rotated* orientation
         transformed.sort((a, b) =>
             Math.abs(a.y - b.y) > 5 ? a.y - b.y : a.x - b.x
         );

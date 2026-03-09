@@ -1,9 +1,26 @@
+// frontend/src/hooks/useDragSelection.ts
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { highlightTool, redactTool, selectTool, cropTool, underlineTool } from '../core/tools/DragTool';
+import type { ToolId } from '../components/toolbar/Toolbar';
+import type { PageChar } from './usePageChars';
+import type { InteractionContext } from '../core/tools/BaseTool';
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+export interface GeoRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
 
-function lineBBox(lineChars) {
+interface UseDragSelectionArgs {
+    pageId: string;
+    pageChars: PageChar[];
+    activeTool: ToolId;
+    metadata?: { width: number; height: number };
+    onAction: (rects: GeoRect[]) => void;
+}
+
+function lineBBox(lineChars: PageChar[]): GeoRect {
     const minX = Math.min(...lineChars.map(c => c.x));
     const minY = Math.min(...lineChars.map(c => c.y));
     const maxX = Math.max(...lineChars.map(c => c.x + c.width));
@@ -11,9 +28,9 @@ function lineBBox(lineChars) {
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-function buildLineRects(chars) {
+function buildLineRects(chars: PageChar[]): GeoRect[] {
     if (!chars.length) return [];
-    const rects = [];
+    const rects: GeoRect[] = [];
     let line = [chars[0]];
     for (let i = 1; i < chars.length; i++) {
         const prev = line[line.length - 1];
@@ -30,23 +47,20 @@ function buildLineRects(chars) {
     return rects;
 }
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
-
 export const useDragSelection = ({
     pageId,
     pageChars,
     activeTool,
     metadata,
     onAction
-}) => {
-    const liveRectsRef = useRef([]);
-    const committedRectsRef = useRef([]);
-    const [selVersion, setSelVersion] = useState(0);
+}: UseDragSelectionArgs) => {
+    const liveRectsRef = useRef<GeoRect[]>([]);
+    const committedRectsRef = useRef<GeoRect[]>([]);
+    const [, setSelVersion] = useState(0);
     const bumpSel = useCallback(() => setSelVersion(v => v + 1), []);
 
     const isDragging = useRef(false);
-    const wasDragging = useRef(false);
-    const startPos = useRef(null);
+    const startPos = useRef<{ x: number, y: number } | null>(null);
     const startIdx = useRef(-1);
 
     const onActionRef = useRef(onAction);
@@ -64,7 +78,7 @@ export const useDragSelection = ({
         }
     }, [activeTool, clearSelection]);
 
-    const nearestCharIdx = useCallback((pt) => {
+    const nearestCharIdx = useCallback((pt: { x: number, y: number }) => {
         if (!pageChars.length) return -1;
         let best = -1, bestD = 60 * 60;
         pageChars.forEach((c, i) => {
@@ -75,7 +89,6 @@ export const useDragSelection = ({
         return best;
     }, [pageChars]);
 
-    // Map tool names to the tool instances so we can listen to the right one
     const getActiveToolInstance = useCallback(() => {
         switch(activeTool) {
             case 'highlight': return highlightTool;
@@ -91,30 +104,26 @@ export const useDragSelection = ({
         const tool = getActiveToolInstance();
         if (!tool) return;
 
-        const onDown = (ctx) => {
+        const onDown = (ctx: InteractionContext) => {
             if (ctx.pageId !== pageId || ctx.originalEvent.button !== 0) return;
             
-            // Clear selections on normal click if using select tool
             if (activeTool === 'select' && committedRectsRef.current.length > 0) {
                 clearSelection();
             }
 
             isDragging.current = true;
-            wasDragging.current = false;
             startPos.current = { x: ctx.x, y: ctx.y };
             startIdx.current = nearestCharIdx(startPos.current);
             liveRectsRef.current = [];
             bumpSel();
         };
 
-        const onMove = (ctx) => {
+        const onMove = (ctx: InteractionContext) => {
             if (!isDragging.current || !startPos.current || ctx.pageId !== pageId) return;
             
             const dx = Math.abs(ctx.x - startPos.current.x);
             const dy = Math.abs(ctx.y - startPos.current.y);
             if (dx < 3 && dy < 3) return;
-
-            wasDragging.current = true;
 
             if (activeTool === 'crop') {
                 const W = metadata?.width || 612;
@@ -143,7 +152,7 @@ export const useDragSelection = ({
             bumpSel();
         };
 
-        const onUp = (ctx) => {
+        const onUp = (ctx: InteractionContext) => {
             if (!isDragging.current || ctx.pageId !== pageId) return;
             isDragging.current = false;
 
@@ -165,7 +174,7 @@ export const useDragSelection = ({
             }
         };
 
-        const onLeave = (ctx) => {
+        const onLeave = (ctx: InteractionContext) => {
             if (ctx.pageId === pageId) onUp(ctx);
         };
 
@@ -183,7 +192,7 @@ export const useDragSelection = ({
         liveRects: liveRectsRef.current,
         committedRects: committedRectsRef.current,
         clearSelection,
-        setCommittedRects: (rects) => {
+        setCommittedRects: (rects: GeoRect[]) => {
             committedRectsRef.current = rects;
             bumpSel();
         }
