@@ -1,5 +1,4 @@
-// app/App.tsx — Root layout.
-// RightPanel now receives activeTool so it can auto-expand the right section.
+// app/App.tsx
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -7,6 +6,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { engineApi } from '../api/client';
 import { useTts } from '../hooks/useTts';
 import { buildMenuDefs } from '../constants/menuDefs';
+import { DEFAULT_TEXT_PROPS, type TextProps } from '../types/textProps';
 
 import { TopBar }      from '../components/layout/TopBar';
 import { LeftSidebar } from '../components/layout/LeftSidebar';
@@ -30,7 +30,6 @@ interface PageNode {
   crop_box?: { x: number; y: number; width: number; height: number };
   children?: unknown[];
 }
-
 interface DocumentState {
   node_type: string;
   file_name: string;
@@ -51,6 +50,9 @@ export default function App() {
   const [lastSelectedText, setLastSelectedText] = useState('');
   const [tabs,             setTabs]             = useState<FileTab[]>([]);
   const [activeTabId,      setActiveTabId]      = useState<string | null>(null);
+
+  // ── Text properties — owned here, shared to RightPanel + Canvas ───────────
+  const [textProps, setTextProps] = useState<TextProps>(DEFAULT_TEXT_PROPS);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRefs     = useRef<(HTMLDivElement | null)[]>([]);
@@ -112,9 +114,7 @@ export default function App() {
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement('a'), {
-        href: url, download: `edited_${documentState.file_name}`,
-      });
+      const a = Object.assign(document.createElement('a'), { href: url, download: `edited_${documentState.file_name}` });
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: unknown) { alert('Export failed: ' + (err as Error).message); }
@@ -178,65 +178,41 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-[#1e2327] text-white overflow-hidden">
-
       <TopBar
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onTabClick={setActiveTabId}
+        tabs={tabs} activeTabId={activeTabId} onTabClick={setActiveTabId}
         onTabClose={id => {
           setTabs(prev => prev.filter(x => x.id !== id));
-          if (activeTabId === id) {
-            setActiveTabId(null);
-            setDocumentState(null);
-            setPdfDoc(null);
-          }
+          if (activeTabId === id) { setActiveTabId(null); setDocumentState(null); setPdfDoc(null); }
         }}
-        onNewTab={openFileDialog}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        menus={menus}
+        onNewTab={openFileDialog} onUndo={handleUndo} onRedo={handleRedo} menus={menus}
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
-
         <LeftSidebar
           showThumbnails={showThumbnails}
           onToggleThumbnails={() => setShowThumbnails(v => !v)}
-          pdfDoc={pdfDoc}
-          documentState={documentState}
-          activePage={activePage}
+          pdfDoc={pdfDoc} documentState={documentState} activePage={activePage}
           activeView={sidebarView}
           onViewChange={v => { setSidebarView(v); if (v) setShowThumbnails(true); }}
-          onPageClick={i => {
-            setActivePage(i);
-            pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }}
+          onPageClick={i => { setActivePage(i); pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
           onDocumentChanged={refreshDocumentState}
         />
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <Toolbar
-            activeTool={activeTool}
-            onToolChange={setActiveTool}
-            scale={scale}
-            onZoomIn={zoomIn}
-            onZoomOut={zoomOut}
-            onZoomReset={zoomReset}
-            onUndo={handleUndo}
-            onRedo={handleRedo}
-            onReadPage={handleReadPage}
-            onReadSelection={handleReadSelection}
-            hasSelection={!!lastSelectedText}
-            ttsActive={tts.visible}
+            activeTool={activeTool} onToolChange={setActiveTool}
+            scale={scale} onZoomIn={zoomIn} onZoomOut={zoomOut} onZoomReset={zoomReset}
+            onUndo={handleUndo} onRedo={handleRedo}
+            onReadPage={handleReadPage} onReadSelection={handleReadSelection}
+            hasSelection={!!lastSelectedText} ttsActive={tts.visible}
             pageInfo={documentState ? { current: activePage + 1, total: pageCount } : null}
           />
 
           <div className="flex-1 flex overflow-hidden min-h-0">
             <Canvas
-              pdfDoc={pdfDoc}
-              documentState={documentState}
-              activeTool={activeTool}
-              scale={scale}
+              pdfDoc={pdfDoc} documentState={documentState}
+              activeTool={activeTool} scale={scale}
+              textProps={textProps}
               onAnnotationAdded={refreshDocumentState}
               onDocumentChanged={refreshDocumentState}
               onTextSelected={setLastSelectedText}
@@ -244,9 +220,9 @@ export default function App() {
             />
             {rightPanelOpen && (
               <RightPanel
-                documentState={documentState}
-                activePage={activePage}
-                activeTool={activeTool}
+                documentState={documentState} activePage={activePage} activeTool={activeTool}
+                textProps={textProps}
+                onTextPropsChange={setTextProps}
               />
             )}
           </div>
@@ -254,28 +230,17 @@ export default function App() {
       </div>
 
       <TtsBar
-        visible={tts.visible}
-        status={tts.status}
-        phase={tts.phase}
-        progress={tts.progress}
-        isPaused={tts.isPaused}
-        speed={tts.speed}
-        onStop={ttsStop}
-        onPauseResume={pauseResume}
-        onSpeedChange={setSpeed}
+        visible={tts.visible} status={tts.status} phase={tts.phase}
+        progress={tts.progress} isPaused={tts.isPaused} speed={tts.speed}
+        onStop={ttsStop} onPauseResume={pauseResume} onSpeedChange={setSpeed}
       />
 
       <StatusBar
-        activeTool={activeTool}
-        scale={scale}
-        activePage={activePage}
-        pageCount={pageCount}
-        lastSelectedText={lastSelectedText}
-        documentState={documentState}
+        activeTool={activeTool} scale={scale} activePage={activePage}
+        pageCount={pageCount} lastSelectedText={lastSelectedText} documentState={documentState}
       />
 
-      <input ref={fileInputRef} type="file" accept="application/pdf"
-        className="hidden" onChange={handleFileUpload} />
+      <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
     </div>
   );
 }

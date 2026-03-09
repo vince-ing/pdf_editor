@@ -54,25 +54,41 @@ class LoadPayload(BaseModel):
 class ExportPayload(BaseModel):
     output_path: str
 
+class TextRunPayload(BaseModel):
+    text:        str
+    bold:        bool  = False
+    italic:      bool  = False
+    font_family: str   = "Helvetica"
+    font_size:   float = 12.0
+    color:       str   = "#000000"
+
 class TextAnnotationPayload(BaseModel):
-    page_id: str
-    text: str
-    x: float
-    y: float
-    width: float = 200
-    height: float = 30
-    font_size: float = 12.0
-    color: str = "#000000"
+    page_id:     str
+    text:        str        = ""
+    x:           float
+    y:           float
+    width:       float      = 200
+    height:      float      = 30
+    font_family: str        = "Helvetica"
+    font_size:   float      = 12.0
+    color:       str        = "#000000"
+    bold:        bool       = False
+    italic:      bool       = False
+    runs:        List[TextRunPayload] = []
 
 class UpdateAnnotationPayload(BaseModel):
-    page_id: str
-    x: Optional[float] = None
-    y: Optional[float] = None
-    width: Optional[float] = None
-    height: Optional[float] = None
-    text_content: Optional[str] = None
-    font_size: Optional[float] = None
-    color: Optional[str] = None
+    page_id:      str
+    x:            Optional[float]              = None
+    y:            Optional[float]              = None
+    width:        Optional[float]              = None
+    height:       Optional[float]              = None
+    text_content: Optional[str]                = None
+    font_family:  Optional[str]                = None
+    font_size:    Optional[float]              = None
+    color:        Optional[str]                = None
+    bold:         Optional[bool]               = None
+    italic:       Optional[bool]               = None
+    runs:         Optional[List[TextRunPayload]] = None
 
 class HighlightRect(BaseModel):
     x: float
@@ -82,8 +98,8 @@ class HighlightRect(BaseModel):
 
 class HighlightPayload(BaseModel):
     page_id: str
-    rects: List[HighlightRect]
-    color: str = "#FFFF00"
+    rects:   List[HighlightRect]
+    color:   str   = "#FFFF00"
     opacity: float = 0.4
 
 
@@ -133,19 +149,18 @@ def export_document(payload: ExportPayload):
 
 @app.get("/api/document/download")
 def download_document():
-    """Stream the modified PDF directly to the browser as a file download."""
     from fastapi.responses import Response
     if not current_session.document or not current_session.document.file_name:
         raise HTTPException(status_code=400, detail="No document loaded.")
     try:
         service = DocumentService(current_session)
         pdf_bytes = service.export_to_bytes()
-        filename = current_session.document.file_name
+        filename      = current_session.document.file_name
         download_name = f"edited_{filename}"
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{download_name}"'}
+            headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
         )
     except Exception as e:
         import traceback
@@ -162,8 +177,7 @@ def crop_page(page_id: str, payload: CropPayload):
         service.crop_page(page_id, payload.x, payload.y, payload.width, payload.height)
         return {"status": "success", "message": "Page cropped."}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages")
@@ -183,46 +197,27 @@ def rotate_page(page_id: str, payload: RotatePayload):
 @app.delete("/api/pages/{page_id}")
 def delete_page(page_id: str):
     try:
-        before = len(current_session.document.children)
+        before     = len(current_session.document.children)
         before_ids = [c.id for c in current_session.document.children]
-        print(f"[DELETE] page_id={page_id}")
-        print(f"[DELETE] before count={before}, ids={before_ids}")
-
+        print(f"[DELETE] page_id={page_id}, before={before}, ids={before_ids}")
         service = PageService(current_session)
         service.delete_page(page_id)
-
-        after = len(current_session.document.children)
+        after     = len(current_session.document.children)
         after_ids = [c.id for c in current_session.document.children]
-        print(f"[DELETE] after count={after}, ids={after_ids}")
-
-        return {
-            "status": "success",
-            "message": "Page deleted.",
-            "before": before,
-            "after": after,
-        }
+        print(f"[DELETE] after={after}, ids={after_ids}")
+        return {"status": "success", "message": "Page deleted.", "before": before, "after": after}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/pages/{page_id}/move")
 def move_page(page_id: str, payload: MovePagePayload):
     try:
-        before_ids = [c.id for c in current_session.document.children]
-        print(f"[MOVE] page_id={page_id} new_index={payload.new_index}")
-        print(f"[MOVE] before ids={before_ids}")
-
         service = PageService(current_session)
         service.move_page(page_id, payload.new_index)
-
-        after_ids = [c.id for c in current_session.document.children]
-        print(f"[MOVE] after ids={after_ids}")
-
         return {"status": "success", "message": "Page moved."}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/pages/{page_id}/chars")
@@ -234,8 +229,7 @@ def get_page_chars(page_id: str):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -244,19 +238,15 @@ def get_page_chars(page_id: str):
 @app.patch("/api/annotations/{node_id}")
 def update_annotation(node_id: str, payload: UpdateAnnotationPayload):
     service = AnnotationService(current_session)
-    # Convert payload to dict, ignoring fields that weren't sent
     updates = payload.model_dump(exclude_unset=True)
     page_id = updates.pop("page_id", None)
-    
     if not page_id:
         raise HTTPException(status_code=400, detail="page_id is required")
-        
     try:
         node = service.update_annotation(page_id, node_id, updates)
         return {"status": "success", "node": node}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/annotations/text")
@@ -265,6 +255,10 @@ def add_text_annotation(payload: TextAnnotationPayload):
     if not page or page.node_type != "page":
         raise HTTPException(status_code=404, detail="Page not found")
     service = AnnotationService(current_session)
+
+    # Convert TextRunPayload → dicts for annotation_service
+    runs_data = [r.model_dump() for r in payload.runs]
+
     node = service.add_text(
         page_id=payload.page_id,
         text=payload.text,
@@ -272,8 +266,12 @@ def add_text_annotation(payload: TextAnnotationPayload):
         y=payload.y,
         width=payload.width,
         height=payload.height,
+        font_family=payload.font_family,
         font_size=payload.font_size,
         color=payload.color,
+        bold=payload.bold,
+        italic=payload.italic,
+        runs=runs_data,
     )
     return {"status": "success", "node": node}
 
@@ -283,14 +281,12 @@ def add_highlight_annotation(payload: HighlightPayload):
     if not page or page.node_type != "page":
         raise HTTPException(status_code=404, detail="Page not found")
     service = AnnotationService(current_session)
-    
-    # Pass all rects at once to properly batch them into one undo operation
     rect_dicts = [{"x": r.x, "y": r.y, "width": r.width, "height": r.height} for r in payload.rects]
     nodes = service.add_highlights(
         page_id=payload.page_id,
         rects=rect_dicts,
         color=payload.color,
-        opacity=payload.opacity
+        opacity=payload.opacity,
     )
     return {"status": "success", "nodes": nodes}
 
