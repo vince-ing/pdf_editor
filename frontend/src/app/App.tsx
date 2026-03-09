@@ -42,7 +42,7 @@ export default function App() {
   const [documentState,    setDocumentState]    = useState<DocumentState | null>(null);
   const [pdfDoc,           setPdfDoc]           = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [loading,          setLoading]          = useState(false);
-  const [scale,            setScale]            = useState(1.5);
+  const [scale,            setScale]            = useState(1.0);
   const [activeTool,       setActiveTool]       = useState<ToolId>('hand');
   const [activePage,       setActivePage]       = useState(0);
   const [sidebarView,      setSidebarView]      = useState<SidebarView>('pages');
