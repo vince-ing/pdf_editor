@@ -39,7 +39,7 @@ const Thumbnail = ({ pdfDoc, pageNumber, rotation }: {
   pdfDoc: pdfjsLib.PDFDocumentProxy; pageNumber: number; rotation: number;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const W = 136;
+  const W = 100; // Smaller rendered size — container has padding so it sits with space around it
   useEffect(() => {
     let alive = true;
     let task: pdfjsLib.RenderTask | null = null;
@@ -174,7 +174,7 @@ export function LeftSidebar({
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+          <div className="flex-1 overflow-y-auto py-2 px-3 space-y-2">
             {drawerView === 'pages' && (
               <>
                 {!pdfDoc && pages.length === 0 && (
@@ -211,22 +211,34 @@ export function LeftSidebar({
                       }
                     }}
                     onClick={() => { setLocalActivePage(i); onPageClick?.(i); }}
-                    className={`group relative cursor-pointer rounded-lg overflow-hidden transition-all
-                      ${effectivePage === i ? 'ring-2 ring-[#4a90e2]' : 'hover:ring-1 hover:ring-white/20'}
+                    className={`group relative cursor-pointer rounded-lg transition-all
                       ${dragOver === i && dragSrc !== i ? 'ring-2 ring-amber-400' : ''}
                       ${dragSrc === i ? 'opacity-40' : ''}`}
                   >
-                    <div className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 text-white/40">
+                    {/* Drag handle */}
+                    <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 text-white/40">
                       <GripVertical size={12} />
                     </div>
-                    <div className="bg-white rounded overflow-hidden">
-                      <Thumbnail pdfDoc={pdfDoc} pageNumber={page.page_number ?? i} rotation={page.rotation ?? 0} />
+
+                    {/* Thumbnail — padded inside the card, ring goes around the white page */}
+                    <div className="px-3 pt-3 pb-1 flex justify-center">
+                      <div className={`bg-white rounded overflow-hidden shadow-lg transition-all
+                        ${effectivePage === i ? 'ring-2 ring-[#4a90e2]' : 'hover:ring-2 hover:ring-white/20'}`}>
+                        <Thumbnail pdfDoc={pdfDoc} pageNumber={page.page_number ?? i} rotation={page.rotation ?? 0} />
+                      </div>
                     </div>
-                    <div className="absolute bottom-1 right-1 bg-[#1e2327] text-white text-[9px] px-1.5 py-0.5 rounded font-mono font-semibold">
-                      {i + 1}
+
+                    {/* Page number label — below the thumbnail */}
+                    <div className="pb-2 text-center">
+                      <span className={`text-[11px] font-mono font-semibold
+                        ${effectivePage === i ? 'text-[#4a90e2]' : 'text-gray-500'}`}>
+                        {i + 1}
+                      </span>
                     </div>
+
+                    {/* Rotation badge */}
                     {(page.rotation ?? 0) !== 0 && (
-                      <div className="absolute bottom-1 left-1 bg-[#4a90e2] text-white text-[9px] px-1 py-0.5 rounded font-mono font-bold flex items-center gap-0.5">
+                      <div className="absolute top-2 right-2 bg-[#4a90e2] text-white text-[9px] px-1 py-0.5 rounded font-mono font-bold flex items-center gap-0.5">
                         <RotateCw size={8} />{page.rotation}°
                       </div>
                     )}
