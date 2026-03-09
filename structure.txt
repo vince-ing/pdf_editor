@@ -47,9 +47,13 @@ pdf_editor
     │   ├── components
     │   │   ├── canvas
     │   │   │   ├── Canvas.tsx
+    │   │   │   ├── InteractionLayer.tsx
     │   │   │   ├── NodeOverlay.jsx
     │   │   │   ├── PageControls.jsx
-    │   │   │   └── PageRenderer.jsx
+    │   │   │   ├── PageRenderer.jsx
+    │   │   │   ├── ResizeHandles.tsx
+    │   │   │   ├── RichTextEditor.tsx
+    │   │   │   └── TransientTexBox.tsx
     │   │   ├── layout
     │   │   │   ├── LeftSidebar.tsx
     │   │   │   ├── RightPanel.tsx
@@ -68,7 +72,15 @@ pdf_editor
     │   ├── constants
     │   │   ├── menuDefs.ts
     │   │   └── tools.ts
+    │   ├── core
+    │   │   └── tools
+    │   │       ├── BaseTool.ts
+    │   │       ├── PanTool.ts
+    │   │       ├── SelectTool.ts
+    │   │       ├── TextTool.ts
+    │   │       └── ToolManager.ts
     │   ├── hooks
+    │   │   ├── useActiveTool.ts
     │   │   ├── useDragSelection.js
     │   │   ├── usePageChars.js
     │   │   ├── usePdfCanvas.js
@@ -79,6 +91,8 @@ pdf_editor
     │   │   ├── index.css
     │   │   ├── tailwind.css
     │   │   └── theme.css
-    │   └── types
-    │       └── textProps.ts
+    │   ├── types
+    │   │   └── textProps.ts
+    │   └── utils
+    │       └── textUtils.ts
     └── vite.config.ts

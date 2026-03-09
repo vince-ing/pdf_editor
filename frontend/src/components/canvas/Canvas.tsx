@@ -20,6 +20,20 @@ import {
   type TextProps, type TextRun,
 } from '../../types/textProps';
 
+import { InteractionLayer } from './InteractionLayer';
+import { textTool } from '../../core/tools/TextTool';
+import { 
+  runToSpanStyle, 
+  runsToPlainText, 
+  domToRuns, 
+  applyStyleToSelection, 
+  runsToHtml 
+} from '../../utils/textUtils';
+import { runToSpanStyle, runsToHtml } from '../../utils/textUtils';
+import { ResizeHandles, useResizeDrag, type GeoRect } from './ResizeHandles';
+import { RichTextEditor } from './RichTextEditor';
+import { TransientTextBox } from './TransientTextBox';
+
 type ToolId = import('./Toolbar').ToolId;
 
 // ── Data types ─────────────────────────────────────────────────────────────────
@@ -68,656 +82,6 @@ const SEL_COLOR: Partial<Record<ToolId, string>> = {
   highlight: 'rgba(245,158,11,0.25)', redact: 'rgba(239,68,68,0.25)',
   select: 'rgba(74,144,226,0.2)', crop: 'rgba(0,0,0,0)', underline: 'rgba(255,255,255,0.1)',
 };
-
-// ── Rich-text helpers ──────────────────────────────────────────────────────────
-
-/** Convert a TextRun to inline CSS properties for a <span>. */
-function runToSpanStyle(run: TextRun, scale: number): React.CSSProperties {
-  const family = run.fontFamily ?? 'Helvetica';
-  return {
-    fontFamily:  FONT_TO_CSS[family] ?? 'Helvetica, Arial, sans-serif',
-    fontWeight:  run.bold   ? 'bold'   : 'normal',
-    fontStyle:   run.italic ? 'italic' : 'normal',
-    fontSize:    (run.fontSize ?? 12) * scale,
-    color:       run.color ?? '#000000',
-    lineHeight:  1.2,
-    whiteSpace:  'pre-wrap',
-  };
-}
-
-/** Flatten a TextRun[] to a plain string (for text_content fallback). */
-const runsToPlainText = (runs: TextRun[]): string => runs.map(r => r.text).join('');
-
-/**
- * Walk a contentEditable div and extract TextRun[].
- * Each <span data-run> is one run. Text nodes outside spans inherit the
- * container's current default style (passed as `defaultProps`).
- */
-function domToRuns(container: HTMLElement, defaultProps: TextProps): TextRun[] {
-  const runs: TextRun[] = [];
-
-  const walk = (node: ChildNode) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent ?? '';
-      if (!text) return;
-      // Inherit from closest ancestor span
-      const parent = node.parentElement;
-      const span   = parent?.closest('[data-run]') as HTMLElement | null;
-      if (span) {
-        runs.push({
-          text,
-          bold:       span.dataset.bold       === 'true',
-          italic:     span.dataset.italic     === 'true',
-          fontFamily: span.dataset.fontFamily ?? defaultProps.fontFamily,
-          fontSize:   parseFloat(span.dataset.fontSize ?? String(defaultProps.fontSize)),
-          color:      span.dataset.color      ?? defaultProps.color,
-        });
-      } else {
-        runs.push({
-          text,
-          bold:       defaultProps.isBold,
-          italic:     defaultProps.isItalic,
-          fontFamily: defaultProps.fontFamily,
-          fontSize:   defaultProps.fontSize,
-          color:      defaultProps.color,
-        });
-      }
-    } else if (node.nodeName === 'BR') {
-      if (runs.length > 0) runs[runs.length - 1].text += '\n';
-      else runs.push({ text: '\n', bold: false, italic: false, fontFamily: defaultProps.fontFamily, fontSize: defaultProps.fontSize, color: defaultProps.color });
-    } else if (node.nodeName === 'DIV' || node.nodeName === 'P') {
-      // Block elements = newline before content
-      if (runs.length > 0) runs[runs.length - 1].text += '\n';
-      node.childNodes.forEach(walk);
-    } else {
-      node.childNodes.forEach(walk);
-    }
-  };
-
-  container.childNodes.forEach(walk);
-
-  // Merge adjacent runs that share identical style
-  const merged: TextRun[] = [];
-  for (const run of runs) {
-    const prev = merged[merged.length - 1];
-    if (
-      prev &&
-      prev.bold       === run.bold       &&
-      prev.italic     === run.italic     &&
-      prev.fontFamily === run.fontFamily &&
-      prev.fontSize   === run.fontSize   &&
-      prev.color      === run.color
-    ) {
-      prev.text += run.text;
-    } else {
-      merged.push({ ...run });
-    }
-  }
-  return merged;
-}
-
-/**
- * Apply a style to the current Selection (or an explicitly passed range) inside `container`.
- * Returns true if a range was found and acted on.
- */
-function applyStyleToSelection(
-  container: HTMLElement,
-  style: Partial<{ bold: boolean; italic: boolean; fontFamily: string; fontSize: number; color: string }>,
-  scale: number,
-  explicitRange?: Range,
-): boolean {
-  const sel = window.getSelection();
-
-  // Use explicit range if provided (survives React state-update cycles), otherwise
-  // fall back to live selection.
-  let range: Range | null = explicitRange ?? null;
-  if (!range) {
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
-    range = sel.getRangeAt(0);
-  }
-  if (!container.contains(range.commonAncestorContainer)) return false;
-
-  const span = document.createElement('span');
-  span.dataset.run = '1';
-
-  // Inherit current style from the span the cursor/selection starts in
-  const anchor = range.startContainer.parentElement?.closest('[data-run]') as HTMLElement | null;
-  const existingBold       = anchor?.dataset.bold       === 'true';
-  const existingItalic     = anchor?.dataset.italic     === 'true';
-  const existingFontFamily = anchor?.dataset.fontFamily ?? 'Helvetica';
-  const existingFontSize   = parseFloat(anchor?.dataset.fontSize ?? '12');
-  const existingColor      = anchor?.dataset.color      ?? '#000000';
-
-  span.dataset.bold       = String(style.bold       !== undefined ? style.bold       : existingBold);
-  span.dataset.italic     = String(style.italic     !== undefined ? style.italic     : existingItalic);
-  span.dataset.fontFamily = style.fontFamily ?? existingFontFamily;
-  span.dataset.fontSize   = String(style.fontSize   !== undefined ? style.fontSize   : existingFontSize);
-  span.dataset.color      = style.color      ?? existingColor;
-
-  const family = span.dataset.fontFamily;
-  Object.assign(span.style, {
-    fontFamily:  FONT_TO_CSS[family] ?? 'Helvetica, Arial, sans-serif',
-    fontWeight:  span.dataset.bold   === 'true' ? 'bold'   : 'normal',
-    fontStyle:   span.dataset.italic === 'true' ? 'italic' : 'normal',
-    fontSize:    `${parseFloat(span.dataset.fontSize) * scale}px`,
-    color:       span.dataset.color,
-    lineHeight:  '1.2',
-    whiteSpace:  'pre-wrap',
-  });
-
-  try {
-    range.surroundContents(span);
-  } catch {
-    // surroundContents throws when selection crosses element boundaries
-    // Fall back: extract → wrap → insert
-    const fragment = range.extractContents();
-    span.appendChild(fragment);
-    range.insertNode(span);
-  }
-
-  // Restore selection to the new span
-  const newRange = document.createRange();
-  newRange.selectNodeContents(span);
-  sel?.removeAllRanges();
-  sel?.addRange(newRange);
-  return true;
-}
-
-/**
- * Build initial innerHTML for a contentEditable from a node's runs.
- * Each run becomes a <span data-run ...>.
- */
-function runsToHtml(runs: TextRun[], defaultProps: TextProps, scale: number): string {
-  if (!runs || runs.length === 0) return '';
-  return runs.map(run => {
-    const family  = run.fontFamily ?? defaultProps.fontFamily;
-    const fs      = run.fontSize   ?? defaultProps.fontSize;
-    const color   = run.color      ?? defaultProps.color;
-    const bold    = run.bold       ?? false;
-    const italic  = run.italic     ?? false;
-    const cssFont = FONT_TO_CSS[family] ?? 'Helvetica, Arial, sans-serif';
-    // Escape HTML entities in text, convert \n to <br>
-    const escaped = run.text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/\n/g, '<br>');
-    return `<span data-run="1" data-bold="${bold}" data-italic="${italic}" `
-      + `data-font-family="${family}" data-font-size="${fs}" data-color="${color}" `
-      + `style="font-family:${cssFont};font-weight:${bold ? 'bold' : 'normal'};`
-      + `font-style:${italic ? 'italic' : 'normal'};font-size:${fs * scale}px;`
-      + `color:${color};line-height:1.2;white-space:pre-wrap">${escaped}</span>`;
-  }).join('');
-}
-
-// ── Resize handles ─────────────────────────────────────────────────────────────
-
-type HandleDef = { id: string; cursor: string; tx: number; ty: number; dx: 1|0|-1; dy: 1|0|-1 };
-const HANDLES: HandleDef[] = [
-  { id: 'nw', cursor: 'nw-resize', tx: 0,   ty: 0,   dx: -1, dy: -1 },
-  { id: 'n',  cursor: 'n-resize',  tx: 0.5, ty: 0,   dx:  0, dy: -1 },
-  { id: 'ne', cursor: 'ne-resize', tx: 1,   ty: 0,   dx:  1, dy: -1 },
-  { id: 'e',  cursor: 'e-resize',  tx: 1,   ty: 0.5, dx:  1, dy:  0 },
-  { id: 'se', cursor: 'se-resize', tx: 1,   ty: 1,   dx:  1, dy:  1 },
-  { id: 's',  cursor: 's-resize',  tx: 0.5, ty: 1,   dx:  0, dy:  1 },
-  { id: 'sw', cursor: 'sw-resize', tx: 0,   ty: 1,   dx: -1, dy:  1 },
-  { id: 'w',  cursor: 'w-resize',  tx: 0,   ty: 0.5, dx: -1, dy:  0 },
-];
-const MIN_W = 40, MIN_H = 16;
-type GeoRect = { x: number; y: number; w: number; h: number };
-
-function useResizeDrag(scale: number, onUpdate: (g: GeoRect) => void) {
-  return useCallback((e: React.PointerEvent, handle: HandleDef, snap: GeoRect) => {
-    e.preventDefault(); e.stopPropagation();
-    const sx = e.clientX, sy = e.clientY;
-    const calc = (ev: PointerEvent): GeoRect => {
-      const ddx = (ev.clientX - sx) / scale, ddy = (ev.clientY - sy) / scale;
-      let { x, y, w, h } = snap;
-      if (handle.dx ===  1) w = Math.max(MIN_W, snap.w + ddx);
-      if (handle.dx === -1) { w = Math.max(MIN_W, snap.w - ddx); x = snap.x + snap.w - w; }
-      if (handle.dy ===  1) h = Math.max(MIN_H, snap.h + ddy);
-      if (handle.dy === -1) { h = Math.max(MIN_H, snap.h - ddy); y = snap.y + snap.h - h; }
-      return { x, y, w, h };
-    };
-    const onMove = (ev: PointerEvent) => onUpdate(calc(ev));
-    const onUp   = (ev: PointerEvent) => { onUpdate(calc(ev)); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  }, [scale, onUpdate]);
-}
-
-function ResizeHandles({ geo, scale, onResize }: {
-  geo: GeoRect; scale: number;
-  onResize: (e: React.PointerEvent, h: HandleDef, snap: GeoRect) => void;
-}) {
-  return (
-    <>
-      {HANDLES.map(h => (
-        <div key={h.id} onPointerDown={e => onResize(e, h, geo)} style={{
-          position: 'absolute',
-          left: `calc(${h.tx * 100}% - 4px)`, top: `calc(${h.ty * 100}% - 4px)`,
-          width: 8, height: 8, background: '#fff',
-          border: '1.5px solid #4a90e2', borderRadius: 1.5,
-          cursor: h.cursor, zIndex: 4, boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
-        }} />
-      ))}
-    </>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// RichTextEditor — shared contentEditable core used by both Transient and Node
-// ══════════════════════════════════════════════════════════════════════════════
-
-interface RichTextEditorProps {
-  initialHtml:   string;
-  scale:         number;
-  textProps:     TextProps;
-  isTransient:   boolean;    // true = new box, false = editing committed node
-  onCommit:      (runs: TextRun[], plainText: string) => void;
-  onCancel:      () => void;
-  onPropsChange?:(p: TextProps) => void; // reflect selection style back to panel
-  blurRef?:      React.MutableRefObject<(() => void) | null>; // imperative blur handle
-}
-
-// ID used to identify the right panel — blur is suppressed when focus moves there
-const RIGHT_PANEL_ID = 'text-props-panel';
-
-function RichTextEditor({
-  initialHtml, scale, textProps, isTransient, onCommit, onCancel, onPropsChange, blurRef,
-}: RichTextEditorProps) {
-  const editorRef     = useRef<HTMLDivElement>(null);
-  // Keep a live ref to textProps so event handlers always see current values
-  // without needing to be re-created on every render
-  const textPropsRef  = useRef(textProps);
-  useEffect(() => { textPropsRef.current = textProps; }, [textProps]);
-
-  // Set initial HTML once
-  useEffect(() => {
-    if (editorRef.current && initialHtml !== undefined) {
-      editorRef.current.innerHTML = initialHtml;
-      const range = document.createRange();
-      range.selectNodeContents(editorRef.current);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-      editorRef.current.focus();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // pendingStyle holds style overrides that should apply to the NEXT typed character.
-  const pendingStyle = useRef<Partial<{ bold: boolean; italic: boolean; fontFamily: string; fontSize: number; color: string }>>({});
-
-  // savedRange preserves the user's text selection across React state updates.
-  // Set by reflectSelection before calling onPropsChange; consumed by the textProps effect.
-  const savedRange = useRef<Range | null>(null);
-
-  // Track previous textProps to detect what changed
-  const prevProps = useRef(textProps);
-
-  useEffect(() => {
-    const p = textProps, pp = prevProps.current;
-    const changes: typeof pendingStyle.current = {};
-    if (p.isBold     !== pp.isBold)     changes.bold       = p.isBold;
-    if (p.isItalic   !== pp.isItalic)   changes.italic     = p.isItalic;
-    if (p.fontFamily !== pp.fontFamily) changes.fontFamily  = p.fontFamily;
-    if (p.fontSize   !== pp.fontSize)   changes.fontSize   = p.fontSize;
-    if (p.color      !== pp.color)      changes.color      = p.color;
-    prevProps.current = p;
-
-    if (!Object.keys(changes).length || !editorRef.current) return;
-
-    const sel = window.getSelection();
-    const rangeToUse = savedRange.current;
-    const liveNonCollapsed = sel && !sel.isCollapsed && sel.rangeCount > 0 &&
-      editorRef.current.contains(sel.anchorNode);
-    const hasSelection = rangeToUse || liveNonCollapsed;
-
-    if (hasSelection) {
-      if (rangeToUse && sel) {
-        sel.removeAllRanges();
-        sel.addRange(rangeToUse);
-      }
-      applyStyleToSelection(editorRef.current, changes, scale);
-      savedRange.current = null;
-    } else {
-      // No selection — queue for next typed character only.
-      // Do NOT update existing content in the editor.
-      pendingStyle.current = { ...pendingStyle.current, ...changes };
-    }
-  }, [textProps, scale]);
-
-  const commit = useCallback(() => {
-    if (!editorRef.current) return;
-    const runs = domToRuns(editorRef.current, textPropsRef.current);
-    const plain = runsToPlainText(runs);
-    if (plain.trim()) onCommit(runs, plain);
-    else onCancel();
-  }, [onCommit, onCancel]);
-
-  // Expose blur imperatively so parent can trigger commit by blurring the editor.
-  // Set once on mount — editorRef.current is stable for the lifetime of this instance.
-  useEffect(() => {
-    if (blurRef) blurRef.current = () => editorRef.current?.blur();
-    return () => { if (blurRef) blurRef.current = null; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Guard blur: only suppress when focus moves into the right-panel (for style changes).
-  // All other blur events — including clicks on the canvas, toolbar, sidebar — should commit.
-  const handleBlur = useCallback((e: React.FocusEvent) => {
-    const relatedTarget = e.relatedTarget as HTMLElement | null;
-    if (relatedTarget && document.getElementById(RIGHT_PANEL_ID)?.contains(relatedTarget)) {
-      setTimeout(() => editorRef.current?.focus(), 0);
-      return;
-    }
-    commit();
-  }, [commit]);
-
-  // Reflect selection style back to panel when user selects text.
-  // Also save the range so it survives the onPropsChange state update.
-  const reflectSelection = useCallback(() => {
-    if (!onPropsChange || !editorRef.current) return;
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-    if (!editorRef.current.contains(sel.anchorNode)) return;
-
-    savedRange.current = sel.getRangeAt(0).cloneRange();
-
-    const anchor = sel.anchorNode?.parentElement?.closest('[data-run]') as HTMLElement | null;
-    if (!anchor) return;
-    onPropsChange({
-      fontFamily: anchor.dataset.fontFamily ?? textPropsRef.current.fontFamily,
-      fontSize:   parseFloat(anchor.dataset.fontSize ?? String(textPropsRef.current.fontSize)),
-      color:      anchor.dataset.color      ?? textPropsRef.current.color,
-      isBold:     anchor.dataset.bold       === 'true',
-      isItalic:   anchor.dataset.italic     === 'true',
-    });
-  }, [onPropsChange]);
-
-  // Helper: make a styled span from current textProps + any pendingStyle overrides
-  const makeStyledSpan = useCallback((): HTMLSpanElement => {
-    const tp = textPropsRef.current;
-    const ps = pendingStyle.current;
-    const bold       = ps.bold       !== undefined ? ps.bold       : tp.isBold;
-    const italic     = ps.italic     !== undefined ? ps.italic     : tp.isItalic;
-    const fontFamily = ps.fontFamily ?? tp.fontFamily;
-    const fontSize   = ps.fontSize   ?? tp.fontSize;
-    const color      = ps.color      ?? tp.color;
-    const cssFont    = FONT_TO_CSS[fontFamily] ?? 'Helvetica, Arial, sans-serif';
-
-    const span = document.createElement('span');
-    span.dataset.run        = '1';
-    span.dataset.bold       = String(bold);
-    span.dataset.italic     = String(italic);
-    span.dataset.fontFamily = fontFamily;
-    span.dataset.fontSize   = String(fontSize);
-    span.dataset.color      = color;
-    Object.assign(span.style, {
-      fontFamily:  cssFont,
-      fontWeight:  bold   ? 'bold'   : 'normal',
-      fontStyle:   italic ? 'italic' : 'normal',
-      fontSize:    `${fontSize * scale}px`,
-      color,
-      lineHeight:  '1.2',
-      whiteSpace:  'pre-wrap',
-    });
-    pendingStyle.current = {}; // consumed
-    return span;
-  }, [scale]);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    // Escape always cancels
-    if (e.key === 'Escape') { e.preventDefault(); onCancel(); return; }
-
-    // Enter = newline (browser default), Shift+Enter also newline — never commit on Enter
-    // Commit only happens on blur (clicking outside) or Ctrl+Enter
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(); return; }
-
-    // Ctrl+B / Ctrl+I
-    const tp = textPropsRef.current;
-    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
-      e.preventDefault();
-      const next = !tp.isBold;
-      const sel = window.getSelection();
-      const hasSelection = sel && !sel.isCollapsed && editorRef.current?.contains(sel.anchorNode);
-      if (hasSelection && editorRef.current) {
-        applyStyleToSelection(editorRef.current, { bold: next }, scale);
-      } else {
-        pendingStyle.current = { ...pendingStyle.current, bold: next };
-      }
-      onPropsChange?.({ ...tp, isBold: next });
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
-      e.preventDefault();
-      const next = !tp.isItalic;
-      const sel = window.getSelection();
-      const hasSelection = sel && !sel.isCollapsed && editorRef.current?.contains(sel.anchorNode);
-      if (hasSelection && editorRef.current) {
-        applyStyleToSelection(editorRef.current, { italic: next }, scale);
-      } else {
-        pendingStyle.current = { ...pendingStyle.current, italic: next };
-      }
-      onPropsChange?.({ ...tp, isItalic: next });
-      return;
-    }
-
-    // For any printable character, if there's a pending style we insert a
-    // pre-styled span manually so the character appears with the right style.
-    // We only do this when pendingStyle is non-empty AND the cursor is not
-    // already inside a matching [data-run] span.
-    if (Object.keys(pendingStyle.current).length > 0 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
-      e.preventDefault();
-      const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0) return;
-      const range = sel.getRangeAt(0);
-      // Delete any selected content first
-      if (!sel.isCollapsed) range.deleteContents();
-
-      const span = makeStyledSpan();
-      const textNode = document.createTextNode(e.key);
-      span.appendChild(textNode);
-      range.insertNode(span);
-
-      // Place cursor after the inserted character
-      const newRange = document.createRange();
-      newRange.setStartAfter(textNode);
-      newRange.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(newRange);
-    }
-  };
-
-  // Wrap any bare text nodes in the editor into styled spans immediately after
-  // the browser inserts them. This prevents defaultStyle CSS from cascading into
-  // unstyled text and causing the "first word changes color" bug.
-  //
-  // IMPORTANT: Only wrap text nodes that are NOT already inside a [data-run] span.
-  // We check this by walking only direct children of the editor root and any
-  // non-[data-run] elements — we never recurse into [data-run] spans.
-  const handleInput = useCallback(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const sel = window.getSelection();
-    const cursorNode   = sel?.anchorNode ?? null;
-    const cursorOffset = sel?.anchorOffset ?? 0;
-
-    let wrapped: Node | null = null;
-
-    // Walk nodes that are direct children of the editor (or nested in non-run
-    // elements like <div>/<p> inserted by the browser on Enter). Stop descent
-    // as soon as we reach a [data-run] span — never recurse into them.
-    const walkAndWrap = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        // Only wrap if this text node's nearest [data-run] ancestor is NOT
-        // inside the editor — i.e. the text is truly bare.
-        const parentRun = (node.parentElement as HTMLElement | null)?.closest('[data-run]');
-        if (parentRun && editor.contains(parentRun)) {
-          // Already inside a styled span — leave it alone.
-          return;
-        }
-
-        // Bare text node — wrap it with current style.
-        const tp = textPropsRef.current;
-        const ps = pendingStyle.current;
-        const bold       = ps.bold       !== undefined ? ps.bold       : tp.isBold;
-        const italic     = ps.italic     !== undefined ? ps.italic     : tp.isItalic;
-        const fontFamily = ps.fontFamily ?? tp.fontFamily;
-        const fontSize   = ps.fontSize   ?? tp.fontSize;
-        const color      = ps.color      ?? tp.color;
-        const cssFont    = FONT_TO_CSS[fontFamily] ?? 'Helvetica, Arial, sans-serif';
-
-        const span = document.createElement('span');
-        span.dataset.run        = '1';
-        span.dataset.bold       = String(bold);
-        span.dataset.italic     = String(italic);
-        span.dataset.fontFamily = fontFamily;
-        span.dataset.fontSize   = String(fontSize);
-        span.dataset.color      = color;
-        Object.assign(span.style, {
-          fontFamily: cssFont,
-          fontWeight: bold   ? 'bold'   : 'normal',
-          fontStyle:  italic ? 'italic' : 'normal',
-          fontSize:   `${fontSize * scale}px`,
-          color,
-          lineHeight: '1.2',
-          whiteSpace: 'pre-wrap',
-        });
-
-        node.parentNode!.insertBefore(span, node);
-        span.appendChild(node);
-        if (node === cursorNode) wrapped = span;
-        // Consume pendingStyle now that we've used it
-        pendingStyle.current = {};
-        return;
-      }
-
-      // Element node: stop recursion at [data-run] spans.
-      if ((node as HTMLElement).dataset?.run) return;
-
-      // Recurse into non-run elements (e.g. <div>, <p> from browser Enter behaviour).
-      node.childNodes.forEach(walkAndWrap);
-    };
-
-    editor.childNodes.forEach(walkAndWrap);
-
-    // Restore cursor if we wrapped the node it was in
-    if (wrapped && sel) {
-      const range = document.createRange();
-      const textChild = (wrapped as HTMLElement).firstChild;
-      if (textChild) {
-        range.setStart(textChild, Math.min(cursorOffset, (textChild as Text).length));
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-    }
-  }, [scale]);
-
-  const defaultStyle: React.CSSProperties = {
-    // Only layout properties — NO color, font, size here.
-    // All text must be inside [data-run] spans which carry their own styles.
-    // If we put color/fontWeight etc. here they cascade into bare text nodes
-    // and make the whole box change style when textProps changes.
-    lineHeight:   1.2,
-    wordBreak:    'break-word',
-    overflowWrap: 'break-word',
-    whiteSpace:   'pre-wrap',
-    overflow:     'hidden',
-    padding:      0,
-    margin:       0,
-  };
-
-  return (
-    <div
-      ref={editorRef}
-      contentEditable
-      suppressContentEditableWarning
-      onKeyDown={onKeyDown}
-      onBlur={handleBlur}
-      onInput={handleInput}
-      onMouseUp={reflectSelection}
-      onKeyUp={reflectSelection}
-      onPointerDown={e => e.stopPropagation()}
-      style={{
-        ...defaultStyle,
-        position:   'absolute', inset: 0,
-        outline:    '1.5px solid #4a90e2',
-        background: 'transparent',
-        cursor:     'text',
-        boxSizing:  'border-box',
-        userSelect: 'text',
-      }}
-    />
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TransientTextBox
-// ══════════════════════════════════════════════════════════════════════════════
-
-interface TransientBoxProps {
-  initialX: number; initialY: number;
-  scale:      number;
-  textProps:  TextProps;
-  onPropsChange?: (p: TextProps) => void;
-  onCommit: (runs: TextRun[], plain: string, x: number, y: number, w: number, h: number) => void;
-  onCancel: () => void;
-  blurRef?: React.MutableRefObject<(() => void) | null>;
-}
-
-function TransientTextBox({ initialX, initialY, scale, textProps, onPropsChange, onCommit, onCancel, blurRef }: TransientBoxProps) {
-  const INIT_W = 160;
-  const INIT_H = Math.ceil(textProps.fontSize * 1.2) + 2;
-  const [geo, setGeo] = useState<GeoRect>({ x: initialX, y: initialY, w: INIT_W, h: INIT_H });
-
-  const startMove = useCallback((e: React.PointerEvent) => {
-    // Only move if the target is the wrapper div (not the editor inside)
-    if ((e.target as HTMLElement).isContentEditable) return;
-    e.preventDefault(); e.stopPropagation();
-    const sx = e.clientX, sy = e.clientY, ox = geo.x, oy = geo.y;
-    const onMove = (ev: PointerEvent) => setGeo(g => ({ ...g, x: ox + (ev.clientX - sx) / scale, y: oy + (ev.clientY - sy) / scale }));
-    const onUp   = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  }, [geo.x, geo.y, scale]);
-
-  const handleResize = useResizeDrag(scale, setGeo);
-
-  // Keep geo accessible inside commit callback via ref
-  const geoRef = useRef(geo);
-  useEffect(() => { geoRef.current = geo; }, [geo]);
-
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        left: geo.x * scale, top: geo.y * scale,
-        width: geo.w * scale, height: geo.h * scale,
-        zIndex: 60, boxSizing: 'border-box',
-        border: '1.5px solid #4a90e2',
-        cursor: 'move',
-      }}
-      onPointerDown={startMove}
-    >
-      <RichTextEditor
-        initialHtml=""
-        scale={scale}
-        textProps={textProps}
-        isTransient
-        onPropsChange={onPropsChange}
-        blurRef={blurRef}
-        onCommit={(runs, plain) => {
-          const g = geoRef.current;
-          onCommit(runs, plain, g.x, g.y, g.w, g.h);
-        }}
-        onCancel={onCancel}
-      />
-      <ResizeHandles geo={geo} scale={scale} onResize={handleResize} />
-    </div>
-  );
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // NodeOverlay — committed annotations
@@ -920,14 +284,25 @@ function PageRenderer({
   useEffect(() => { setAnnotations(pageNode.children ?? []); }, [pageNode.children]);
   useEffect(() => { if (typeof pageNode.rotation === 'number') setLocalRotation(pageNode.rotation); }, [pageNode.rotation, pageNode.id]);
 
-  // When the user switches away from addtext while a transient box is open, blur it to commit.
+  // Hook up the new Tool Manager logic for text rendering
   useEffect(() => {
-    if (activeTool !== 'addtext' && transientPos) {
+    const unsubPos = textTool.onPositionStateChange((pos) => {
+      if (!pos) {
+        setTransientPos(null);
+      } else if (pos.pageId === pageNode.id) {
+        setTransientPos({ x: pos.x, y: pos.y });
+      }
+    });
+
+    const unsubCommit = textTool.onCommitRequest(() => {
       transientBlurRef.current?.();
-    }
-  // We only want to react to tool changes, not transientPos changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTool]);
+    });
+    
+    return () => {
+      unsubPos();
+      unsubCommit();
+    };
+  }, [pageNode.id]);
 
   const { canvasRef, fullDimensions } = usePdfCanvas({ pdfDoc, pageNode, pageIndex, scale, localRotation });
   const { pageChars } = usePageChars({ pageNodeId: pageNode.id, localRotation, metadata: pageNode.metadata });
@@ -1008,7 +383,7 @@ function PageRenderer({
 
   const handleTextCommit = useCallback(async (runs: TextRun[], plain: string, x: number, y: number, w: number, h: number) => {
     setTransientPos(null);
-    // Suppress the overlay onClick that fires on the same pointer event that caused the blur
+    textTool.notifyCommitted(); // Tell the tool manager strategy it closed
     justCommittedRef.current = true;
     try {
       const res = await engineApi.addTextAnnotation(
@@ -1062,33 +437,17 @@ function PageRenderer({
           </div>
         )}
 
+        {/* RESTORED LEGACY OVERLAY */}
         <div
           ref={overlayRef}
           className="absolute inset-0 z-10"
           style={{ cursor: CURSORS[activeTool] ?? 'default', userSelect: 'none' }}
           onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => {
-            // If a transient box is open, this mousedown will cause it to blur+commit.
-            // Pre-emptively set the flag so the onClick that follows doesn't open a new box.
-            if (transientPos) {
-              justCommittedRef.current = true;
-            }
-            // If a node is being edited and the user clicks on the bare canvas
-            // (not on the editor itself — that stops propagation), commit the edit.
-            if (activeNodeBlurRef.current) {
-              activeNodeBlurRef.current();
-            }
+            if (transientPos) justCommittedRef.current = true;
+            if (activeNodeBlurRef.current) activeNodeBlurRef.current();
             if (isDragTool) handlers.onMouseDown?.(e);
           }}
-          onClick={activeTool === 'addtext' ? (e) => {
-            // If a commit just happened on this same click, skip opening a new box
-            if (justCommittedRef.current) {
-              justCommittedRef.current = false;
-              return;
-            }
-            if (transientPos || !overlayRef.current) return;
-            const r = overlayRef.current.getBoundingClientRect();
-            setTransientPos({ x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale });
-          } : handlers.onClick}
+          onClick={handlers.onClick}
           onMouseMove={isDragTool ? handlers.onMouseMove : undefined}
           onMouseUp={isDragTool ? handlers.onMouseUp : undefined}
           onMouseLeave={isDragTool ? handlers.onMouseLeave : undefined}
@@ -1102,6 +461,16 @@ function PageRenderer({
             }} />
           ))}
         </div>
+
+        {/* NEW INTERACTION LAYER */}
+        <InteractionLayer 
+          scale={scale} 
+          pageId={pageNode.id} 
+          cursor={CURSORS[activeTool] ?? 'default'} 
+          onPointerDownCapture={() => {
+            if (activeNodeBlurRef.current) activeNodeBlurRef.current();
+          }}
+        />
 
         {annotations.map(node => (
           <NodeOverlay
@@ -1120,7 +489,10 @@ function PageRenderer({
             onPropsChange={onTextPropsChange}
             blurRef={transientBlurRef}
             onCommit={handleTextCommit}
-            onCancel={() => setTransientPos(null)}
+            onCancel={() => {
+              setTransientPos(null);
+              textTool.notifyCommitted(); // Tell the strategy it closed
+            }}
           />
         )}
       </div>

@@ -16,6 +16,7 @@ import { StatusBar }   from '../components/layout/StatusBar';
 import { Toolbar }     from '../components/toolbar/Toolbar';
 import { Canvas }      from '../components/canvas/Canvas';
 
+import { toolManager } from '../core/tools/ToolManager';
 import type { ToolId } from '../constants/tools';
 import type { SidebarView } from '../components/layout/LeftSidebar';
 import type { FileTab } from '../components/layout/TopBar';
@@ -200,7 +201,11 @@ export default function App() {
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <Toolbar
-            activeTool={activeTool} onToolChange={setActiveTool}
+            activeTool={activeTool} 
+            onToolChange={(id) => {
+              setActiveTool(id);               // Updates React
+              toolManager.setActiveTool(id);   // Updates the Strategy Pattern
+            }}
             scale={scale} onZoomIn={zoomIn} onZoomOut={zoomOut} onZoomReset={zoomReset}
             onUndo={handleUndo} onRedo={handleRedo}
             onReadPage={handleReadPage} onReadSelection={handleReadSelection}
