@@ -1,142 +1,116 @@
-// components/toolbar/Toolbar.tsx — Ribbon-style tabbed toolbar.
-// Active tool tab: text turns blue instead of showing a dot indicator.
-
+// components/toolbar/Toolbar.tsx
 import { Undo2, Redo2, Volume2, Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { TOOL_DEFS, type ToolId } from '../../constants/tools';
+import { useTheme } from '../../theme';
 
 export type { ToolId };
 
 interface ToolbarProps {
-  activeTool: ToolId;
-  onToolChange: (tool: ToolId) => void;
-  scale: number;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onZoomReset: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onReadPage: () => void;
-  onReadSelection: () => void;
-  hasSelection: boolean;
-  ttsActive: boolean;
+  activeTool: ToolId; onToolChange: (tool: ToolId) => void;
+  scale: number; onZoomIn: () => void; onZoomOut: () => void; onZoomReset: () => void;
+  onUndo: () => void; onRedo: () => void;
+  onReadPage: () => void; onReadSelection: () => void;
+  hasSelection: boolean; ttsActive: boolean;
   pageInfo?: { current: number; total: number } | null;
 }
 
 type TabId = 'view' | 'edit' | 'comment' | 'pages';
-
 const TABS: { id: TabId; label: string }[] = [
-  { id: 'view',    label: 'View'    },
-  { id: 'edit',    label: 'Edit'    },
-  { id: 'comment', label: 'Comment' },
-  { id: 'pages',   label: 'Pages'   },
+  { id: 'view', label: 'View' }, { id: 'edit', label: 'Edit' },
+  { id: 'comment', label: 'Comment' }, { id: 'pages', label: 'Pages' },
 ];
 
-// ── Tall tool button ──────────────────────────────────────────────────────────
+const ToolBtn = ({ icon: Icon, label, isActive, onClick }: {
+  icon: React.ComponentType<{ size?: number }>; label: string; isActive: boolean; onClick: () => void;
+}) => {
+  const { theme: t } = useTheme();
+  const [hov, setHov] = useState(false);
+  return (
+    <button onClick={onClick} title={label}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: '6px', padding: '0 16px', borderRadius: t.radius.md, flexShrink: 0, height: '100%',
+        minWidth: '60px', border: 'none', cursor: 'pointer', transition: t.t.fast,
+        backgroundColor: isActive ? t.colors.accent : hov ? t.colors.bgHover : 'transparent',
+        color: isActive ? '#fff' : hov ? t.colors.textPrimary : t.colors.textSecondary,
+      }}>
+      <Icon size={19} />
+      <span style={{ fontSize: '11px', lineHeight: 1, whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  );
+};
 
-const ToolBtn = ({
-  icon: Icon, label, isActive, onClick,
-}: {
-  icon: React.ComponentType<{ size?: number }>;
-  label: string;
-  isActive: boolean;
-  onClick: () => void;
-}) => (
-  <button
-    onClick={onClick}
-    title={label}
-    className={`flex flex-col items-center justify-center gap-1.5 px-4 rounded-lg transition-all duration-100 flex-shrink-0 h-full min-w-[60px]
-      ${isActive
-        ? 'bg-[#4a90e2] text-white shadow-sm'
-        : 'text-gray-300 hover:bg-[#3d4449] hover:text-white'
-      }`}
-  >
-    <Icon size={19} />
-    <span className={`text-[11px] font-normal leading-none whitespace-nowrap`}>{label}</span>
-  </button>
-);
+const SmallToolBtn = ({ icon: Icon, label, isActive, onClick, disabled }: {
+  icon: React.ComponentType<{ size?: number }>; label: string;
+  isActive: boolean; onClick: () => void; disabled?: boolean;
+}) => {
+  const { theme: t } = useTheme();
+  const [hov, setHov] = useState(false);
+  return (
+    <button onClick={onClick} disabled={disabled} title={label}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px',
+        borderRadius: t.radius.sm, width: '100%', border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: t.t.fast, opacity: disabled ? 0.3 : 1,
+        backgroundColor: isActive ? t.colors.accent : hov && !disabled ? t.colors.bgHover : 'transparent',
+        color: isActive ? '#fff' : hov && !disabled ? t.colors.textPrimary : t.colors.textSecondary,
+      }}>
+      <Icon size={14} />
+      <span style={{ fontSize: '11px', lineHeight: 1, whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  );
+};
 
-// ── Small stacked button ──────────────────────────────────────────────────────
-
-const SmallToolBtn = ({
-  icon: Icon, label, isActive, onClick, disabled,
-}: {
-  icon: React.ComponentType<{ size?: number }>;
-  label: string;
-  isActive: boolean;
-  onClick: () => void;
-  disabled?: boolean;
-}) => (
-  <button
-    onClick={onClick}
-    disabled={disabled}
-    title={label}
-    className={`flex items-center gap-2 px-3 py-[6px] rounded transition-all duration-100 w-full
-      ${disabled
-        ? 'opacity-30 cursor-not-allowed text-gray-500'
-        : isActive
-          ? 'bg-[#4a90e2] text-white'
-          : 'text-gray-300 hover:bg-[#3d4449] hover:text-white'
-      }`}
-  >
-    <Icon size={14} />
-    <span className="text-[11px] font-normal leading-none whitespace-nowrap">{label}</span>
-  </button>
-);
-
-// ── Vertical rule ─────────────────────────────────────────────────────────────
-
-const Rule = () => (
-  <div className="w-px bg-[#1e2327] mx-3 my-2 flex-shrink-0 self-stretch" />
-);
-
-// ── Pair column ───────────────────────────────────────────────────────────────
+const Rule = () => {
+  const { theme: t } = useTheme();
+  return <div style={{ width: '1px', backgroundColor: t.colors.border, margin: '8px 12px', flexShrink: 0, alignSelf: 'stretch' }} />;
+};
 
 const PairCol = ({ tools, activeTool, onToolChange }: {
-  tools: (typeof TOOL_DEFS[number])[];
-  activeTool: ToolId;
-  onToolChange: (id: ToolId) => void;
+  tools: (typeof TOOL_DEFS[number])[]; activeTool: ToolId; onToolChange: (id: ToolId) => void;
 }) => (
-  <div className="flex flex-col gap-0.5 justify-center h-full py-1.5 min-w-[110px]">
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', justifyContent: 'center', height: '100%', padding: '6px 0', minWidth: '110px' }}>
     {tools.map(t => (
-      <SmallToolBtn
-        key={t.id}
-        icon={t.icon}
-        label={t.label}
-        isActive={activeTool === t.id}
-        onClick={() => onToolChange(t.id)}
-      />
+      <SmallToolBtn key={t.id} icon={t.icon} label={t.label}
+        isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
     ))}
   </div>
 );
 
-const byId = (ids: ToolId[]) =>
-  ids.map(id => TOOL_DEFS.find(t => t.id === id)!).filter(Boolean);
-
-// ── Tab content ───────────────────────────────────────────────────────────────
+const byId = (ids: ToolId[]) => ids.map(id => TOOL_DEFS.find(t => t.id === id)!).filter(Boolean);
 
 function ViewTab({ activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset }: {
   activeTool: ToolId; onToolChange: (id: ToolId) => void;
   scale: number; onZoomIn: () => void; onZoomOut: () => void; onZoomReset: () => void;
 }) {
+  const { theme: t } = useTheme();
+  const [hovOut, setHovOut] = useState(false);
+  const [hovReset, setHovReset] = useState(false);
+  const [hovIn, setHovIn] = useState(false);
   return (
     <>
-      {byId(['hand', 'select', 'zoom']).map(t => (
-        <ToolBtn key={t.id} icon={t.icon} label={t.label}
-          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+      {byId(['hand', 'select', 'zoom']).map(t2 => (
+        <ToolBtn key={t2.id} icon={t2.icon} label={t2.label}
+          isActive={activeTool === t2.id} onClick={() => onToolChange(t2.id)} />
       ))}
       <Rule />
-      <div className="flex items-center gap-0.5 bg-[#1e2327] rounded-lg px-1.5 self-center">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: t.colors.bgBase, borderRadius: t.radius.md, padding: '0 6px', alignSelf: 'center' }}>
         <button onClick={onZoomOut} disabled={scale <= 0.25}
-          className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-[#3d4449] hover:text-white disabled:opacity-30 transition-colors">
+          onMouseEnter={() => setHovOut(true)} onMouseLeave={() => setHovOut(false)}
+          style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: t.radius.sm, border: 'none', cursor: scale <= 0.25 ? 'not-allowed' : 'pointer', opacity: scale <= 0.25 ? 0.3 : 1, backgroundColor: hovOut ? t.colors.bgHover : 'transparent', color: t.colors.textSecondary, transition: t.t.fast }}>
           <Minus size={13} />
         </button>
         <button onClick={onZoomReset}
-          className="min-w-[46px] h-7 text-white text-[11px] font-semibold font-mono px-1 hover:bg-[#3d4449] rounded transition-colors">
+          onMouseEnter={() => setHovReset(true)} onMouseLeave={() => setHovReset(false)}
+          style={{ minWidth: 46, height: 28, fontSize: '11px', fontWeight: 600, fontFamily: t.fonts.mono, padding: '0 4px', borderRadius: t.radius.sm, border: 'none', cursor: 'pointer', backgroundColor: hovReset ? t.colors.bgHover : 'transparent', color: t.colors.textPrimary, transition: t.t.fast }}>
           {Math.round(scale * 100)}%
         </button>
         <button onClick={onZoomIn} disabled={scale >= 4.0}
-          className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:bg-[#3d4449] hover:text-white disabled:opacity-30 transition-colors">
+          onMouseEnter={() => setHovIn(true)} onMouseLeave={() => setHovIn(false)}
+          style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: t.radius.sm, border: 'none', cursor: scale >= 4.0 ? 'not-allowed' : 'pointer', opacity: scale >= 4.0 ? 0.3 : 1, backgroundColor: hovIn ? t.colors.bgHover : 'transparent', color: t.colors.textSecondary, transition: t.t.fast }}>
           <Plus size={13} />
         </button>
       </div>
@@ -145,19 +119,17 @@ function ViewTab({ activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomR
 }
 
 function EditTab({ activeTool, onToolChange, onUndo, onRedo }: {
-  activeTool: ToolId; onToolChange: (id: ToolId) => void;
-  onUndo: () => void; onRedo: () => void;
+  activeTool: ToolId; onToolChange: (id: ToolId) => void; onUndo: () => void; onRedo: () => void;
 }) {
   return (
     <>
-      <div className="flex flex-col gap-0.5 justify-center h-full py-1.5 min-w-[90px]">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', justifyContent: 'center', height: '100%', padding: '6px 0', minWidth: '90px' }}>
         <SmallToolBtn icon={Undo2} label="Undo" isActive={false} onClick={onUndo} />
         <SmallToolBtn icon={Redo2} label="Redo" isActive={false} onClick={onRedo} />
       </div>
       <Rule />
       {byId(['addtext', 'edittext']).map(t => (
-        <ToolBtn key={t.id} icon={t.icon} label={t.label}
-          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+        <ToolBtn key={t.id} icon={t.icon} label={t.label} isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
       ))}
       <Rule />
       <PairCol tools={byId(['addimage', 'link'])} activeTool={activeTool} onToolChange={onToolChange} />
@@ -167,38 +139,31 @@ function EditTab({ activeTool, onToolChange, onUndo, onRedo }: {
 
 function CommentTab({ activeTool, onToolChange, onReadPage, onReadSelection, ttsActive, hasSelection }: {
   activeTool: ToolId; onToolChange: (id: ToolId) => void;
-  onReadPage: () => void; onReadSelection: () => void;
-  ttsActive: boolean; hasSelection: boolean;
+  onReadPage: () => void; onReadSelection: () => void; ttsActive: boolean; hasSelection: boolean;
 }) {
   return (
     <>
       {byId(['highlight', 'underline']).map(t => (
-        <ToolBtn key={t.id} icon={t.icon} label={t.label}
-          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+        <ToolBtn key={t.id} icon={t.icon} label={t.label} isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
       ))}
       <Rule />
       <PairCol tools={byId(['stickynote', 'stamp'])} activeTool={activeTool} onToolChange={onToolChange} />
       <ToolBtn icon={TOOL_DEFS.find(t => t.id === 'redact')!.icon} label="Redact"
         isActive={activeTool === 'redact'} onClick={() => onToolChange('redact')} />
       <Rule />
-      <div className="flex flex-col gap-0.5 justify-center h-full py-1.5 min-w-[110px]">
-        <SmallToolBtn icon={Volume2} label="Read Page"
-          isActive={false} onClick={onReadPage} disabled={ttsActive} />
-        <SmallToolBtn icon={Volume2} label="Read Selection"
-          isActive={false} onClick={onReadSelection} disabled={ttsActive || !hasSelection} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', justifyContent: 'center', height: '100%', padding: '6px 0', minWidth: '110px' }}>
+        <SmallToolBtn icon={Volume2} label="Read Page" isActive={false} onClick={onReadPage} disabled={ttsActive} />
+        <SmallToolBtn icon={Volume2} label="Read Selection" isActive={false} onClick={onReadSelection} disabled={ttsActive || !hasSelection} />
       </div>
     </>
   );
 }
 
-function PagesTab({ activeTool, onToolChange }: {
-  activeTool: ToolId; onToolChange: (id: ToolId) => void;
-}) {
+function PagesTab({ activeTool, onToolChange }: { activeTool: ToolId; onToolChange: (id: ToolId) => void }) {
   return (
     <>
       {byId(['insert', 'delete']).map(t => (
-        <ToolBtn key={t.id} icon={t.icon} label={t.label}
-          isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+        <ToolBtn key={t.id} icon={t.icon} label={t.label} isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
       ))}
       <Rule />
       <PairCol tools={byId(['rotate', 'extract'])} activeTool={activeTool} onToolChange={onToolChange} />
@@ -208,67 +173,61 @@ function PagesTab({ activeTool, onToolChange }: {
   );
 }
 
-// ── Toolbar root ──────────────────────────────────────────────────────────────
-
 export function Toolbar({
-  activeTool, onToolChange,
-  scale, onZoomIn, onZoomOut, onZoomReset,
-  onUndo, onRedo,
-  onReadPage, onReadSelection,
-  hasSelection, ttsActive,
-  pageInfo,
+  activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset,
+  onUndo, onRedo, onReadPage, onReadSelection, hasSelection, ttsActive, pageInfo,
 }: ToolbarProps) {
+  const { theme: t } = useTheme();
   const [activeTab, setActiveTab] = useState<TabId>('view');
 
   const handleToolChange = (id: ToolId) => {
     onToolChange(id);
-    const cat = TOOL_DEFS.find(t => t.id === id)?.category as TabId | undefined;
-    if (cat && TABS.some(t => t.id === cat)) setActiveTab(cat);
+    const cat = TOOL_DEFS.find(t2 => t2.id === id)?.category as TabId | undefined;
+    if (cat && TABS.some(t2 => t2.id === cat)) setActiveTab(cat);
   };
 
   return (
-    <div className="bg-[#2d3338] border-b border-[#1e2327] flex-shrink-0 flex flex-col">
+    <div style={{ backgroundColor: t.colors.bgRaised, borderBottom: `1px solid ${t.colors.bgBase}`, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
 
-      {/* ── Tab strip ── */}
-      <div className="flex items-end px-3 pt-1.5 gap-0.5">
+      {/* Tab strip */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', padding: '6px 12px 0', gap: '2px' }}>
         {TABS.map(tab => {
-          const hasActiveTool = TOOL_DEFS.some(t => t.category === tab.id && t.id === activeTool);
+          const hasActiveTool = TOOL_DEFS.some(t2 => t2.category === tab.id && t2.id === activeTool);
           const isOpen = activeTab === tab.id;
+          const [hov, setHov] = useState(false);
           return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-1.5 text-xs font-medium rounded-t-md transition-all duration-100 border-t border-x flex-shrink-0
-                ${isOpen
-                  ? 'bg-[#252a2e] border-[#1e2327] text-white'
-                  : hasActiveTool
-                    ? 'bg-transparent border-transparent text-[#4a90e2] hover:bg-[#252a2e]/40'
-                    : 'bg-transparent border-transparent text-gray-500 hover:text-gray-300 hover:bg-[#252a2e]/40'
-                }`}
-            >
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+              style={{
+                padding: '5px 16px', fontSize: '12px', fontWeight: 500,
+                borderRadius: `${t.radius.sm} ${t.radius.sm} 0 0`,
+                border: `1px solid ${isOpen ? t.colors.border : 'transparent'}`,
+                borderBottom: 'none', flexShrink: 0, cursor: 'pointer', transition: t.t.fast,
+                backgroundColor: isOpen ? t.colors.bgBase : hov ? `${t.colors.bgBase}60` : 'transparent',
+                color: isOpen ? t.colors.textPrimary : hasActiveTool ? t.colors.accent : hov ? t.colors.textSecondary : t.colors.textMuted,
+                fontFamily: t.fonts.ui,
+              }}>
               {tab.label}
             </button>
           );
         })}
-
         {pageInfo && (
-          <div className="ml-auto flex items-center pb-1.5 pr-1">
-            <span className="text-[12px] text-gray-500 font-mono">
-              <span className="text-gray-200 font-semibold">{pageInfo.current}</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingBottom: '6px' }}>
+            <span style={{ fontSize: '12px', color: t.colors.textMuted, fontFamily: t.fonts.mono }}>
+              <span style={{ color: t.colors.textPrimary, fontWeight: 600 }}>{pageInfo.current}</span>
               {' / '}{pageInfo.total}
             </span>
           </div>
         )}
       </div>
 
-      {/* ── Ribbon body ── */}
-      <div className="bg-[#252a2e] border-t border-[#1e2327] px-4 flex items-stretch h-[58px] gap-1">
+      {/* Ribbon body */}
+      <div style={{ backgroundColor: t.colors.bgBase, borderTop: `1px solid ${t.colors.border}`, padding: '0 16px', display: 'flex', alignItems: 'stretch', height: '58px', gap: '4px' }}>
         {activeTab === 'view'    && <ViewTab    activeTool={activeTool} onToolChange={handleToolChange} scale={scale} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />}
         {activeTab === 'edit'    && <EditTab    activeTool={activeTool} onToolChange={handleToolChange} onUndo={onUndo} onRedo={onRedo} />}
         {activeTab === 'comment' && <CommentTab activeTool={activeTool} onToolChange={handleToolChange} onReadPage={onReadPage} onReadSelection={onReadSelection} ttsActive={ttsActive} hasSelection={hasSelection} />}
         {activeTab === 'pages'   && <PagesTab   activeTool={activeTool} onToolChange={handleToolChange} />}
       </div>
-
     </div>
   );
 }

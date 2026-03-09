@@ -1,105 +1,71 @@
-// components/layout/TtsBar.tsx — Slide-up text-to-speech control bar.
-// All icons: Lucide React. No emoji.
-
-import {
-  X, Volume2, Loader2, Pause, Play, Square,
-} from 'lucide-react';
+// components/layout/TtsBar.tsx
+import { X, Volume2, Loader2, Pause, Play, Square } from 'lucide-react';
+import { useTheme } from '../../theme';
 
 interface TtsBarProps {
-  visible: boolean;
-  status?: string;
-  phase?: 'loading' | 'playing';
-  progress?: { pct: number };
-  isPaused?: boolean;
-  speed?: number;
-  onStop: () => void;
-  onPauseResume: () => void;
-  onSpeedChange: (s: number) => void;
+  visible: boolean; status?: string; phase?: 'loading' | 'playing';
+  progress?: { pct: number }; isPaused?: boolean; speed?: number;
+  onStop: () => void; onPauseResume: () => void; onSpeedChange: (s: number) => void;
 }
 
-export function TtsBar({
-  visible, status, phase, progress,
-  isPaused, speed = 1,
-  onStop, onPauseResume, onSpeedChange,
-}: TtsBarProps) {
+export function TtsBar({ visible, status, phase, progress, isPaused, speed = 1, onStop, onPauseResume, onSpeedChange }: TtsBarProps) {
+  const { theme: t } = useTheme();
   if (!visible) return null;
 
-  return (
-    <div className="h-10 bg-[#1e2327] border-t border-white/[0.05] flex items-center gap-0 flex-shrink-0 animate-slide-up shadow-2xl">
+  const sep = <div style={{ width: '1px', height: '20px', backgroundColor: t.colors.borderMid, flexShrink: 0 }} />;
 
-      {/* Close */}
-      <button
-        onClick={onStop}
-        title="Stop"
-        className="w-10 h-full flex items-center justify-center text-gray-500 hover:text-white transition-colors"
-      >
+  return (
+    <div style={{
+      height: '40px', backgroundColor: t.colors.bgBase, borderTop: `1px solid ${t.colors.border}`,
+      display: 'flex', alignItems: 'center', gap: 0, flexShrink: 0,
+      boxShadow: t.shadow.panel, fontFamily: t.fonts.ui,
+    }}>
+      <button onClick={onStop} title="Stop" style={{
+        width: 40, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: t.colors.textMuted, background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
+      }}
+        onMouseEnter={e => (e.currentTarget.style.color = t.colors.textPrimary)}
+        onMouseLeave={e => (e.currentTarget.style.color = t.colors.textMuted)}>
         <X size={14} />
       </button>
-
-      <div className="w-px h-5 bg-white/10 flex-shrink-0" />
-
-      {/* Status label */}
-      <span className="text-xs font-semibold text-[#4a90e2] px-3 font-mono whitespace-nowrap flex items-center gap-1.5">
-        {phase === 'loading'
-          ? <Loader2 size={12} className="animate-spin" />
-          : isPaused
-          ? <Pause size={12} />
-          : <Volume2 size={12} />
-        }
+      {sep}
+      <span style={{ fontSize: '12px', fontWeight: 600, color: t.colors.accent, padding: '0 12px', fontFamily: t.fonts.mono, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {phase === 'loading' ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : isPaused ? <Pause size={12} /> : <Volume2 size={12} />}
         {status}
       </span>
-
-      <div className="w-px h-5 bg-white/10 flex-shrink-0" />
-
-      {/* Loading phase — progress bar */}
+      {sep}
       {phase === 'loading' && (
-        <div className="flex items-center gap-2 px-3 flex-1">
-          <div className="flex-1 max-w-[160px] h-1 bg-[#2d3338] rounded-full overflow-hidden">
-            <div
-              className="h-full bg-[#4a90e2] rounded-full transition-all"
-              style={{ width: `${progress?.pct ?? 0}%` }}
-            />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 12px', flex: 1 }}>
+          <div style={{ flex: 1, maxWidth: 160, height: 4, backgroundColor: t.colors.bgRaised, borderRadius: t.radius.pill, overflow: 'hidden' }}>
+            <div style={{ height: '100%', backgroundColor: t.colors.accent, width: `${progress?.pct ?? 0}%`, transition: 'width 0.2s' }} />
           </div>
-          <span className="text-[10px] text-gray-500 font-mono">{progress?.pct ?? 0}%</span>
+          <span style={{ fontSize: '10px', color: t.colors.textMuted, fontFamily: t.fonts.mono }}>{progress?.pct ?? 0}%</span>
         </div>
       )}
-
-      {/* Playing phase — controls */}
       {phase === 'playing' && (
-        <div className="flex items-center gap-2 px-3">
-          <button
-            onClick={onPauseResume}
-            className={`h-6 px-3 rounded text-xs font-medium transition-colors border flex items-center gap-1.5
-              ${isPaused
-                ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
-                : 'bg-[#4a90e2]/10 border-[#4a90e2]/30 text-[#4a90e2] hover:bg-[#4a90e2]/20'
-              }`}
-          >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 12px' }}>
+          <button onClick={onPauseResume} style={{
+            height: 24, padding: '0 12px', borderRadius: t.radius.sm, fontSize: '12px', fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', border: '1px solid',
+            backgroundColor: isPaused ? 'rgba(34,197,94,0.1)' : `${t.colors.accent}1a`,
+            borderColor: isPaused ? 'rgba(34,197,94,0.3)' : `${t.colors.accent}4d`,
+            color: isPaused ? '#4ade80' : t.colors.accent,
+          }}>
             {isPaused ? <><Play size={11} /> Resume</> : <><Pause size={11} /> Pause</>}
           </button>
-
-          <button
-            onClick={onStop}
-            className="h-6 px-3 rounded text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-1.5"
-          >
+          <button onClick={onStop} style={{
+            height: 24, padding: '0 12px', borderRadius: t.radius.sm, fontSize: '12px', fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', border: '1px solid',
+            backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)', color: '#f87171',
+          }}>
             <Square size={10} /> Stop
           </button>
-
-          <div className="w-px h-4 bg-white/10 mx-1 flex-shrink-0" />
-
-          <span className="text-[11px] text-gray-500">Speed</span>
-          <input
-            type="range"
-            min={0.25}
-            max={4}
-            step={0.25}
-            value={speed}
+          <div style={{ width: '1px', height: 16, backgroundColor: t.colors.border, margin: '0 4px', flexShrink: 0 }} />
+          <span style={{ fontSize: '11px', color: t.colors.textMuted }}>Speed</span>
+          <input type="range" min={0.25} max={4} step={0.25} value={speed}
             onChange={e => onSpeedChange(parseFloat(e.target.value))}
-            className="w-20 accent-[#4a90e2] cursor-pointer"
-          />
-          <span className="text-xs font-semibold text-white font-mono min-w-[28px]">
-            {speed}×
-          </span>
+            style={{ width: 80, accentColor: t.colors.accent, cursor: 'pointer' }} />
+          <span style={{ fontSize: '12px', fontWeight: 600, color: t.colors.textPrimary, fontFamily: t.fonts.mono, minWidth: 28 }}>{speed}×</span>
         </div>
       )}
     </div>

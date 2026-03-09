@@ -2,16 +2,72 @@
   "files": {
     "engine\\src\\api\\main.py": {
       "classes": {
-        "class CropPayload": [],
-        "class MovePagePayload": [],
-        "class RotatePayload": [],
-        "class LoadPayload": [],
-        "class ExportPayload": [],
-        "class TextRunPayload": [],
-        "class TextAnnotationPayload": [],
-        "class UpdateAnnotationPayload": [],
-        "class HighlightRect": [],
-        "class HighlightPayload": []
+        "class CropPayload": [
+          "x: float",
+          "y: float",
+          "width: float",
+          "height: float"
+        ],
+        "class MovePagePayload": [
+          "new_index: int"
+        ],
+        "class RotatePayload": [
+          "degrees: int = 90"
+        ],
+        "class LoadPayload": [
+          "file_path: str"
+        ],
+        "class ExportPayload": [
+          "output_path: str"
+        ],
+        "class TextRunPayload": [
+          "text: str",
+          "bold: bool = False",
+          "italic: bool = False",
+          "font_family: str = 'Helvetica'",
+          "font_size: float = 12.0",
+          "color: str = '#000000'"
+        ],
+        "class TextAnnotationPayload": [
+          "page_id: str",
+          "text: str = ''",
+          "x: float",
+          "y: float",
+          "width: float = 200",
+          "height: float = 30",
+          "font_family: str = 'Helvetica'",
+          "font_size: float = 12.0",
+          "color: str = '#000000'",
+          "bold: bool = False",
+          "italic: bool = False",
+          "runs: List[TextRunPayload] = []"
+        ],
+        "class UpdateAnnotationPayload": [
+          "page_id: str",
+          "x: Optional[float] = None",
+          "y: Optional[float] = None",
+          "width: Optional[float] = None",
+          "height: Optional[float] = None",
+          "text_content: Optional[str] = None",
+          "font_family: Optional[str] = None",
+          "font_size: Optional[float] = None",
+          "color: Optional[str] = None",
+          "bold: Optional[bool] = None",
+          "italic: Optional[bool] = None",
+          "runs: Optional[List[TextRunPayload]] = None"
+        ],
+        "class HighlightRect": [
+          "x: float",
+          "y: float",
+          "width: float",
+          "height: float"
+        ],
+        "class HighlightPayload": [
+          "page_id: str",
+          "rects: List[HighlightRect]",
+          "color: str = '#FFFF00'",
+          "opacity: float = 0.4"
+        ]
       },
       "functions": [
         {
@@ -494,7 +550,14 @@
     },
     "engine\\src\\core\\annotation_nodes.py": {
       "classes": {
-        "class TextRun": [],
+        "class TextRun": [
+          "text: str",
+          "bold: bool = False",
+          "italic: bool = False",
+          "font_family: str = 'Helvetica'",
+          "font_size: float = 12.0",
+          "color: str = '#000000'"
+        ],
         "class TextNode": [],
         "class ImageNode": [],
         "class HighlightNode": []
@@ -524,26 +587,19 @@
     },
     "engine\\src\\core\\node.py": {
       "classes": {
-        "class BoundingBox": [],
+        "class BoundingBox": [
+          "x: float",
+          "y: float",
+          "width: float",
+          "height: float"
+        ],
         "class Node": [
-          {
-            "name": "add_child",
-            "params": [
-              "child: 'Node'"
-            ]
-          },
-          {
-            "name": "remove_child",
-            "params": [
-              "child_id: str"
-            ]
-          },
-          {
-            "name": "get_child",
-            "params": [
-              "child_id: str"
-            ]
-          }
+          "id: str = Field(default_factory=lambda: str(uuid.uuid4()))",
+          "node_type: str = 'base_node'",
+          "parent_id: Optional[str] = None",
+          "children: List['Node'] = Field(default_factory=list)",
+          "bbox: Optional[BoundingBox] = None",
+          "metadata: Dict[str, Any] = Field(default_factory=dict)"
         ]
       }
     },
@@ -630,7 +686,10 @@
     },
     "engine\\src\\plugins\\ocr_plugin.py": {
       "classes": {
-        "class OCRRequest": [],
+        "class OCRRequest": [
+          "page_id: str",
+          "language: str = 'eng'"
+        ],
         "class OCRPlugin": [
           {
             "name": "name",
@@ -662,7 +721,10 @@
     },
     "engine\\src\\plugins\\plugins.py": {
       "classes": {
-        "class OCRRequest": [],
+        "class OCRRequest": [
+          "page_id: str",
+          "language: str = 'eng'"
+        ],
         "class OCRPlugin": [
           {
             "name": "name",
@@ -694,8 +756,16 @@
     },
     "engine\\src\\plugins\\redact_plugin.py": {
       "classes": {
-        "class BoundingBoxPayload": [],
-        "class RedactRequest": [],
+        "class BoundingBoxPayload": [
+          "x: float",
+          "y: float",
+          "width: float",
+          "height: float"
+        ],
+        "class RedactRequest": [
+          "page_id: str",
+          "rects: List[BoundingBoxPayload]"
+        ],
         "class RedactPlugin": [
           {
             "name": "name",
@@ -727,7 +797,10 @@
     },
     "engine\\src\\plugins\\tts_plugin.py": {
       "classes": {
-        "class TTSRequest": [],
+        "class TTSRequest": [
+          "text: str",
+          "speed: float = 1.0"
+        ],
         "class TTSPlugin": [
           {
             "name": "__init__",
@@ -855,20 +928,6 @@
             ]
           },
           {
-            "name": "_apply_annotations",
-            "params": [
-              "out_page: fitz.Page",
-              "page_node: PageNode"
-            ]
-          },
-          {
-            "name": "_render_text_node",
-            "params": [
-              "out_page: fitz.Page",
-              "node: TextNode"
-            ]
-          },
-          {
             "name": "export_document",
             "params": [
               "output_path: str"
@@ -877,16 +936,6 @@
           {
             "name": "export_to_bytes",
             "params": []
-          },
-          {
-            "name": "_build_output_doc",
-            "params": []
-          },
-          {
-            "name": "_hex_to_rgb",
-            "params": [
-              "hex_color: str"
-            ]
           }
         ]
       },
@@ -1009,10 +1058,6 @@
             "params": []
           },
           {
-            "name": "_prewarm_worker",
-            "params": []
-          },
-          {
             "name": "speak",
             "params": [
               "text: str"
@@ -1063,72 +1108,8 @@
             ]
           },
           {
-            "name": "_ensure_models",
-            "params": []
-          },
-          {
-            "name": "_load_kokoro",
-            "params": []
-          },
-          {
-            "name": "_cache_key",
-            "params": [
-              "text: str",
-              "voice: str",
-              "speed: float"
-            ]
-          },
-          {
-            "name": "_cache_get",
-            "params": [
-              "key: str"
-            ]
-          },
-          {
-            "name": "_cache_put",
-            "params": [
-              "key: str",
-              "value"
-            ]
-          },
-          {
             "name": "clear_cache",
             "params": []
-          },
-          {
-            "name": "_clean_text",
-            "params": [
-              "text: str"
-            ]
-          },
-          {
-            "name": "_split_text",
-            "params": [
-              "text: str",
-              "target_words: int = 40",
-              "max_words: int = 60",
-              "min_words: int = 8"
-            ]
-          },
-          {
-            "name": "_generator",
-            "params": [
-              "text: str",
-              "q: queue.Queue"
-            ]
-          },
-          {
-            "name": "_player",
-            "params": [
-              "q: queue.Queue"
-            ]
-          },
-          {
-            "name": "_stream_samples",
-            "params": [
-              "stream",
-              "samples"
-            ]
           }
         ]
       },
@@ -1164,96 +1145,120 @@
     "frontend\\src\\api\\client.ts": {
       "api_calls": [
         {
+          "fn": "closeSession",
+          "signature": "closeSession(sessionId: string)",
           "method": "DELETE",
           "url": "${API_BASE}/session",
           "payload": null
         },
         {
+          "fn": "uploadDocument",
+          "signature": "uploadDocument(file: File, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/document/upload",
-          "payload": "{\n      headers: { 'Content-Type': 'multipart/form-data', 'X-Session-Id': sessionId }"
+          "payload": "{ headers: { 'Content-Type': 'multipart/form-data', 'X-Session-Id': sessionId }, }"
         },
         {
+          "fn": "getDocumentState",
+          "signature": "getDocumentState(sessionId: string)",
           "method": "GET",
           "url": "${API_BASE}/document",
-          "payload": "{ output_path: outputPath }"
+          "payload": null
         },
         {
+          "fn": "exportDocument",
+          "signature": "exportDocument(outputPath: string, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/document/export",
           "payload": "{ output_path: outputPath }"
         },
         {
+          "fn": "undo",
+          "signature": "undo(sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/undo",
-          "payload": null
+          "payload": "{}"
         },
         {
+          "fn": "redo",
+          "signature": "redo(sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/redo",
-          "payload": "{ degrees }"
+          "payload": "{}"
         },
         {
+          "fn": "rotatePage",
+          "signature": "rotatePage(pageId: string, sessionId: string, degrees = 90)",
           "method": "POST",
           "url": "${API_BASE}/pages/${pageId}/rotate",
           "payload": "{ degrees }"
         },
         {
+          "fn": "deletePage",
+          "signature": "deletePage(pageId: string, sessionId: string)",
           "method": "DELETE",
           "url": "${API_BASE}/pages/${pageId}",
-          "payload": "{ new_index: newIndex }"
+          "payload": null
         },
         {
+          "fn": "movePage",
+          "signature": "movePage(pageId: string, newIndex: number, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/pages/${pageId}/move",
           "payload": "{ new_index: newIndex }"
         },
         {
+          "fn": "cropPage",
+          "signature": "cropPage(pageId: string, x: number, y: number, width: number, height: number, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/pages/${pageId}/crop",
           "payload": "{ x, y, width, height }"
         },
         {
+          "fn": "clearCrop",
+          "signature": "clearCrop(pageId: string, sessionId: string)",
           "method": "DELETE",
           "url": "${API_BASE}/pages/${pageId}/crop",
           "payload": null
         },
         {
+          "fn": "getPageChars",
+          "signature": "getPageChars(pageId: string, sessionId: string)",
           "method": "GET",
           "url": "${API_BASE}/pages/${pageId}/chars",
           "payload": null
         },
         {
-          "method": "POST",
-          "url": "${API_BASE}/annotations/text",
-          "payload": null
-        },
-        {
-          "method": "PATCH",
-          "url": "${API_BASE}/annotations/${nodeId}",
-          "payload": null
-        },
-        {
+          "fn": "addHighlight",
+          "signature": "addHighlight(pageId: string, rects: { x: number; y: number; width: number; height: number }[], color: string, opacity: number, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/annotations/highlight",
-          "payload": "{\n      page_id: pageId,\n      rects,\n      color,\n      opacity,\n    }"
+          "payload": "{ page_id: pageId, rects, color, opacity, }"
         },
         {
+          "fn": "applyRedaction",
+          "signature": "applyRedaction(pageId: string, rects: { x: number; y: number; width: number; height: number }[], sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/plugins/redact/apply",
-          "payload": "{\n      page_id: pageId,\n      rects: rects.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }"
+          "payload": null
         },
         {
+          "fn": "runOcr",
+          "signature": "runOcr(pageId: string, sessionId: string, language = 'eng')",
           "method": "POST",
           "url": "${API_BASE}/plugins/ocr/process",
           "payload": "{ page_id: pageId, language }"
         },
         {
+          "fn": "ttsPlay",
+          "signature": "ttsPlay(text: string, speed = 1.0)",
           "method": "POST",
           "url": "${API_BASE}/plugins/tts/play",
           "payload": "{ text, speed }"
         },
         {
+          "fn": "ttsStop",
+          "signature": "ttsStop()",
           "method": "POST",
           "url": "${API_BASE}/plugins/tts/stop",
           "payload": null
@@ -1262,25 +1267,19 @@
     },
     "frontend\\src\\app\\App.tsx": {
       "functions": [
+        "AppInner()",
         "App()"
       ]
     },
     "frontend\\src\\components\\canvas\\Canvas.tsx": {
       "interfaces": {
         "CanvasProps": [
-          "pdfDoc?:            pdfjsLib.PDFDocumentProxy | null",
-          "documentState?:     DocumentState | null",
-          "activeTool:         ToolId",
-          "scale:              number",
-          "sessionId:          string",
-          "textProps?:         TextProps",
-          "highlightColor?:    string",
-          "highlightOpacity?:  number",
-          "onTextPropsChange?: (p: TextProps) => void",
-          "onAnnotationAdded?: () => Promise<void>",
-          "onDocumentChanged?: () => Promise<void>",
-          "onTextSelected?:    (text: string) => void",
-          "pageRefs?:          React.MutableRefObject<(HTMLDivElement | null)[]>"
+          "pdfDoc?: pdfjsLib.PDFDocumentProxy | null; documentState?: DocumentState | null",
+          "activeTool: ToolId; scale: number; sessionId: string",
+          "textProps?: TextProps; highlightColor?: string; highlightOpacity?: number",
+          "onTextPropsChange?: (p: TextProps) => void; onAnnotationAdded?: () => Promise<void>",
+          "onDocumentChanged?: () => Promise<void>; onTextSelected?: (text: string) => void",
+          "pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>"
         ]
       },
       "functions": [
@@ -1415,69 +1414,51 @@
     "frontend\\src\\components\\layout\\LeftSidebar.tsx": {
       "interfaces": {
         "PageNode": [
-          "id: string",
-          "page_number?: number",
-          "rotation?: number",
-          "children?: unknown[]"
+          "id: string; page_number?: number; rotation?: number; children?: unknown[]"
         ],
         "DocumentState": [
           "children?: PageNode[]"
         ],
         "LeftSidebarProps": [
-          "showThumbnails: boolean",
-          "onToggleThumbnails: () => void",
-          "pdfDoc?: pdfjsLib.PDFDocumentProxy | null",
-          "documentState?: DocumentState | null",
-          "activePage?: number",
-          "activeView?: SidebarView",
-          "onViewChange?: (v: SidebarView) => void",
-          "onPageClick?: (index: number) => void",
-          "onDocumentChanged?: () => Promise<void>"
+          "showThumbnails: boolean; onToggleThumbnails: () => void",
+          "pdfDoc?: pdfjsLib.PDFDocumentProxy | null; documentState?: DocumentState | null",
+          "activePage?: number; activeView?: SidebarView; onViewChange?: (v: SidebarView) => void",
+          "onPageClick?: (index: number) => void; onDocumentChanged?: () => Promise<void>"
         ]
       },
       "functions": [
-        "LeftSidebar({\n  showThumbnails, onToggleThumbnails,\n  pdfDoc, documentState,\n  activePage = 0, activeView, onViewChange, onPageClick, onDocumentChanged,\n}: LeftSidebarProps)"
+        "LeftSidebar({\n  showThumbnails, onToggleThumbnails, pdfDoc, documentState,\n  activePage = 0, activeView, onViewChange, onPageClick, onDocumentChanged,\n}: LeftSidebarProps)"
       ]
     },
     "frontend\\src\\components\\layout\\RightPanel.tsx": {
       "interfaces": {
         "PageNode": [
-          "id?: string; rotation?: number",
-          "metadata?: { width?: number; height?: number"
+          "id?: string; rotation?: number; metadata?: { width?: number; height?: number"
         ],
         "DocumentState": [
           "file_name?: string; file_size?: number; children?: PageNode[]"
         ],
         "RightPanelProps": [
-          "documentState?:    DocumentState | null",
-          "activePage?:       number",
-          "activeTool?:       ToolId",
-          "textProps:         TextProps",
-          "onTextPropsChange: (p: TextProps) => void",
-          "highlightColor?: string",
-          "highlightOpacity?: number",
-          "onHighlightColorChange?: (color: string) => void",
-          "onHighlightOpacityChange?: (opacity: number) => void"
+          "documentState?: DocumentState | null; activePage?: number; activeTool?: ToolId",
+          "textProps: TextProps; onTextPropsChange: (p: TextProps) => void",
+          "highlightColor?: string; highlightOpacity?: number",
+          "onHighlightColorChange?: (color: string) => void; onHighlightOpacityChange?: (opacity: number) => void"
         ]
       },
       "functions": [
-        "TextPropertiesContent({ props, onChange }: {\n  props: TextProps; onChange: (p: TextProps)",
+        "TextPropertiesContent({ props, onChange, t }: { props: TextProps; onChange: (p: TextProps)",
         "RightPanel({\n  documentState, activePage = 0, activeTool, textProps, onTextPropsChange,\n  highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,\n}: RightPanelProps)"
       ]
     },
     "frontend\\src\\components\\layout\\StatusBar.tsx": {
       "interfaces": {
         "StatusBarProps": [
-          "activeTool: ToolId",
-          "scale: number",
-          "activePage: number",
-          "pageCount: number",
-          "lastSelectedText?: string",
-          "documentState?: { file_name?: string"
+          "activeTool: ToolId; scale: number; activePage: number; pageCount: number",
+          "lastSelectedText?: string; documentState?: { file_name?: string"
         ]
       },
       "functions": [
-        "StatusBar({\n  activeTool, scale, activePage, pageCount, lastSelectedText, documentState,\n}: StatusBarProps)"
+        "StatusBar({ activeTool, scale, activePage, pageCount, lastSelectedText, documentState }: StatusBarProps)"
       ]
     },
     "frontend\\src\\components\\layout\\TopBar.tsx": {
@@ -1500,37 +1481,29 @@
         ]
       },
       "functions": [
-        "TopBar({\n  tabs = [], activeTabId = null,\n  onTabClick, onTabClose, onNewTab,\n  onUndo, onRedo,\n  menus = [],\n}: TopBarProps)"
+        "TopBar({\n  tabs = [], activeTabId = null,\n  onTabClick, onTabClose, onNewTab,\n  onUndo, onRedo,\n  menus = [],\n}: TopBarProps)",
+        "TopBarBtn({ children, onClick, title, active = false, danger = false, accentColor, size = 32, style: sx }: {\n  children: React.ReactNode;\n  onClick?: ()"
       ]
     },
     "frontend\\src\\components\\layout\\TtsBar.tsx": {
       "interfaces": {
         "TtsBarProps": [
-          "visible: boolean",
-          "status?: string",
-          "phase?: 'loading' | 'playing'",
+          "visible: boolean; status?: string; phase?: 'loading' | 'playing'",
           "progress?: { pct: number"
         ]
       },
       "functions": [
-        "TtsBar({\n  visible, status, phase, progress,\n  isPaused, speed = 1,\n  onStop, onPauseResume, onSpeedChange,\n}: TtsBarProps)"
+        "TtsBar({ visible, status, phase, progress, isPaused, speed = 1, onStop, onPauseResume, onSpeedChange }: TtsBarProps)"
       ]
     },
     "frontend\\src\\components\\toolbar\\Toolbar.tsx": {
       "interfaces": {
         "ToolbarProps": [
-          "activeTool: ToolId",
-          "onToolChange: (tool: ToolId) => void",
-          "scale: number",
-          "onZoomIn: () => void",
-          "onZoomOut: () => void",
-          "onZoomReset: () => void",
-          "onUndo: () => void",
-          "onRedo: () => void",
-          "onReadPage: () => void",
-          "onReadSelection: () => void",
-          "hasSelection: boolean",
-          "ttsActive: boolean",
+          "activeTool: ToolId; onToolChange: (tool: ToolId) => void",
+          "scale: number; onZoomIn: () => void; onZoomOut: () => void; onZoomReset: () => void",
+          "onUndo: () => void; onRedo: () => void",
+          "onReadPage: () => void; onReadSelection: () => void",
+          "hasSelection: boolean; ttsActive: boolean",
           "pageInfo?: { current: number; total: number"
         ]
       },
@@ -1538,8 +1511,8 @@
         "ViewTab({ activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
         "EditTab({ activeTool, onToolChange, onUndo, onRedo }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
         "CommentTab({ activeTool, onToolChange, onReadPage, onReadSelection, ttsActive, hasSelection }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
-        "PagesTab({ activeTool, onToolChange }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
-        "Toolbar({\n  activeTool, onToolChange,\n  scale, onZoomIn, onZoomOut, onZoomReset,\n  onUndo, onRedo,\n  onReadPage, onReadSelection,\n  hasSelection, ttsActive,\n  pageInfo,\n}: ToolbarProps)"
+        "PagesTab({ activeTool, onToolChange }: { activeTool: ToolId; onToolChange: (id: ToolId)",
+        "Toolbar({\n  activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset,\n  onUndo, onRedo, onReadPage, onReadSelection, hasSelection, ttsActive, pageInfo,\n}: ToolbarProps)"
       ]
     },
     "frontend\\src\\components\\ui\\Button.tsx": {
@@ -1639,15 +1612,15 @@
     },
     "frontend\\src\\components\\ui\\Primitives.tsx": {
       "functions": [
-        "IconButton({\n    children, onClick, title, disabled = false,\n    variant = 'ghost',  // ghost | solid | accent | danger\n    size = 'md',        // xs | sm | md | lg\n    active = false,\n    style: sx = {},\n})",
-        "Button({\n    children, onClick, title, disabled = false, icon,\n    variant = 'ghost',  // ghost | solid | accent | danger | success\n    size = 'md',        // sm | md | lg\n    style: sx = {},\n})",
-        "Divider({ vertical = true, style: sx = {} })",
-        "Kbd({ children })",
-        "DropdownMenu({ items, style: sx = {}, onClose })",
-        "Tag({ children, color = t.colors.accent })",
-        "Tooltip({ children, text })",
-        "PanelSection({ title, children, collapsible = false })",
-        "PropRow({ label, children })"
+        "IconButton({\n    children, onClick, title, disabled = false,\n    variant = 'ghost',  // ghost | solid | accent | danger\n    size = 'md',        // xs | sm | md | lg\n    active = false,\n    style: sx = {},\n}: {\n    children?: React.ReactNode;\n    onClick?: ()",
+        "Button({\n    children, onClick, title, disabled = false, icon,\n    variant = 'ghost',  // ghost | solid | accent | danger | success\n    size = 'md',        // sm | md | lg\n    style: sx = {},\n}: {\n    children?: React.ReactNode;\n    onClick?: ()",
+        "Divider({ vertical = true, style: sx = {} }: { vertical?: boolean; style?: React.CSSProperties })",
+        "Kbd({ children }: { children: React.ReactNode })",
+        "DropdownMenu({ items, style: sx = {}, onClose }: {\n    items: any[];\n    style?: React.CSSProperties;\n    onClose?: ()",
+        "Tag({ children, color }: { children: React.ReactNode; color?: string })",
+        "Tooltip({ children, text }: { children: React.ReactNode; text: string })",
+        "PanelSection({ title, children, collapsible = false }: {\n    title: string;\n    children: React.ReactNode;\n    collapsible?: boolean;\n})",
+        "PropRow({ label, children }: { label: string; children: React.ReactNode })"
       ]
     },
     "frontend\\src\\constants\\menuDefs.ts": {
@@ -1678,7 +1651,9 @@
           "zoomIn: () => void",
           "zoomOut: () => void",
           "zoomReset: () => void",
-          "documentState: unknown | null"
+          "documentState: unknown | null",
+          "themeId: ThemeId",
+          "setTheme: (id: ThemeId) => void"
         ]
       },
       "functions": [
@@ -1730,12 +1705,18 @@
         "lineBBox(lineChars: PageChar[])",
         "buildLineRects(chars: PageChar[])",
         "useDragSelection({\n    pageId,\n    pageChars,\n    activeTool,\n    metadata,\n    highlightColor,\n    highlightOpacity,\n    onAction\n}: UseDragSelectionArgs)"
+      ],
+      "returns": [
+        "liveRects",
+        "committedRects",
+        "clearSelection",
+        "setCommittedRects"
       ]
     },
     "frontend\\src\\hooks\\useEditorState.ts": {
       "interfaces": {
         "TabSession": [
-          "sessionId: string;          // unique backend session key (== tab.id)",
+          "sessionId: string",
           "pdfDoc:    pdfjsLib.PDFDocumentProxy | null",
           "documentState: DocumentState | null",
           "activePage: number",
@@ -1745,6 +1726,50 @@
       "functions": [
         "makeSession(sessionId: string)",
         "useEditorState()"
+      ],
+      "returns": [
+        "setTabs",
+        "activeTabId",
+        "setActiveTabId",
+        "handleTabClose",
+        "setDocumentState",
+        "pdfDoc",
+        "setPdfDoc",
+        "activePage",
+        "setActivePage",
+        "scale",
+        "activeTool",
+        "setActiveTool",
+        "sidebarView",
+        "setSidebarView",
+        "showThumbnails",
+        "setShowThumbnails",
+        "rightPanelOpen",
+        "setRightPanelOpen",
+        "lastSelectedText",
+        "setLastSelectedText",
+        "textProps",
+        "setTextProps",
+        "highlightColor",
+        "setHighlightColor",
+        "highlightOpacity",
+        "setHighlightOpacity",
+        "setTheme",
+        "pageRefs",
+        "ttsStop",
+        "pauseResume",
+        "setSpeed",
+        "handleUndo",
+        "handleRedo",
+        "handleReadPage",
+        "handleReadSelection",
+        "zoomIn",
+        "zoomOut",
+        "zoomReset",
+        "openFileDialog",
+        "refreshDocumentState",
+        "menus",
+        "pageCount"
       ]
     },
     "frontend\\src\\hooks\\usePageActions.ts": {
@@ -1763,6 +1788,11 @@
       },
       "functions": [
         "usePageActions({\n  pageNode, pageChars, activeTool, textProps,\n  highlightColor = '#f59e0b', highlightOpacity = 0.45,\n  sessionId, setAnnotations, setTransientPos,\n  onAnnotationAdded,\n  onTextSelected,\n  clearSelRef,\n  toast,\n  textToolNotifyCommitted,\n}: UsePageActionsProps)"
+      ],
+      "returns": [
+        "handleNodeUpdate",
+        "handleAction",
+        "handleTextCommit"
       ]
     },
     "frontend\\src\\hooks\\usePageChars.ts": {
@@ -1783,6 +1813,9 @@
       },
       "functions": [
         "usePageChars({ pageNodeId, localRotation, sessionId, metadata }: UsePageCharsArgs)"
+      ],
+      "returns": [
+        "pageChars"
       ]
     },
     "frontend\\src\\hooks\\usePdfCanvas.ts": {
@@ -1797,6 +1830,10 @@
       },
       "functions": [
         "usePdfCanvas({ pdfDoc, pageNode, pageIndex, scale, localRotation }: UsePdfCanvasArgs)"
+      ],
+      "returns": [
+        "canvasRef",
+        "fullDimensions"
       ]
     },
     "frontend\\src\\hooks\\useTts.ts": {
@@ -1809,7 +1846,60 @@
       },
       "functions": [
         "useTts()"
+      ],
+      "returns": [
+        "tts",
+        "status",
+        "phase",
+        "progress",
+        "isPaused",
+        "speed",
+        "speak",
+        "stop",
+        "pauseResume",
+        "setSpeed"
       ]
+    },
+    "frontend\\src\\theme\\ThemeContext.tsx": {
+      "interfaces": {
+        "ThemeContextValue": [
+          "themeId:   ThemeId",
+          "theme:     ThemeTokens",
+          "setTheme:  (id: ThemeId) => void"
+        ]
+      },
+      "functions": [
+        "ThemeProvider({ children }: { children: ReactNode })",
+        "useTheme()"
+      ]
+    },
+    "frontend\\src\\theme\\themes.ts": {
+      "interfaces": {
+        "ThemeTokens": [
+          "colors: {",
+          "bgBase:       string",
+          "bgRaised:     string",
+          "bgHover:      string",
+          "bgActive:     string",
+          "border:       string",
+          "borderMid:    string",
+          "textPrimary:  string",
+          "textSecondary:string",
+          "textMuted:    string",
+          "textDisabled: string",
+          "accent:       string",
+          "accentSubtle: string",
+          "accentHover:  string",
+          "danger:       string",
+          "dangerBg:     string",
+          "success:      string"
+        ],
+        "ThemeDef": [
+          "id:    ThemeId",
+          "label: string",
+          "tokens: ThemeTokens"
+        ]
+      }
     },
     "frontend\\src\\types\\textProps.ts": {
       "interfaces": {

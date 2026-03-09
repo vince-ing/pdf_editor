@@ -8,8 +8,9 @@ import {
   Search, PanelLeft, SlidersHorizontal, ZoomIn, ZoomOut,
   Link2, Bookmark, Image, PenLine, BookOpen, Volume2, Volume1,
   ScanText, Zap, BookMarked, Keyboard, Info, RotateCw, RotateCcw,
-  FilePlus, Trash2,
+  FilePlus, Trash2, Palette, Check,
 } from 'lucide-react';
+import { THEMES, type ThemeId } from '../theme/themes';
 import type { LucideIcon } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -47,6 +48,8 @@ export interface MenuCallbacks {
   zoomOut: () => void;
   zoomReset: () => void;
   documentState: unknown | null;
+  themeId: ThemeId;
+  setTheme: (id: ThemeId) => void;
 }
 
 export function buildMenuDefs(cb: MenuCallbacks): MenuDef[] {
@@ -101,6 +104,15 @@ export function buildMenuDefs(cb: MenuCallbacks): MenuDef[] {
         { label: 'Zoom In',           icon: ZoomIn,  shortcut: 'Ctrl++', onClick: cb.zoomIn },
         { label: 'Zoom Out',          icon: ZoomOut, shortcut: 'Ctrl+-', onClick: cb.zoomOut },
         { label: 'Actual Size (100%)',               onClick: cb.zoomReset },
+        { separator: true },
+        {
+          label: 'Theme', icon: Palette,
+          submenu: THEMES.map(th => ({
+            label: th.label,
+            icon: th.id === cb.themeId ? Check : undefined,
+            onClick: () => cb.setTheme(th.id),
+          })),
+        },
       ],
     },
     {

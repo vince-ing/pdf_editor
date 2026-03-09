@@ -1,10 +1,9 @@
-// components/Primitives.jsx
-// Atomic UI building blocks. All consume theme tokens.
+// components/Primitives.tsx
+// Atomic UI building blocks. All consume theme tokens via useTheme().
 // Add new primitives here — never inline one-off styles for repeated patterns.
 
 import React, { useState, useRef, useEffect } from 'react';
-import theme from '../theme';
-const t = theme;
+import { useTheme } from '../theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IconButton — square icon-only button
@@ -15,7 +14,17 @@ export const IconButton = ({
     size = 'md',        // xs | sm | md | lg
     active = false,
     style: sx = {},
+}: {
+    children?: React.ReactNode;
+    onClick?: () => void;
+    title?: string;
+    disabled?: boolean;
+    variant?: 'ghost' | 'solid' | 'accent' | 'danger';
+    size?: 'xs' | 'sm' | 'md' | 'lg';
+    active?: boolean;
+    style?: React.CSSProperties;
 }) => {
+    const { theme: t } = useTheme();
     const [hov, setHov] = useState(false);
     const sz = { xs: 22, sm: 26, md: 30, lg: 34 }[size] ?? 30;
     const fs = { xs: 11, sm: 12, md: 14, lg: 15 }[size] ?? 14;
@@ -62,18 +71,28 @@ export const Button = ({
     variant = 'ghost',  // ghost | solid | accent | danger | success
     size = 'md',        // sm | md | lg
     style: sx = {},
+}: {
+    children?: React.ReactNode;
+    onClick?: () => void;
+    title?: string;
+    disabled?: boolean;
+    icon?: React.ReactNode;
+    variant?: 'ghost' | 'solid' | 'accent' | 'danger' | 'success';
+    size?: 'sm' | 'md' | 'lg';
+    style?: React.CSSProperties;
 }) => {
+    const { theme: t } = useTheme();
     const [hov, setHov] = useState(false);
     const h  = { sm: 24, md: 28, lg: 32 }[size] ?? 28;
     const fs = { sm: 11, md: 12, lg: 13 }[size] ?? 12;
     const px = { sm: 8,  md: 10, lg: 14 }[size] ?? 10;
 
     const styles = {
-        ghost:   { bg: hov && !disabled ? t.colors.bgHover   : 'transparent',    color: disabled ? t.colors.textDisabled : hov ? t.colors.textPrimary : t.colors.textSecondary, border: '1px solid transparent' },
-        solid:   { bg: hov && !disabled ? t.colors.bgHover   : t.colors.bgRaised, color: disabled ? t.colors.textDisabled : t.colors.textPrimary, border: `1px solid ${t.colors.border}` },
-        accent:  { bg: hov && !disabled ? t.colors.accentHover: t.colors.accent,  color: '#fff', border: 'none' },
-        danger:  { bg: hov && !disabled ? '#b84444'          : t.colors.danger,   color: '#fff', border: 'none' },
-        success: { bg: hov && !disabled ? '#35b48e'          : t.colors.success,  color: '#0a1f17', border: 'none' },
+        ghost:   { bg: hov && !disabled ? t.colors.bgHover    : 'transparent',    color: disabled ? t.colors.textDisabled : hov ? t.colors.textPrimary : t.colors.textSecondary, border: '1px solid transparent' },
+        solid:   { bg: hov && !disabled ? t.colors.bgHover    : t.colors.bgRaised, color: disabled ? t.colors.textDisabled : t.colors.textPrimary, border: `1px solid ${t.colors.border}` },
+        accent:  { bg: hov && !disabled ? t.colors.accentHover : t.colors.accent,  color: '#fff', border: 'none' },
+        danger:  { bg: hov && !disabled ? '#b84444'           : t.colors.danger,   color: '#fff', border: 'none' },
+        success: { bg: hov && !disabled ? '#35b48e'           : t.colors.success,  color: '#0a1f17', border: 'none' },
     };
     const s = styles[variant] ?? styles.ghost;
 
@@ -102,41 +121,52 @@ export const Button = ({
 // ─────────────────────────────────────────────────────────────────────────────
 // Divider — thin separator line
 // ─────────────────────────────────────────────────────────────────────────────
-export const Divider = ({ vertical = true, style: sx = {} }) => (
-    <div style={{
-        width:  vertical ? '1px' : '100%',
-        height: vertical ? '16px' : '1px',
-        backgroundColor: t.colors.border,
-        flexShrink: 0,
-        margin: vertical ? '0 3px' : '3px 0',
-        ...sx,
-    }} />
-);
+export const Divider = ({ vertical = true, style: sx = {} }: { vertical?: boolean; style?: React.CSSProperties }) => {
+    const { theme: t } = useTheme();
+    return (
+        <div style={{
+            width:  vertical ? '1px' : '100%',
+            height: vertical ? '16px' : '1px',
+            backgroundColor: t.colors.border,
+            flexShrink: 0,
+            margin: vertical ? '0 3px' : '3px 0',
+            ...sx,
+        }} />
+    );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kbd — keyboard shortcut badge
 // ─────────────────────────────────────────────────────────────────────────────
-export const Kbd = ({ children }) => (
-    <span style={{
-        fontSize: '10px', fontFamily: t.fonts.mono,
-        color: t.colors.textMuted,
-        backgroundColor: t.colors.bgBase,
-        border: `1px solid ${t.colors.border}`,
-        borderRadius: t.radius.xs,
-        padding: '1px 4px', lineHeight: 1.4,
-    }}>{children}</span>
-);
+export const Kbd = ({ children }: { children: React.ReactNode }) => {
+    const { theme: t } = useTheme();
+    return (
+        <span style={{
+            fontSize: '10px', fontFamily: t.fonts.mono,
+            color: t.colors.textMuted,
+            backgroundColor: t.colors.bgBase,
+            border: `1px solid ${t.colors.border}`,
+            borderRadius: t.radius.xs,
+            padding: '1px 4px', lineHeight: 1.4,
+        }}>{children}</span>
+    );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DropdownMenu — cascading menu, reused by MenuBar and context menus
 // items: Array<{ label, icon, shortcut, onClick, disabled, separator, submenu }>
 // ─────────────────────────────────────────────────────────────────────────────
-export const DropdownMenu = ({ items, style: sx = {}, onClose }) => {
-    const menuRef = useRef(null);
+export const DropdownMenu = ({ items, style: sx = {}, onClose }: {
+    items: any[];
+    style?: React.CSSProperties;
+    onClose?: () => void;
+}) => {
+    const { theme: t } = useTheme();
+    const menuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const handler = (e) => {
-            if (menuRef.current && !menuRef.current.contains(e.target)) onClose?.();
+        const handler = (e: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose?.();
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
@@ -171,7 +201,8 @@ export const DropdownMenu = ({ items, style: sx = {}, onClose }) => {
     );
 };
 
-const MenuItem = ({ item, onClose }) => {
+const MenuItem = ({ item, onClose }: { item: any; onClose?: () => void }) => {
+    const { theme: t } = useTheme();
     const [hov, setHov] = useState(false);
     const [subOpen, setSubOpen] = useState(false);
     const hasSubmenu = item.submenu && item.submenu.length > 0;
@@ -217,28 +248,37 @@ const MenuItem = ({ item, onClose }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tag / Badge
 // ─────────────────────────────────────────────────────────────────────────────
-export const Tag = ({ children, color = t.colors.accent }) => (
-    <span style={{
-        fontSize: '10px', fontWeight: '600',
-        color, backgroundColor: `${color}18`,
-        border: `1px solid ${color}30`,
-        borderRadius: t.radius.pill, padding: '1px 6px',
-        fontFamily: t.fonts.mono, letterSpacing: '0.02em',
-        lineHeight: 1.5,
-    }}>{children}</span>
-);
+export const Tag = ({ children, color }: { children: React.ReactNode; color?: string }) => {
+    const { theme: t } = useTheme();
+    const c = color ?? t.colors.accent;
+    return (
+        <span style={{
+            fontSize: '10px', fontWeight: '600',
+            color: c, backgroundColor: `${c}18`,
+            border: `1px solid ${c}30`,
+            borderRadius: t.radius.pill, padding: '1px 6px',
+            fontFamily: t.fonts.mono, letterSpacing: '0.02em',
+            lineHeight: 1.5,
+        }}>{children}</span>
+    );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tooltip (simple title-based, can be upgraded)
 // ─────────────────────────────────────────────────────────────────────────────
-export const Tooltip = ({ children, text }) => (
+export const Tooltip = ({ children, text }: { children: React.ReactNode; text: string }) => (
     <span title={text} style={{ display: 'contents' }}>{children}</span>
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PanelSection — labeled section inside a properties panel
 // ─────────────────────────────────────────────────────────────────────────────
-export const PanelSection = ({ title, children, collapsible = false }) => {
+export const PanelSection = ({ title, children, collapsible = false }: {
+    title: string;
+    children: React.ReactNode;
+    collapsible?: boolean;
+}) => {
+    const { theme: t } = useTheme();
     const [open, setOpen] = useState(true);
     return (
         <div style={{ borderBottom: `1px solid ${t.colors.border}` }}>
@@ -269,17 +309,20 @@ export const PanelSection = ({ title, children, collapsible = false }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // PropRow — label + value row in properties panel
 // ─────────────────────────────────────────────────────────────────────────────
-export const PropRow = ({ label, children }) => (
-    <div style={{
-        display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', gap: '8px',
-        marginBottom: '6px',
-    }}>
-        <span style={{ fontSize: '11px', color: t.colors.textSecondary, flexShrink: 0, fontFamily: t.fonts.ui }}>
-            {label}
-        </span>
-        <span style={{ fontSize: '11px', color: t.colors.textPrimary, fontFamily: t.fonts.mono, textAlign: 'right' }}>
-            {children}
-        </span>
-    </div>
-);
+export const PropRow = ({ label, children }: { label: string; children: React.ReactNode }) => {
+    const { theme: t } = useTheme();
+    return (
+        <div style={{
+            display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', gap: '8px',
+            marginBottom: '6px',
+        }}>
+            <span style={{ fontSize: '11px', color: t.colors.textSecondary, flexShrink: 0, fontFamily: t.fonts.ui }}>
+                {label}
+            </span>
+            <span style={{ fontSize: '11px', color: t.colors.textPrimary, fontFamily: t.fonts.mono, textAlign: 'right' }}>
+                {children}
+            </span>
+        </div>
+    );
+};

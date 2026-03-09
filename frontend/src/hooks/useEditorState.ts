@@ -6,6 +6,8 @@ import { useTts } from './useTts';
 import { buildMenuDefs } from '../constants/menuDefs';
 import { DEFAULT_TEXT_PROPS, type TextProps } from '../types/textProps';
 import { toolManager } from '../core/tools/ToolManager';
+import { useTheme } from '../theme';  // ← NEW
+import { THEMES, type ThemeId } from '../theme/themes';  // ← NEW
 
 import type { ToolId } from '../constants/tools';
 import type { SidebarView } from '../components/layout/LeftSidebar';
@@ -15,7 +17,7 @@ import type { DocumentState } from '../components/canvas/types';
 // ── Per-tab session state ─────────────────────────────────────────────────────
 
 interface TabSession {
-  sessionId: string;          // unique backend session key (== tab.id)
+  sessionId: string;
   pdfDoc:    pdfjsLib.PDFDocumentProxy | null;
   documentState: DocumentState | null;
   activePage: number;
@@ -47,6 +49,9 @@ export function useEditorState() {
   const [highlightOpacity, setHighlightOpacity] = useState(0.45);
   const [loading,          setLoading]          = useState(false);
 
+  // ── Theme ─────────────────────────────────────────────────────────────────
+  const { themeId, setTheme } = useTheme();  // ← NEW
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRefs     = useRef<(HTMLDivElement | null)[]>([]);
   const { tts, speak, stop: ttsStop, pauseResume, setSpeed } = useTts();
@@ -62,7 +67,6 @@ export function useEditorState() {
     }));
   }, []);
 
-  // Convenience accessors that fall back to safe defaults
   const documentState = activeSession?.documentState ?? null;
   const pdfDoc        = activeSession?.pdfDoc        ?? null;
   const activePage    = activeSession?.activePage    ?? 0;
@@ -93,7 +97,6 @@ export function useEditorState() {
 
   const setActiveTabId = useCallback((id: string | null) => {
     setActiveTabIdRaw(id);
-    // Reset page refs when switching tabs so IntersectionObserver re-attaches
     pageRefs.current = [];
   }, []);
 
@@ -116,7 +119,7 @@ export function useEditorState() {
     } catch (e) { console.error(e); }
   }, [activeTabId, patchSession]);
 
-  // ── IntersectionObserver — re-run whenever the active tab's doc changes ────
+  // ── IntersectionObserver ───────────────────────────────────────────────────
 
   useEffect(() => {
     if (!documentState || !activeTabId) return;
@@ -142,7 +145,6 @@ export function useEditorState() {
     if (!file) return;
     setLoading(true);
 
-    // Each file gets its own session ID (use filename + timestamp for uniqueness)
     const sessionId = `${file.name}-${Date.now()}`;
     const newTab: FileTab = { id: sessionId, name: file.name, fullName: file.name, modified: false };
 
@@ -150,7 +152,6 @@ export function useEditorState() {
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
 
-      // Register session on backend and upload document
       await engineApi.uploadDocument(file, sessionId);
       const data = await engineApi.getDocumentState(sessionId);
 
@@ -178,14 +179,12 @@ export function useEditorState() {
   // ── Tab close ───────────────────────────────────────────────────────────────
 
   const handleTabClose = useCallback(async (id: string) => {
-    // Clean up backend session
     try { await engineApi.closeSession(id); } catch { /* ignore */ }
 
     setTabs(prev => {
       const remaining = prev.filter(x => x.id !== id);
       setActiveTabIdRaw(cur => {
         if (cur !== id) return cur;
-        // Switch to nearest remaining tab
         const idx = prev.findIndex(x => x.id === id);
         const next = remaining[Math.min(idx, remaining.length - 1)];
         pageRefs.current = [];
@@ -271,13 +270,15 @@ export function useEditorState() {
     return () => window.removeEventListener('keydown', handler);
   }, [handleUndo, handleRedo, openFileDialog, zoomIn, zoomOut]);
 
-  // ── Menus ───────────────────────────────────────────────────────────────────
+  // ── Menus (theme submenu injected here) ────────────────────────────────────
 
   const menus = buildMenuDefs({
     openFileDialog, handleExportPdf, handleUndo, handleRedo,
     handleReadPage, handleReadSelection, ttsStop,
     setShowThumbnails, setRightPanelOpen,
     zoomIn, zoomOut, zoomReset, documentState,
+    // ↓ NEW — pass theme state into menu builder
+    themeId, setTheme,
   });
 
   const pageCount = documentState?.children?.length ?? 0;
@@ -288,7 +289,7 @@ export function useEditorState() {
     activeTabId, setActiveTabId,
     handleTabClose,
 
-    // Active session state (proxied from tabSessions)
+    // Active session state
     documentState, setDocumentState,
     pdfDoc, setPdfDoc,
     activePage, setActivePage,
@@ -304,6 +305,9 @@ export function useEditorState() {
     textProps, setTextProps,
     highlightColor, setHighlightColor,
     highlightOpacity, setHighlightOpacity,
+
+    // Theme — NEW
+    themeId, setTheme,
 
     // Refs
     fileInputRef, pageRefs,

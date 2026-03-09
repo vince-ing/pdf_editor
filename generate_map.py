@@ -43,14 +43,31 @@ def analyze_python(path: Path) -> dict:
 
         # Top-level classes with their methods + signatures
         if isinstance(node, ast.ClassDef):
-            methods = []
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    methods.append({
-                        "name": item.name,
-                        "params": _py_func_params(item),
-                    })
-            classes[f"class {node.name}"] = methods
+            # Check if it's a Pydantic BaseModel — extract fields instead of methods
+            bases = [ast.unparse(b) for b in node.bases]
+            is_model = any("BaseModel" in b for b in bases)
+
+            if is_model:
+                fields = []
+                for item in node.body:
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                        field = item.target.id
+                        annotation = ast.unparse(item.annotation)
+                        default = f" = {ast.unparse(item.value)}" if item.value else ""
+                        fields.append(f"{field}: {annotation}{default}")
+                classes[f"class {node.name}"] = fields
+            else:
+                methods = []
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        # Skip private/internal methods (underscore-prefixed), except __init__
+                        if item.name.startswith("_") and item.name != "__init__":
+                            continue
+                        methods.append({
+                            "name": item.name,
+                            "params": _py_func_params(item),
+                        })
+                classes[f"class {node.name}"] = methods
 
         # Top-level functions
         if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
@@ -160,30 +177,105 @@ def analyze_typescript(path: Path) -> dict:
         if fields:
             interfaces[m.group(1)] = fields
 
-    # API calls: axios.get/post/patch/delete with their URL and payload shape
-    axios_pattern = re.compile(
-        r'axios\.(get|post|put|patch|delete)\s*\(\s*`([^`]+)`',
-        re.MULTILINE
-    )
-    for m in axios_pattern.finditer(src):
-        # Try to grab the payload object on the same line
-        after = src[m.end():m.end() + 200]
-        payload_match = re.search(r',\s*(\{[^}]+\})', after)
-        payload = payload_match.group(1).strip() if payload_match else None
-        api_calls.append({
-            "method": m.group(1).upper(),
-            "url": m.group(2),
-            "payload": payload,
-        })
+    # For client.ts: extract named API methods with their signature + axios payload
+    # Match:  methodName: async (params) => { ... axios.METHOD(`url`, payload ...) }
+    # We find each top-level key in the engineApi object
+    is_api_client = "engineApi" in src or "axios" in src
+    if is_api_client:
+        # Find each property: `  name: async (...) =>` style entries
+        method_pattern = re.compile(
+            r'^\s{2}(\w+):\s*async\s*\(([^)]*)\)',
+            re.MULTILINE
+        )
+        for mm in method_pattern.finditer(src):
+            fn_name = mm.group(1)
+            fn_params = [p.strip() for p in mm.group(2).split(",") if p.strip()]
+
+            # Find the axios call within ~400 chars after this method starts
+            chunk = src[mm.start(): mm.start() + 600]
+            axios_m = re.search(
+                r'axios\.(get|post|put|patch|delete)\s*\(\s*`([^`]+)`(.*?)(?:\),|\)\s*\))',
+                chunk, re.DOTALL
+            )
+            if axios_m:
+                method = axios_m.group(1).upper()
+                url = axios_m.group(2)
+                # Extract payload: the second argument to axios (skip session header arg)
+                args_text = axios_m.group(3)
+                # Find first { } block that looks like a payload
+                payload = _extract_first_object(args_text)
+                api_calls.append({
+                    "fn": fn_name,
+                    "signature": f"{fn_name}({', '.join(fn_params)})",
+                    "method": method,
+                    "url": url,
+                    "payload": payload,
+                })
 
     result = {}
     if interfaces:
         result["interfaces"] = interfaces
-    if functions:
-        result["functions"] = [f["name"] + ("(" + ", ".join(f["params"]) + ")" if f["params"] else "()") for f in functions]
     if api_calls:
         result["api_calls"] = api_calls
+    elif functions:
+        # Only show generic functions for non-client files
+        result["functions"] = [f["name"] + ("(" + ", ".join(f["params"]) + ")" if f["params"] else "()") for f in functions]
+    if not api_calls and functions:
+        result["functions"] = [f["name"] + ("(" + ", ".join(f["params"]) + ")" if f["params"] else "()") for f in functions]
+
+    # For hooks/state files: extract the keys of the final return { ... } object
+    # This shows what a hook exposes without reading the whole file
+    if path.name.startswith("use") or "State" in path.name:
+        return_keys = _extract_return_keys(src)
+        if return_keys:
+            result["returns"] = return_keys
+
     return result
+
+
+def _extract_return_keys(src: str) -> list[str] | None:
+    """Find the last top-level `return { ... }` and extract its keys."""
+    # Find all `return {` blocks
+    pattern = re.compile(r'\breturn\s*\(\s*\{|\breturn\s*\{', re.MULTILINE)
+    matches = list(pattern.finditer(src))
+    if not matches:
+        return None
+
+    # Use the last one (the main return statement of the hook)
+    m = matches[-1]
+    start = src.index("{", m.start())
+    obj = _extract_first_object(src[start:])
+    if not obj:
+        return None
+
+    # Extract just the keys (left side of each `key: value` or bare `key,`)
+    keys = []
+    for line in obj.split(","):
+        line = line.strip().lstrip("{").rstrip("}")
+        # Match `key:` or bare `key`
+        key_match = re.match(r'^(\w+)\s*(?::|$)', line.strip())
+        if key_match:
+            keys.append(key_match.group(1))
+    return keys if keys else None
+
+
+def _extract_first_object(text: str) -> str | None:
+    """Extract the first {...} block from text, handling nesting."""
+    depth = 0
+    start = None
+    for i, ch in enumerate(text):
+        if ch == "{":
+            if start is None:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                raw = text[start:i+1].strip()
+                # Collapse whitespace for readability
+                raw = re.sub(r'\s+', ' ', raw)
+                return raw
+    return None
 
 
 def _ts_parse_params(raw: str) -> list[str]:

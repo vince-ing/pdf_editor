@@ -1,24 +1,19 @@
+// components/canvas/Canvas.tsx
 import React from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { DEFAULT_TEXT_PROPS, type TextProps } from '../../types/textProps';
 import { PageRenderer } from './PageRenderer';
 import type { ToolId } from '../toolbar/Toolbar';
 import type { DocumentState } from './types';
+import { useTheme } from '../../theme';
 
 export interface CanvasProps {
-  pdfDoc?:            pdfjsLib.PDFDocumentProxy | null;
-  documentState?:     DocumentState | null;
-  activeTool:         ToolId;
-  scale:              number;
-  sessionId:          string;
-  textProps?:         TextProps;
-  highlightColor?:    string;
-  highlightOpacity?:  number;
-  onTextPropsChange?: (p: TextProps) => void;
-  onAnnotationAdded?: () => Promise<void>;
-  onDocumentChanged?: () => Promise<void>;
-  onTextSelected?:    (text: string) => void;
-  pageRefs?:          React.MutableRefObject<(HTMLDivElement | null)[]>;
+  pdfDoc?: pdfjsLib.PDFDocumentProxy | null; documentState?: DocumentState | null;
+  activeTool: ToolId; scale: number; sessionId: string;
+  textProps?: TextProps; highlightColor?: string; highlightOpacity?: number;
+  onTextPropsChange?: (p: TextProps) => void; onAnnotationAdded?: () => Promise<void>;
+  onDocumentChanged?: () => Promise<void>; onTextSelected?: (text: string) => void;
+  pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>;
 }
 
 export function Canvas({
@@ -26,18 +21,20 @@ export function Canvas({
   textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,
 }: CanvasProps) {
+  const { theme: t } = useTheme();
+
   return (
-    <div className="flex-1 bg-[#353a40] overflow-auto flex flex-col items-center pt-8 pb-8 px-4">
+    <div style={{ flex: 1, backgroundColor: t.colors.bgHover, overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 32, paddingBottom: 32, paddingLeft: 16, paddingRight: 16 }}>
       {!documentState ? (
-        <div className="flex flex-col items-center justify-center h-full gap-5 select-none">
-          <div className="w-16 h-16 bg-[#2d3338] rounded-xl flex items-center justify-center text-3xl border border-white/[0.05] shadow-2xl">📄</div>
-          <div className="text-center">
-            <div className="text-base font-semibold text-white mb-1">Open a document to begin</div>
-            <div className="text-sm text-gray-400">File → Open, or press Ctrl+O</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 20, userSelect: 'none' }}>
+          <div style={{ width: 64, height: 64, backgroundColor: t.colors.bgRaised, borderRadius: t.radius.lg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, border: `1px solid ${t.colors.border}`, boxShadow: t.shadow.panel }}>📄</div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '15px', fontWeight: 600, color: t.colors.textPrimary, marginBottom: 4, fontFamily: t.fonts.ui }}>Open a document to begin</div>
+            <div style={{ fontSize: '13px', color: t.colors.textSecondary, fontFamily: t.fonts.ui }}>File → Open, or press Ctrl+O</div>
           </div>
-          <div className="flex flex-wrap gap-1.5 justify-center max-w-xs">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', maxWidth: 280 }}>
             {['Highlight · Redact', 'Add Text · Images', 'Reorder · Rotate', 'Read Aloud · Export'].map(f => (
-              <span key={f} className="text-[11px] text-gray-500 bg-[#2d3338] border border-white/[0.05] rounded-full px-3 py-1">{f}</span>
+              <span key={f} style={{ fontSize: '11px', color: t.colors.textMuted, backgroundColor: t.colors.bgRaised, border: `1px solid ${t.colors.border}`, borderRadius: t.radius.pill, padding: '3px 12px', fontFamily: t.fonts.ui }}>{f}</span>
             ))}
           </div>
         </div>
