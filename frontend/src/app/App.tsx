@@ -84,6 +84,7 @@ function AppInner() {
           onToggleThumbnails={() => editor.setShowThumbnails(v => !v)}
           pdfDoc={editor.pdfDoc} documentState={editor.documentState} activePage={editor.activePage}
           activeView={editor.sidebarView}
+          sessionId={editor.activeTabId ?? ''}
           onViewChange={v => {
             editor.setSidebarView(v);
             if (v) editor.setShowThumbnails(true);

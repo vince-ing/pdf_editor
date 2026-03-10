@@ -1486,11 +1486,12 @@
           "pdfDoc?: pdfjsLib.PDFDocumentProxy | null; documentState?: DocumentState | null",
           "activePage?: number; activeView?: SidebarView; onViewChange?: (v: SidebarView) => void",
           "onPageClick?: (index: number) => void; onDocumentChanged?: () => Promise<void>",
-          "search?: SearchProps"
+          "search?: SearchProps",
+          "sessionId?: string"
         ]
       },
       "functions": [
-        "LeftSidebar({\n  showThumbnails, onToggleThumbnails, pdfDoc, documentState,\n  activePage = 0, activeView, onViewChange, onPageClick, onDocumentChanged,\n  search,\n}: LeftSidebarProps)",
+        "LeftSidebar({\n  showThumbnails, onToggleThumbnails, pdfDoc, documentState,\n  activePage = 0, activeView, onViewChange, onPageClick, onDocumentChanged,\n  search, sessionId,\n}: LeftSidebarProps)",
         "ContextSnippet({ before, term, after, t, isCurrent }: {\n  before: string; term: string; after: string; t: any; isCurrent: boolean;\n})",
         "SearchPanel({\n  search, pages, t,\n}: {\n  search:    SearchProps | undefined;\n  pages:     PageNode[];\n  t:         any;\n})"
       ]

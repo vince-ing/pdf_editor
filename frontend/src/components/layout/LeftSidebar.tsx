@@ -32,6 +32,7 @@ interface LeftSidebarProps {
   activePage?: number; activeView?: SidebarView; onViewChange?: (v: SidebarView) => void;
   onPageClick?: (index: number) => void; onDocumentChanged?: () => Promise<void>;
   search?: SearchProps;
+  sessionId?: string;
 }
 
 const Thumbnail = ({ pdfDoc, pageNumber, rotation }: {
@@ -69,7 +70,7 @@ const VIEW_ITEMS: Array<{ id: SidebarView; icon: React.ComponentType<{ size?: nu
 export function LeftSidebar({
   showThumbnails, onToggleThumbnails, pdfDoc, documentState,
   activePage = 0, activeView, onViewChange, onPageClick, onDocumentChanged,
-  search,
+  search, sessionId,
 }: LeftSidebarProps) {
   const { theme: t } = useTheme();
   const pages = documentState?.children ?? [];
@@ -175,7 +176,7 @@ export function LeftSidebar({
                     setDragSrc(null); setInsertBefore(null);
                     if (src !== null && src !== i) await withBusy(async () => {
                       const { engineApi } = await import('../../api/client');
-                      await engineApi.movePage(pages[src].id, i);
+                      await engineApi.movePage(pages[src].id, i, sessionId ?? '');
                       await onDocumentChanged?.();
                     });
                   }}
