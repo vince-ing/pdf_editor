@@ -1,10 +1,14 @@
 # engine/src/api/main.py
 
 import os
+import sys
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import fitz
+import pytesseract
+from PIL import Image
 
 from engine.src.editor.editor_session import EditorSession
 from engine.src.services.page_service import PageService
@@ -14,6 +18,16 @@ from engine.src.plugin_system.plugin_manager import PluginManager
 from engine.src.plugins.ocr_plugin import OCRPlugin
 from engine.src.plugins.tts_plugin import TTSPlugin
 from engine.src.plugins.redact_plugin import RedactPlugin
+
+# Calculate the root directory of the project relative to this file
+# main.py is in engine/src/api/
+# 3 directories up gets us to the project root
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "..", "..", ".."))
+
+if sys.platform == "win32":
+    tesseract_path = os.path.join(project_root, "pytesseract", "tesseract.exe")
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
 app = FastAPI(title="PDF Editor Engine API")
 
@@ -342,27 +356,79 @@ def run_ocr(payload: OCRPayload, session: EditorSession = Depends(get_session)):
     page = session.document.get_child(payload.page_id)
     if not page or page.node_type != "page":
         raise HTTPException(status_code=404, detail="Page not found")
-    # TODO: replace with real Tesseract call, e.g.:
-    # from engine.src.services.ocr_service import OcrService
-    # extracted_blocks = OcrService().extract(page, payload.language)
-    extracted_blocks: list = []
-    annot_service = AnnotationService(session)
-    added_nodes = []
-    for block in extracted_blocks:
-        node = annot_service.add_text(
-            page_id=payload.page_id,
-            text=block["text"],
-            x=block["x"],
-            y=block["y"],
-            width=block["w"],
-            height=block["h"],
+
+    doc_path = session.document.file_path
+    if not doc_path or not os.path.exists(doc_path):
+        raise HTTPException(status_code=400, detail="Document file path is missing or invalid.")
+
+    try:
+        # Open the PDF using PyMuPDF
+        pdf_doc = fitz.open(doc_path)
+        
+        # fitz is 0-indexed. Assuming page.page_number is 1-indexed
+        fitz_page_num = max(0, page.page_number - 1)
+        if fitz_page_num >= len(pdf_doc):
+            raise HTTPException(status_code=400, detail="Invalid page number")
+        
+        pdf_page = pdf_doc[fitz_page_num]
+        page_height = pdf_page.rect.height
+        
+        # Render page to an image at standard 72 DPI to match PDF coordinate space
+        pix = pdf_page.get_pixmap(matrix=fitz.Matrix(1, 1))
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+        # Execute OCR and extract data
+        ocr_data = pytesseract.image_to_data(
+            img, 
+            lang=payload.language, 
+            output_type=pytesseract.Output.DICT
         )
-        added_nodes.append(node)
-    return {
-        "status": "success",
-        "message": f"OCR complete. Added {len(added_nodes)} text nodes.",
-        "nodes": added_nodes,
-    }
+
+        annot_service = AnnotationService(session)
+        added_nodes = []
+        n_boxes = len(ocr_data['text'])
+
+        # Mutate the Scene Graph using the standardized service layer
+        for i in range(n_boxes):
+            text = ocr_data['text'][i].strip()
+            if text:  # Ignore empty strings or whitespace-only detections
+                w = ocr_data['width'][i]
+                h = ocr_data['height'][i]
+                x = ocr_data['left'][i]
+                y_tesseract = ocr_data['top'][i]
+                
+                # Invert the Y-axis to match the PDF coordinate system (origin at bottom-left)
+                y_pdf = page_height - (y_tesseract + h)
+
+                node = annot_service.add_text(
+                    page_id=payload.page_id,
+                    text=text,
+                    x=x,
+                    y=y_pdf,
+                    width=w,
+                    height=h
+                )
+                added_nodes.append(node)
+
+        pdf_doc.close()
+
+        return {
+            "status": "success",
+            "message": f"OCR complete. Added {len(added_nodes)} text nodes.",
+            "nodes": added_nodes
+        }
+
+    except pytesseract.pytesseract.TesseractNotFoundError:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Tesseract executable not found at {tesseract_path}. Please ensure it exists."
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"OCR processing failed: {str(e)}")
 
 
 # ── Undo / Redo ───────────────────────────────────────────────────────────────
