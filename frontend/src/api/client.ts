@@ -3,7 +3,12 @@
 import axios from 'axios';
 import type { TextRun } from '../types/textProps';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+// We'll use a simple check: if the URL includes 'vercel.app', use the HF backend.
+const isProduction = window.location.hostname.includes('vercel.app');
+
+const API_BASE = isProduction 
+  ? 'https://vince-ing-pdf-editor-backend.hf.space/api' 
+  : 'http://localhost:8000/api';
 
 // Build axios config with session header
 const s = (sessionId: string) => ({ headers: { 'X-Session-Id': sessionId } });
