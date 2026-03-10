@@ -1813,6 +1813,7 @@
         "handleRedo",
         "handleReadPage",
         "handleReadSelection",
+        "handleExportPdf",
         "zoomIn",
         "zoomOut",
         "zoomReset",
@@ -1820,6 +1821,22 @@
         "refreshDocumentState",
         "menus",
         "pageCount"
+      ]
+    },
+    "frontend\\src\\hooks\\useOcr.ts": {
+      "interfaces": {
+        "UseOcrProps": [
+          "activeTabId: string | null",
+          "onSuccess?: () => void"
+        ]
+      },
+      "functions": [
+        "useOcr({ activeTabId, onSuccess }: UseOcrProps)"
+      ],
+      "returns": [
+        "runOcr",
+        "isProcessing",
+        "error"
       ]
     },
     "frontend\\src\\hooks\\usePageActions.ts": {

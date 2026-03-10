@@ -274,6 +274,7 @@ export function useEditorState() {
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z') { e.preventDefault(); handleUndo(); }
         if (e.key === 'y') { e.preventDefault(); handleRedo(); }
+        if (e.key === 's') { e.preventDefault(); handleExportPdf(); }
         if (e.key === 'o') { e.preventDefault(); openFileDialog(); }
         if (e.key === '=') { e.preventDefault(); zoomIn(); }
         if (e.key === '-') { e.preventDefault(); zoomOut(); }
@@ -339,7 +340,7 @@ export function useEditorState() {
 
     // Actions
     handleFileUpload, handleUndo, handleRedo,
-    handleReadPage, handleReadSelection,
+    handleReadPage, handleReadSelection, handleExportPdf,
     zoomIn, zoomOut, zoomReset, openFileDialog,
     refreshDocumentState,
     menus, pageCount,

@@ -17,6 +17,8 @@ import { ThemeProvider, useTheme } from '../theme';
 // Register external strategy tools
 import '../core/tools/PanTool';
 import '../core/tools/DragTool';
+import '../core/tools/SelectTool'; 
+import '../core/tools/TextTool';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -40,7 +42,7 @@ function AppInner() {
       <TopBar
         tabs={editor.tabs} activeTabId={editor.activeTabId} onTabClick={editor.setActiveTabId}
         onTabClose={editor.handleTabClose}
-        onNewTab={editor.openFileDialog} onUndo={editor.handleUndo} onRedo={editor.handleRedo} menus={editor.menus}
+        onNewTab={editor.openFileDialog} onUndo={editor.handleUndo} onRedo={editor.handleRedo} onSave={editor.handleExportPdf} menus={editor.menus}
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -103,13 +105,17 @@ function AppInner() {
             />
             {editor.rightPanelOpen && (
               <RightPanel
-                documentState={editor.documentState} activePage={editor.activePage} activeTool={editor.activeTool}
+                documentState={editor.documentState} 
+                activePage={editor.activePage} 
+                activeTool={editor.activeTool}
                 textProps={editor.textProps}
                 onTextPropsChange={editor.setTextProps}
                 highlightColor={editor.highlightColor}
                 highlightOpacity={editor.highlightOpacity}
                 onHighlightColorChange={editor.setHighlightColor}
                 onHighlightOpacityChange={editor.setHighlightOpacity}
+                sessionId={editor.activeTabId}
+                onDocumentChanged={editor.refreshDocumentState} 
               />
             )}
           </div>
