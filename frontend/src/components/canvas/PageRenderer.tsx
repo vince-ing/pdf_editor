@@ -174,14 +174,26 @@ export function PageRenderer({
           </div>
         )}
 
-        {displayRects.map((rect, i) => (
-          <div key={i} className="absolute pointer-events-none z-10" style={{
-            left: rect.x * scale, top: rect.y * scale,
-            width: rect.width * scale, height: rect.height * scale,
-            background: SEL_COLOR[activeTool] ?? 'rgba(74,144,226,0.2)',
-            border: activeTool === 'crop' ? '2px dashed #f97316' : 'none', borderRadius: 1,
-          }} />
-        ))}
+        {displayRects.map((rect, i) => {
+          let bg = SEL_COLOR[activeTool] ?? 'rgba(74,144,226,0.2)';
+          if (activeTool === 'highlight' && highlightColor) {
+            const hex = highlightColor.replace('#', '');
+            if (hex.length === 6) {
+              const r = parseInt(hex.substring(0, 2), 16);
+              const g = parseInt(hex.substring(2, 4), 16);
+              const b = parseInt(hex.substring(4, 6), 16);
+              bg = `rgba(${r}, ${g}, ${b}, ${highlightOpacity ?? 0.45})`;
+            }
+          }
+          return (
+            <div key={i} className="absolute pointer-events-none z-10" style={{
+              left: rect.x * scale, top: rect.y * scale,
+              width: rect.width * scale, height: rect.height * scale,
+              background: bg,
+              border: activeTool === 'crop' ? '2px dashed #f97316' : 'none', borderRadius: 1,
+            }} />
+          );
+        })}
 
         <InteractionLayer
           scale={scale}
