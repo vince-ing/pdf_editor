@@ -189,8 +189,16 @@ export function Toolbar({
   return (
     <div style={{ backgroundColor: t.colors.bgRaised, borderBottom: `1px solid ${t.colors.bgBase}`, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
 
+      {/* Ribbon body (Tools) */}
+      <div style={{ padding: '0 16px', display: 'flex', alignItems: 'stretch', height: '58px', gap: '4px' }}>
+        {activeTab === 'view'    && <ViewTab    activeTool={activeTool} onToolChange={handleToolChange} scale={scale} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />}
+        {activeTab === 'edit'    && <EditTab    activeTool={activeTool} onToolChange={handleToolChange} onUndo={onUndo} onRedo={onRedo} />}
+        {activeTab === 'comment' && <CommentTab activeTool={activeTool} onToolChange={handleToolChange} onReadPage={onReadPage} onReadSelection={onReadSelection} ttsActive={ttsActive} hasSelection={hasSelection} />}
+        {activeTab === 'pages'   && <PagesTab   activeTool={activeTool} onToolChange={handleToolChange} />}
+      </div>
+
       {/* Tab strip */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', padding: '6px 12px 0', gap: '2px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', padding: '0 12px 0px', gap: '4px' }}>
         {TABS.map(tab => {
           const hasActiveTool = TOOL_DEFS.some(t2 => t2.category === tab.id && t2.id === activeTool);
           const isOpen = activeTab === tab.id;
@@ -199,11 +207,15 @@ export function Toolbar({
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
               style={{
-                padding: '5px 16px', fontSize: '12px', fontWeight: 500,
-                borderRadius: `${t.radius.sm} ${t.radius.sm} 0 0`,
-                border: `1px solid ${isOpen ? t.colors.border : 'transparent'}`,
-                borderBottom: 'none', flexShrink: 0, cursor: 'pointer', transition: t.t.fast,
-                backgroundColor: isOpen ? t.colors.bgBase : hov ? `${t.colors.bgBase}60` : 'transparent',
+                padding: '6px 16px', 
+                fontSize: '12px', 
+                fontWeight: isOpen ? 600 : 500,
+                borderRadius: t.radius.sm,
+                border: 'none', 
+                flexShrink: 0, 
+                cursor: 'pointer', 
+                transition: t.t.fast,
+                backgroundColor: isOpen ? t.colors.bgBase : hov ? t.colors.bgHover : 'transparent',
                 color: isOpen ? t.colors.textPrimary : hasActiveTool ? t.colors.accent : hov ? t.colors.textSecondary : t.colors.textMuted,
                 fontFamily: t.fonts.ui,
               }}>
@@ -212,7 +224,7 @@ export function Toolbar({
           );
         })}
         {pageInfo && (
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingBottom: '6px' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingTop: '6px' }}>
             <span style={{ fontSize: '12px', color: t.colors.textMuted, fontFamily: t.fonts.mono }}>
               <span style={{ color: t.colors.textPrimary, fontWeight: 600 }}>{pageInfo.current}</span>
               {' / '}{pageInfo.total}
@@ -221,13 +233,6 @@ export function Toolbar({
         )}
       </div>
 
-      {/* Ribbon body */}
-      <div style={{ backgroundColor: t.colors.bgBase, borderTop: `1px solid ${t.colors.border}`, padding: '0 16px', display: 'flex', alignItems: 'stretch', height: '58px', gap: '4px' }}>
-        {activeTab === 'view'    && <ViewTab    activeTool={activeTool} onToolChange={handleToolChange} scale={scale} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />}
-        {activeTab === 'edit'    && <EditTab    activeTool={activeTool} onToolChange={handleToolChange} onUndo={onUndo} onRedo={onRedo} />}
-        {activeTab === 'comment' && <CommentTab activeTool={activeTool} onToolChange={handleToolChange} onReadPage={onReadPage} onReadSelection={onReadSelection} ttsActive={ttsActive} hasSelection={hasSelection} />}
-        {activeTab === 'pages'   && <PagesTab   activeTool={activeTool} onToolChange={handleToolChange} />}
-      </div>
     </div>
   );
 }
