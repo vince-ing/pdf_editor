@@ -1,6 +1,6 @@
 // components/layout/RightPanel.tsx
 import { ChevronDown, ChevronUp, MoreVertical, Sparkles, RotateCw, Crop, ScanText, Loader2 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react'
 import type { ToolId } from '../../constants/tools';
 import { DEFAULT_TEXT_PROPS, FONT_OPTIONS, type TextProps } from '../../types/textProps';
 import { useTheme } from '../../theme';
