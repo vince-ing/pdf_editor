@@ -1432,6 +1432,8 @@
       "interfaces": {
         "TransientBoxProps": [
           "initialX: number; initialY: number",
+          "initialW?: number; initialH?: number",
+          "isDrawing?: boolean",
           "scale:      number",
           "textProps:  TextProps",
           "onPropsChange?: (p: TextProps) => void",
@@ -1441,7 +1443,7 @@
         ]
       },
       "functions": [
-        "TransientTextBox({ initialX, initialY, scale, textProps, onPropsChange, onCommit, onCancel, blurRef }: TransientBoxProps)"
+        "TransientTextBox({ initialX, initialY, initialW, initialH, isDrawing, scale, textProps, onPropsChange, onCommit, onCancel, blurRef }: TransientBoxProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\types.tsx": {
@@ -1876,7 +1878,7 @@
           "highlightOpacity?: number",
           "sessionId: string",
           "setAnnotations: React.Dispatch<React.SetStateAction<AnnotationNode[]>>",
-          "setTransientPos: (pos: { x: number; y: number"
+          "setTransientPos: (pos: { x: number; y: number; w?: number; h?: number; isDrawing?: boolean"
         ]
       },
       "functions": [

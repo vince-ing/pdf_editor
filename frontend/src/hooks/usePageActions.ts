@@ -13,7 +13,7 @@ interface UsePageActionsProps {
   highlightOpacity?: number;
   sessionId: string;
   setAnnotations: React.Dispatch<React.SetStateAction<AnnotationNode[]>>;
-  setTransientPos: (pos: { x: number; y: number } | null) => void;
+  setTransientPos: (pos: { x: number; y: number; w?: number; h?: number; isDrawing?: boolean } | null) => void;
   onAnnotationAdded?: () => Promise<void>;
   onTextSelected?: (text: string) => void;
   clearSelRef: React.MutableRefObject<(() => void) | null>;

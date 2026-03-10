@@ -67,7 +67,7 @@ export function PageRenderer({
   const [localRotation,  setLocalRotation] = useState(pageNode.rotation ?? 0);
   const [showToast,      setShowToast]     = useState(false);
   const [showCtrl,       setShowCtrl]      = useState(false);
-  const [transientPos,   setTransientPos]  = useState<{ x: number; y: number } | null>(null);
+  const [transientPos,   setTransientPos]  = useState<{ x: number; y: number; w?: number; h?: number; isDrawing?: boolean } | null>(null);
 
   useEffect(() => { setAnnotations(pageNode.children ?? []); }, [pageNode.children]);
   useEffect(() => { if (typeof pageNode.rotation === 'number') setLocalRotation(pageNode.rotation); }, [pageNode.rotation, pageNode.id]);
@@ -77,7 +77,7 @@ export function PageRenderer({
       if (!pos) {
         setTransientPos(null);
       } else if (pos.pageId === pageNode.id) {
-        setTransientPos({ x: pos.x, y: pos.y });
+        setTransientPos({ x: pos.x, y: pos.y, w: pos.w, h: pos.h, isDrawing: pos.isDrawing });
       }
     });
     const unsubCommit = textTool.onCommitRequest(() => transientBlurRef.current?.());
@@ -218,6 +218,8 @@ export function PageRenderer({
         {transientPos && (
           <TransientTextBox
             initialX={transientPos.x} initialY={transientPos.y}
+            initialW={transientPos.w} initialH={transientPos.h}
+            isDrawing={transientPos.isDrawing}
             scale={scale} textProps={textProps}
             onPropsChange={onTextPropsChange}
             blurRef={transientBlurRef}
