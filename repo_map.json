@@ -1279,11 +1279,13 @@
           "textProps?: TextProps; highlightColor?: string; highlightOpacity?: number",
           "onTextPropsChange?: (p: TextProps) => void; onAnnotationAdded?: () => Promise<void>",
           "onDocumentChanged?: () => Promise<void>; onTextSelected?: (text: string) => void",
-          "pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>"
+          "pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>",
+          "canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>",
+          "pageMatchMap?: PageMatchMap"
         ]
       },
       "functions": [
-        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n}: CanvasProps)"
+        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n}: CanvasProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\CopyToast.tsx": {
@@ -1348,11 +1350,12 @@
           "onAnnotationAdded?: () => Promise<void>",
           "onDocumentChanged?: () => Promise<void>",
           "onTextSelected?: (text: string) => void",
-          "containerRef?: React.Ref<HTMLDivElement>"
+          "containerRef?: React.Ref<HTMLDivElement>",
+          "searchMatches?: { rects: { x: number; y: number; width: number; height: number"
         ]
       },
       "functions": [
-        "PageRenderer({\n  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId,\n  highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,\n}: PageRendererProps)"
+        "PageRenderer({\n  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId,\n  highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,\n  searchMatches = [],\n}: PageRendererProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\ResizeHandles.tsx": {
@@ -1419,15 +1422,31 @@
         "DocumentState": [
           "children?: PageNode[]"
         ],
+        "SearchProps": [
+          "query:          string",
+          "onQueryChange:  (q: string) => void",
+          "matchCount:     number",
+          "currentIndex:   number",
+          "isSearching:    boolean",
+          "pageMatchMap:   PageMatchMap",
+          "matches:        SearchMatch[]",
+          "onNext:         () => void",
+          "onPrev:         () => void",
+          "goToMatch:      (index: number) => void",
+          "inputRef?:      React.RefObject<HTMLInputElement>"
+        ],
         "LeftSidebarProps": [
           "showThumbnails: boolean; onToggleThumbnails: () => void",
           "pdfDoc?: pdfjsLib.PDFDocumentProxy | null; documentState?: DocumentState | null",
           "activePage?: number; activeView?: SidebarView; onViewChange?: (v: SidebarView) => void",
-          "onPageClick?: (index: number) => void; onDocumentChanged?: () => Promise<void>"
+          "onPageClick?: (index: number) => void; onDocumentChanged?: () => Promise<void>",
+          "search?: SearchProps"
         ]
       },
       "functions": [
-        "LeftSidebar({\n  showThumbnails, onToggleThumbnails, pdfDoc, documentState,\n  activePage = 0, activeView, onViewChange, onPageClick, onDocumentChanged,\n}: LeftSidebarProps)"
+        "LeftSidebar({\n  showThumbnails, onToggleThumbnails, pdfDoc, documentState,\n  activePage = 0, activeView, onViewChange, onPageClick, onDocumentChanged,\n  search,\n}: LeftSidebarProps)",
+        "ContextSnippet({ before, term, after, t, isCurrent }: {\n  before: string; term: string; after: string; t: any; isCurrent: boolean;\n})",
+        "SearchPanel({\n  search, pages, t,\n}: {\n  search:    SearchProps | undefined;\n  pages:     PageNode[];\n  t:         any;\n})"
       ]
     },
     "frontend\\src\\components\\layout\\RightPanel.tsx": {
@@ -1653,7 +1672,8 @@
           "zoomReset: () => void",
           "documentState: unknown | null",
           "themeId: ThemeId",
-          "setTheme: (id: ThemeId) => void"
+          "setTheme: (id: ThemeId) => void",
+          "openSearch: () => void"
         ]
       },
       "functions": [
@@ -1756,6 +1776,7 @@
         "setHighlightOpacity",
         "setTheme",
         "pageRefs",
+        "canvasScrollRef",
         "ttsStop",
         "pauseResume",
         "setSpeed",
@@ -1834,6 +1855,40 @@
       "returns": [
         "canvasRef",
         "fullDimensions"
+      ]
+    },
+    "frontend\\src\\hooks\\useSearchState.ts": {
+      "interfaces": {
+        "SearchMatch": [
+          "pageIndex: number",
+          "pageId: string",
+          "rects: { x: number; y: number; width: number; height: number"
+        ],
+        "UseSearchStateArgs": [
+          "documentState:   DocumentState | null",
+          "sessionId:       string | null",
+          "pageRefs:        React.MutableRefObject<(HTMLDivElement | null)[]>",
+          "canvasScrollRef: React.MutableRefObject<HTMLDivElement | null>",
+          "scale:           number"
+        ]
+      },
+      "functions": [
+        "useSearchState({\n  documentState, sessionId, pageRefs, canvasScrollRef, scale,\n}: UseSearchStateArgs)"
+      ],
+      "returns": [
+        "isOpen",
+        "open",
+        "close",
+        "query",
+        "handleQueryChange",
+        "matches",
+        "currentIndex",
+        "pageMatchMap",
+        "isSearching",
+        "goNext",
+        "goPrev",
+        "goToMatch",
+        "inputRef"
       ]
     },
     "frontend\\src\\hooks\\useTts.ts": {

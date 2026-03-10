@@ -1,0 +1,7 @@
+backend
+
+uvicorn engine.src.api.main:app --reload --port 8000
+
+frontend
+
+..\..\nodejs\npm.cmd run dev

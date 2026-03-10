@@ -12,7 +12,7 @@ import { Toolbar }     from '../components/toolbar/Toolbar';
 import { Canvas }      from '../components/canvas/Canvas';
 
 import { useEditorState } from '../hooks/useEditorState';
-import { ThemeProvider, useTheme } from '../theme';  // ← NEW
+import { ThemeProvider, useTheme } from '../theme';
 
 // Register external strategy tools
 import '../core/tools/PanTool';
@@ -24,7 +24,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 function AppInner() {
   const editor = useEditorState();
-  const { theme: t } = useTheme();  // ← NEW — reactive theme tokens
+  const { theme: t } = useTheme();
 
   if (editor.loading) {
     return (
@@ -36,7 +36,6 @@ function AppInner() {
   }
 
   return (
-    // ↓ bgBase now comes from the live theme token instead of a hardcoded class
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: t.colors.bgBase, color: t.colors.textPrimary, overflow: 'hidden' }}>
       <TopBar
         tabs={editor.tabs} activeTabId={editor.activeTabId} onTabClick={editor.setActiveTabId}
@@ -50,12 +49,29 @@ function AppInner() {
           onToggleThumbnails={() => editor.setShowThumbnails(v => !v)}
           pdfDoc={editor.pdfDoc} documentState={editor.documentState} activePage={editor.activePage}
           activeView={editor.sidebarView}
-          onViewChange={v => { editor.setSidebarView(v); if (v) editor.setShowThumbnails(true); }}
+          onViewChange={v => {
+            editor.setSidebarView(v);
+            if (v) editor.setShowThumbnails(true);
+            if (v === 'search') editor.search.open();
+          }}
           onPageClick={i => {
             editor.setActivePage(i);
             editor.pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }}
           onDocumentChanged={editor.refreshDocumentState}
+          search={{
+            query:          editor.search.query,
+            onQueryChange:  editor.search.handleQueryChange,
+            matchCount:     editor.search.matches.length,
+            currentIndex:   editor.search.currentIndex,
+            isSearching:    editor.search.isSearching,
+            pageMatchMap:   editor.search.pageMatchMap,
+            matches:        editor.search.matches,
+            onNext:         editor.search.goNext,
+            onPrev:         editor.search.goPrev,
+            goToMatch:      editor.search.goToMatch,
+            inputRef:       editor.search.inputRef,
+          }}
         />
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -82,6 +98,8 @@ function AppInner() {
               onDocumentChanged={editor.refreshDocumentState}
               onTextSelected={editor.setLastSelectedText}
               pageRefs={editor.pageRefs}
+              canvasScrollRef={editor.canvasScrollRef}
+              pageMatchMap={editor.search.pageMatchMap}
             />
             {editor.rightPanelOpen && (
               <RightPanel
@@ -114,7 +132,7 @@ function AppInner() {
   );
 }
 
-// ── Root export — ThemeProvider wraps everything ─────────────────────────────
+// ── Root export ───────────────────────────────────────────────────────────────
 
 export default function App() {
   return (

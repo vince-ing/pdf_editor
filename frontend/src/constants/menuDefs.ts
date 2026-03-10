@@ -1,7 +1,4 @@
 // constants/menuDefs.ts — App menu bar definitions.
-// Extracted from App.tsx for separation of concerns.
-// Icons are Lucide React components (no emoji).
-
 import {
   FolderOpen, X, Save, FilePen, Download, FileText, Lock,
   ClipboardList, Package, Printer, Undo2, Redo2, Copy, Square,
@@ -12,8 +9,6 @@ import {
 } from 'lucide-react';
 import { THEMES, type ThemeId } from '../theme/themes';
 import type { LucideIcon } from 'lucide-react';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface MenuAction {
   label: string;
@@ -29,10 +24,6 @@ export interface MenuDef {
   label: string;
   items: MenuAction[];
 }
-
-// ── Menu builder ──────────────────────────────────────────────────────────────
-// Returns menu definitions with callbacks injected.
-// All icon fields are LucideIcon components — no emoji.
 
 export interface MenuCallbacks {
   openFileDialog: () => void;
@@ -50,6 +41,7 @@ export interface MenuCallbacks {
   documentState: unknown | null;
   themeId: ThemeId;
   setTheme: (id: ThemeId) => void;
+  openSearch: () => void;
 }
 
 export function buildMenuDefs(cb: MenuCallbacks): MenuDef[] {
@@ -89,7 +81,7 @@ export function buildMenuDefs(cb: MenuCallbacks): MenuDef[] {
         {
           label: 'Find & Replace', icon: Search,
           submenu: [
-            { label: 'Find…',    shortcut: 'Ctrl+F', disabled: true },
+            { label: 'Find…',    icon: Search, shortcut: 'Ctrl+F', onClick: cb.openSearch },
             { label: 'Replace…', shortcut: 'Ctrl+H', disabled: true },
           ],
         },

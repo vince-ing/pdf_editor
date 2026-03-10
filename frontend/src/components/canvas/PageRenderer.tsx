@@ -44,12 +44,15 @@ export interface PageRendererProps {
   onDocumentChanged?: () => Promise<void>;
   onTextSelected?: (text: string) => void;
   containerRef?: React.Ref<HTMLDivElement>;
+  // Search
+  searchMatches?: { rects: { x: number; y: number; width: number; height: number }[]; matchIndex: number; isCurrent: boolean }[];
 }
 
 export function PageRenderer({
   pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId,
   highlightColor, highlightOpacity, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,
+  searchMatches = [],
 }: PageRendererProps) {
   const clearSelRef = useRef<(() => void) | null>(null);
   const toastTimer  = useRef<ReturnType<typeof setTimeout>>();
@@ -95,7 +98,6 @@ export function PageRenderer({
     toastTimer.current = setTimeout(() => setShowToast(false), 2000);
   }, []);
 
-  // Use the newly extracted hook!
   const { handleNodeUpdate, handleAction, handleTextCommit } = usePageActions({
     pageNode, pageChars, activeTool, textProps, sessionId, setAnnotations, setTransientPos,
     highlightColor, highlightOpacity,
@@ -136,6 +138,29 @@ export function PageRenderer({
 
       <div style={{ position: 'absolute', top: innerY, left: innerX, width: fullDimensions.width, height: fullDimensions.height }}>
         <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ width: fullDimensions.width, height: fullDimensions.height }} />
+
+        {/* ── Search match highlights ─────────────────────────────────── */}
+        {searchMatches.map((match, mi) =>
+          match.rects.map((rect, ri) => (
+            <div
+              key={`search-${mi}-${ri}`}
+              className="absolute pointer-events-none"
+              style={{
+                left:            rect.x      * scale,
+                top:             rect.y      * scale,
+                width:           rect.width  * scale,
+                height:          rect.height * scale,
+                backgroundColor: match.isCurrent
+                  ? 'rgba(250, 204, 21, 0.75)'   // yellow  — current match
+                  : 'rgba(147, 51, 234, 0.45)',   // purple  — other matches
+                mixBlendMode: 'multiply',
+                borderRadius: 2,
+                zIndex: match.isCurrent ? 16 : 15,
+                transition: 'background-color 0.15s',
+              }}
+            />
+          ))
+        )}
 
         {cropRect && (
           <div className="absolute inset-0 pointer-events-none z-[8]">

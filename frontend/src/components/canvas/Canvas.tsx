@@ -6,6 +6,7 @@ import { PageRenderer } from './PageRenderer';
 import type { ToolId } from '../toolbar/Toolbar';
 import type { DocumentState } from './types';
 import { useTheme } from '../../theme';
+import type { PageMatchMap } from '../../hooks/useSearchState';
 
 export interface CanvasProps {
   pdfDoc?: pdfjsLib.PDFDocumentProxy | null; documentState?: DocumentState | null;
@@ -14,17 +15,25 @@ export interface CanvasProps {
   onTextPropsChange?: (p: TextProps) => void; onAnnotationAdded?: () => Promise<void>;
   onDocumentChanged?: () => Promise<void>; onTextSelected?: (text: string) => void;
   pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>;
+  canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
+  // Search
+  pageMatchMap?: PageMatchMap;
 }
 
 export function Canvas({
   pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,
   textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,
+  canvasScrollRef,
+  pageMatchMap = {},
 }: CanvasProps) {
   const { theme: t } = useTheme();
 
   return (
-    <div style={{ flex: 1, backgroundColor: t.colors.bgHover, overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 32, paddingBottom: 32, paddingLeft: 16, paddingRight: 16 }}>
+    <div
+      ref={canvasScrollRef}
+      style={{ flex: 1, backgroundColor: t.colors.bgHover, overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 32, paddingBottom: 32, paddingLeft: 16, paddingRight: 16 }}
+    >
       {!documentState ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 20, userSelect: 'none' }}>
           <div style={{ width: 64, height: 64, backgroundColor: t.colors.bgRaised, borderRadius: t.radius.lg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, border: `1px solid ${t.colors.border}`, boxShadow: t.shadow.panel }}>📄</div>
@@ -49,6 +58,7 @@ export function Canvas({
               onTextPropsChange={onTextPropsChange}
               onAnnotationAdded={onAnnotationAdded} onDocumentChanged={onDocumentChanged}
               onTextSelected={onTextSelected}
+              searchMatches={pageMatchMap[page.id] ?? []}
             />
           </div>
         ))

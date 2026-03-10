@@ -6,8 +6,9 @@ import { useTts } from './useTts';
 import { buildMenuDefs } from '../constants/menuDefs';
 import { DEFAULT_TEXT_PROPS, type TextProps } from '../types/textProps';
 import { toolManager } from '../core/tools/ToolManager';
-import { useTheme } from '../theme';  // ← NEW
-import { THEMES, type ThemeId } from '../theme/themes';  // ← NEW
+import { useTheme } from '../theme';
+import { THEMES, type ThemeId } from '../theme/themes';
+import { useSearchState } from './useSearchState';
 
 import type { ToolId } from '../constants/tools';
 import type { SidebarView } from '../components/layout/LeftSidebar';
@@ -50,10 +51,11 @@ export function useEditorState() {
   const [loading,          setLoading]          = useState(false);
 
   // ── Theme ─────────────────────────────────────────────────────────────────
-  const { themeId, setTheme } = useTheme();  // ← NEW
+  const { themeId, setTheme } = useTheme();
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const pageRefs     = useRef<(HTMLDivElement | null)[]>([]);
+  const fileInputRef      = useRef<HTMLInputElement>(null);
+  const pageRefs          = useRef<(HTMLDivElement | null)[]>([]);
+  const canvasScrollRef   = useRef<HTMLDivElement | null>(null);
   const { tts, speak, stop: ttsStop, pauseResume, setSpeed } = useTts();
 
   // ── Active session helpers ──────────────────────────────────────────────────
@@ -92,6 +94,16 @@ export function useEditorState() {
       return { ...prev, [activeTabId]: { ...prev[activeTabId], scale: next } };
     });
   }, [activeTabId]);
+
+  // ── Search ─────────────────────────────────────────────────────────────────
+
+  const search = useSearchState({
+    documentState,
+    sessionId: activeTabId,
+    pageRefs,
+    canvasScrollRef,
+    scale,
+  });
 
   // ── Tab switching ───────────────────────────────────────────────────────────
 
@@ -205,9 +217,7 @@ export function useEditorState() {
   const handleExportPdf = useCallback(async () => {
   if (!documentState || !activeTabId) return;
   try {
-    // Determine base URL dynamically
     const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
-    
     const res = await fetch(`${apiBase}/document/download`, {
       headers: { 'X-Session-Id': activeTabId },
     });
@@ -267,21 +277,27 @@ export function useEditorState() {
         if (e.key === 'o') { e.preventDefault(); openFileDialog(); }
         if (e.key === '=') { e.preventDefault(); zoomIn(); }
         if (e.key === '-') { e.preventDefault(); zoomOut(); }
+        if (e.key === 'f') {
+          e.preventDefault();
+          setSidebarView('search');
+          setShowThumbnails(true);
+          search.open();
+        }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleUndo, handleRedo, openFileDialog, zoomIn, zoomOut]);
+  }, [handleUndo, handleRedo, openFileDialog, zoomIn, zoomOut, search.open]);
 
-  // ── Menus (theme submenu injected here) ────────────────────────────────────
+  // ── Menus ────────────────────────────────────────────────────────────────────
 
   const menus = buildMenuDefs({
     openFileDialog, handleExportPdf, handleUndo, handleRedo,
     handleReadPage, handleReadSelection, ttsStop,
     setShowThumbnails, setRightPanelOpen,
     zoomIn, zoomOut, zoomReset, documentState,
-    // ↓ NEW — pass theme state into menu builder
     themeId, setTheme,
+    openSearch: search.open,
   });
 
   const pageCount = documentState?.children?.length ?? 0;
@@ -309,14 +325,17 @@ export function useEditorState() {
     highlightColor, setHighlightColor,
     highlightOpacity, setHighlightOpacity,
 
-    // Theme — NEW
+    // Theme
     themeId, setTheme,
 
     // Refs
-    fileInputRef, pageRefs,
+    fileInputRef, pageRefs, canvasScrollRef,
 
     // TTS
     tts, ttsStop, pauseResume, setSpeed,
+
+    // Search
+    search,
 
     // Actions
     handleFileUpload, handleUndo, handleRedo,
