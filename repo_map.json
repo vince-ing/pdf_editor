@@ -1370,13 +1370,14 @@
           "pageId: string",
           "pageIndex: number",
           "totalPages: number",
+          "sessionId: string",
           "withBusy: (fn: () => Promise<void>) => void",
           "onDocumentChanged?: () => Promise<void>",
           "setLocalRotation: React.Dispatch<React.SetStateAction<number>>"
         ]
       },
       "functions": [
-        "PageControls({ pageId, pageIndex, totalPages, withBusy, onDocumentChanged, setLocalRotation }: PageControlsProps)"
+        "PageControls({ pageId, pageIndex, totalPages, sessionId, withBusy, onDocumentChanged, setLocalRotation }: PageControlsProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\PageRenderer.tsx": {

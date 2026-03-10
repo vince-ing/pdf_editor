@@ -132,6 +132,7 @@ export function PageRenderer({
       {showCtrl && !cropRect && (
         <PageControls
           pageId={pageNode.id} pageIndex={pageIndex} totalPages={totalPages}
+          sessionId={sessionId}
           withBusy={withBusy} onDocumentChanged={onDocumentChanged} setLocalRotation={setLocalRotation}
         />
       )}
