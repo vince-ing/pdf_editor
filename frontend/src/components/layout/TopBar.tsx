@@ -1,5 +1,5 @@
 // components/layout/TopBar.tsx
-import { Search, Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb } from 'lucide-react';
+import { Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { MenuDef, MenuAction } from '../../constants/menuDefs';
@@ -66,7 +66,6 @@ const DropdownItem = ({ item, onClose, keepOpen = false }: { item: MenuAction; o
     leaveTimer.current = setTimeout(() => { setSubPos(null); setHov(false); }, 100);
   };
 
-  // Clean up timer on unmount
   useEffect(() => () => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
   if (item.separator) return (
@@ -74,10 +73,7 @@ const DropdownItem = ({ item, onClose, keepOpen = false }: { item: MenuAction; o
   );
 
   return (
-    <div ref={rowRef}
-      onMouseEnter={showSub}
-      onMouseLeave={schedulHide}
-    >
+    <div ref={rowRef} onMouseEnter={showSub} onMouseLeave={schedulHide}>
       <div
         onClick={() => { if (item.disabled || hasSub) return; item.onClick?.(); if (!keepOpen) onClose(); }}
         style={{
@@ -112,7 +108,7 @@ const DropdownItem = ({ item, onClose, keepOpen = false }: { item: MenuAction; o
   );
 };
 
-// ── DropdownPanel — scrollable ────────────────────────────────────────────────
+// ── DropdownPanel ─────────────────────────────────────────────────────────────
 
 const DropdownPanel = ({ items, onClose, keepOpenOnClick = false }: { items: MenuAction[]; onClose: () => void; keepOpenOnClick?: boolean }) => {
   const { theme: t } = useTheme();
@@ -132,12 +128,11 @@ const DropdownPanel = ({ items, onClose, keepOpenOnClick = false }: { items: Men
   );
 };
 
-// ── AppMenu — all menus grouped, scrollable ───────────────────────────────────
+// ── AppMenu ───────────────────────────────────────────────────────────────────
 
 const AppMenu = ({ menus, onClose }: { menus: MenuDef[]; onClose: () => void }) => {
   const { theme: t } = useTheme();
   return (
-    // Outer shell: overflow VISIBLE so absolute submenus aren't clipped
     <div style={{
       minWidth: '240px',
       backgroundColor: t.colors.bgRaised,
@@ -146,7 +141,6 @@ const AppMenu = ({ menus, onClose }: { menus: MenuDef[]; onClose: () => void }) 
       boxShadow: t.shadow.menu,
       overflow: 'visible',
     }}>
-      {/* Inner scroll wrapper — only this scrolls */}
       <div style={{ maxHeight: '70vh', overflowY: 'auto', padding: '4px', borderRadius: t.radius.md }}>
         {menus.map((menu, mi) => (
           <div key={mi}>
@@ -175,6 +169,7 @@ const Tab = ({ tab, isActive, onClick, onClose }: {
 }) => {
   const { theme: t } = useTheme();
   const [hov, setHov] = useState(false);
+  
   return (
     <div
       onClick={onClick}
@@ -182,32 +177,55 @@ const Tab = ({ tab, isActive, onClick, onClose }: {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
+        position: 'relative',
         display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '5px 10px', borderRadius: t.radius.md,
-        border: `1px solid ${isActive ? t.colors.borderMid : 'transparent'}`,
+        padding: '8px 14px',
+        borderRadius: '8px 8px 0 0',
         backgroundColor: isActive ? t.colors.bgRaised : hov ? t.colors.bgHover : 'transparent',
         color: isActive ? t.colors.textPrimary : t.colors.textSecondary,
         cursor: 'pointer', flexShrink: 0, maxWidth: '220px',
         transition: t.t.fast, userSelect: 'none',
+        // Pull down by exactly 1px to seamlessly mask the TopBar's bottom border
+        marginBottom: isActive ? '-1px' : '0',
+        zIndex: isActive ? 10 : 1,
+        border: 'none',
       }}
     >
+      {/* ── Outer flares (concave bottom curves) to bridge into the toolbar ── */}
+      {isActive && (
+        <>
+          <div style={{
+            position: 'absolute', bottom: 0, left: -8, width: 8, height: 8,
+            backgroundImage: `radial-gradient(circle at 0% 0%, transparent 8px, ${t.colors.bgRaised} 8px)`,
+            pointerEvents: 'none'
+          }} />
+          <div style={{
+            position: 'absolute', bottom: 0, right: -8, width: 8, height: 8,
+            backgroundImage: `radial-gradient(circle at 100% 0%, transparent 8px, ${t.colors.bgRaised} 8px)`,
+            pointerEvents: 'none'
+          }} />
+        </>
+      )}
+
       <svg width="13" height="14" viewBox="0 0 13 14" fill="none" style={{ flexShrink: 0 }}>
         <path d="M2 1h6.5l3 3V13a.5.5 0 01-.5.5H2A.5.5 0 011.5 13V1.5A.5.5 0 012 1z" fill="#ef4444" opacity="0.9"/>
         <path d="M8.5 1v3.5h3" fill="none" stroke="rgba(0,0,0,0.3)" strokeWidth="0.5"/>
       </svg>
-      <span style={{ fontSize: '13px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isActive ? 500 : 400 }}>
+      <span style={{ fontSize: '13px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isActive ? 600 : 500 }}>
         {tab.modified && <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#f59e0b', marginRight: '6px', verticalAlign: 'middle' }} />}
         {tab.name}
       </span>
       <button
         onClick={e => { e.stopPropagation(); onClose(tab.id); }}
         style={{
-          width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: t.colors.textMuted, background: 'none', border: 'none', cursor: 'pointer',
-          borderRadius: t.radius.xs, flexShrink: 0, padding: 0,
+          width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: isActive ? t.colors.textSecondary : t.colors.textMuted, background: 'none', border: 'none', cursor: 'pointer',
+          borderRadius: t.radius.sm, flexShrink: 0, padding: 0,
         }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(0,0,0,0.08)'; (e.currentTarget as HTMLElement).style.color = t.colors.textPrimary; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.color = isActive ? t.colors.textSecondary : t.colors.textMuted; }}
       >
-        <X size={11} />
+        <X size={12} />
       </button>
     </div>
   );
@@ -230,7 +248,6 @@ export function TopBar({
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
-      // Ignore clicks inside portalled submenus (they are stamped with data-submenu-portal)
       if ((e.target as HTMLElement)?.closest?.('[data-submenu-portal]')) return;
       if (menuRef.current && !menuRef.current.contains(target)) setMenuOpen(false);
       if (helpRef.current && !helpRef.current.contains(target)) setHelpOpen(false);
@@ -247,30 +264,54 @@ export function TopBar({
       height: '48px',
       backgroundColor: t.colors.bgBase,
       borderBottom: `1px solid ${t.colors.border}`,
-      display: 'flex', alignItems: 'center', gap: '4px',
-      padding: '0 8px', flexShrink: 0, userSelect: 'none',
+      display: 'flex', alignItems: 'flex-end',
+      flexShrink: 0, userSelect: 'none',
     }}>
 
-      {/* ── Hamburger ── */}
-      <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
-        <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
-          <Menu size={18} />
-        </TopBarBtn>
-        {menuOpen && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
-            <AppMenu menus={appMenus} onClose={() => setMenuOpen(false)} />
+      {/* ── Left side tools (Width matches Left Sidebar precisely: 264px) ── */}
+      <div style={{ 
+        width: '264px', height: '48px',
+        display: 'flex', alignItems: 'center', gap: '4px', 
+        padding: '0 8px', flexShrink: 0, boxSizing: 'border-box'
+      }}>
+        
+        {/* Hamburger */}
+        <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
+            <Menu size={18} />
+          </TopBarBtn>
+          {menuOpen && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
+              <AppMenu menus={appMenus} onClose={() => setMenuOpen(false)} />
+            </div>
+          )}
+        </div>
+
+        {/* Undo / Redo */}
+        <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
+        <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
+
+        {/* Help / Lightbulb */}
+        {helpMenu && (
+          <div ref={helpRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+            <TopBarBtn onClick={() => setHelpOpen(o => !o)} title="Help" active={helpOpen} accentColor="#f59e0b">
+              <Lightbulb size={16} />
+            </TopBarBtn>
+            {helpOpen && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
+                <DropdownPanel items={helpMenu.items} onClose={() => setHelpOpen(false)} />
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* ── Undo / Redo ── */}
-      <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
-      <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
-
-      <div style={{ width: '1px', height: '20px', backgroundColor: t.colors.border, margin: '0 8px', flexShrink: 0 }} />
+      {/* ── Structural Separator (Aligns exactly with Left Sidebar border) ── */}
+      <div style={{ width: '1px', height: '48px', backgroundColor: t.colors.bgBase, flexShrink: 0 }} />
 
       {/* ── File tabs ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+      {/* paddingLeft: 16px ensures the first tab perfectly aligns with the Toolbar content padding */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', flex: 1, minWidth: 0, overflow: 'visible', paddingLeft: '16px' }}>
         {tabs.map(tab => (
           <Tab key={tab.id} tab={tab}
             isActive={tab.id === activeTabId}
@@ -278,49 +319,14 @@ export function TopBar({
             onClose={id => onTabClose?.(id)}
           />
         ))}
-        <TopBarBtn onClick={onNewTab} title="Open file (Ctrl+O)" style={{ fontSize: '18px' }}>+</TopBarBtn>
+        {/* Open new file button aligned center with tools */}
+        <div style={{ display: 'flex', alignItems: 'center', height: '48px', paddingLeft: '6px' }}>
+          <TopBarBtn onClick={onNewTab} title="Open file (Ctrl+O)" style={{ fontSize: '18px' }} size={32}>+</TopBarBtn>
+        </div>
       </div>
 
       {/* ── Right side ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-
-        {/* Search */}
-        <div style={{ position: 'relative' }}>
-          <input
-            type="text"
-            placeholder="Global Search"
-            style={{
-              backgroundColor: t.colors.bgHover,
-              color: t.colors.textPrimary,
-              border: `1px solid ${t.colors.border}`,
-              borderRadius: t.radius.sm,
-              padding: '5px 28px 5px 10px',
-              fontSize: '12px', width: '176px', outline: 'none',
-              fontFamily: t.fonts.ui,
-              transition: t.t.fast,
-            }}
-            onFocus={e => (e.currentTarget.style.borderColor = t.colors.accent)}
-            onBlur={e => (e.currentTarget.style.borderColor = t.colors.border)}
-          />
-          <Search size={13} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: t.colors.textMuted, pointerEvents: 'none' }} />
-        </div>
-
-        {/* Help / lightbulb */}
-        {helpMenu && (
-          <div ref={helpRef} style={{ position: 'relative', flexShrink: 0 }}>
-            <TopBarBtn onClick={() => setHelpOpen(o => !o)} title="Help" active={helpOpen} accentColor="#f59e0b">
-              <Lightbulb size={16} />
-            </TopBarBtn>
-            {helpOpen && (
-              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 9000 }}>
-                <DropdownPanel items={helpMenu.items} onClose={() => setHelpOpen(false)} />
-              </div>
-            )}
-          </div>
-        )}
-
-        <div style={{ width: '1px', height: '20px', backgroundColor: t.colors.border, margin: '0 2px', flexShrink: 0 }} />
-
+      <div style={{ display: 'flex', alignItems: 'center', height: '48px', gap: '6px', flexShrink: 0, paddingRight: '8px' }}>
         {/* Window controls */}
         {[
           { Icon: Minimize2, title: 'Minimize', danger: false },
