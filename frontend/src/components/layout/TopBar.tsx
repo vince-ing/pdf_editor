@@ -1,5 +1,5 @@
 // components/layout/TopBar.tsx
-import { Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb } from 'lucide-react';
+import { Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb, Save, Printer, Settings } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { MenuDef, MenuAction } from '../../constants/menuDefs';
@@ -20,6 +20,9 @@ interface TopBarProps {
   onNewTab?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
+  onSave?: () => void;
+  onPrint?: () => void;
+  onSettings?: () => void;
   menus?: MenuDef[];
 }
 
@@ -236,7 +239,7 @@ const Tab = ({ tab, isActive, onClick, onClose }: {
 export function TopBar({
   tabs = [], activeTabId = null,
   onTabClick, onTabClose, onNewTab,
-  onUndo, onRedo,
+  onUndo, onRedo, onSave, onPrint, onSettings,
   menus = [],
 }: TopBarProps) {
   const { theme: t } = useTheme();
@@ -271,39 +274,54 @@ export function TopBar({
       {/* ── Left side tools (Width matches Left Sidebar precisely: 264px) ── */}
       <div style={{ 
         width: '264px', height: '48px',
-        display: 'flex', alignItems: 'center', gap: '4px', 
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 8px', flexShrink: 0, boxSizing: 'border-box'
       }}>
         
-        {/* Hamburger */}
-        <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-          <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
-            <Menu size={18} />
-          </TopBarBtn>
-          {menuOpen && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
-              <AppMenu menus={appMenus} onClose={() => setMenuOpen(false)} />
-            </div>
-          )}
-        </div>
-
-        {/* Undo / Redo */}
-        <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
-        <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
-
-        {/* Help / Lightbulb */}
-        {helpMenu && (
-          <div ref={helpRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-            <TopBarBtn onClick={() => setHelpOpen(o => !o)} title="Help" active={helpOpen} accentColor="#f59e0b">
-              <Lightbulb size={16} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          {/* Hamburger */}
+          <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+            <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
+              <Menu size={18} />
             </TopBarBtn>
-            {helpOpen && (
+            {menuOpen && (
               <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
-                <DropdownPanel items={helpMenu.items} onClose={() => setHelpOpen(false)} />
+                <AppMenu menus={appMenus} onClose={() => setMenuOpen(false)} />
               </div>
             )}
           </div>
-        )}
+          
+          <div style={{ width: '1px', height: '16px', backgroundColor: t.colors.border, margin: '0 4px' }} />
+
+          {/* Undo / Redo */}
+          <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
+          <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
+          
+          <div style={{ width: '1px', height: '16px', backgroundColor: t.colors.border, margin: '0 4px' }} />
+
+          {/* Save / Print */}
+          <TopBarBtn onClick={onSave} title="Save (Ctrl+S)"><Save size={16} /></TopBarBtn>
+          <TopBarBtn onClick={onPrint} title="Print (Ctrl+P)"><Printer size={16} /></TopBarBtn>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          {/* Settings */}
+          <TopBarBtn onClick={onSettings} title="Settings"><Settings size={16} /></TopBarBtn>
+
+          {/* Help / Lightbulb */}
+          {helpMenu && (
+            <div ref={helpRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+              <TopBarBtn onClick={() => setHelpOpen(o => !o)} title="Help" active={helpOpen} accentColor="#f59e0b">
+                <Lightbulb size={16} />
+              </TopBarBtn>
+              {helpOpen && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
+                  <DropdownPanel items={helpMenu.items} onClose={() => setHelpOpen(false)} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Structural Separator (Aligns exactly with Left Sidebar border) ── */}

@@ -1522,11 +1522,14 @@
           "onNewTab?: () => void",
           "onUndo?: () => void",
           "onRedo?: () => void",
+          "onSave?: () => void",
+          "onPrint?: () => void",
+          "onSettings?: () => void",
           "menus?: MenuDef[]"
         ]
       },
       "functions": [
-        "TopBar({\n  tabs = [], activeTabId = null,\n  onTabClick, onTabClose, onNewTab,\n  onUndo, onRedo,\n  menus = [],\n}: TopBarProps)",
+        "TopBar({\n  tabs = [], activeTabId = null,\n  onTabClick, onTabClose, onNewTab,\n  onUndo, onRedo, onSave, onPrint, onSettings,\n  menus = [],\n}: TopBarProps)",
         "TopBarBtn({ children, onClick, title, active = false, danger = false, accentColor, size = 32, style: sx }: {\n  children: React.ReactNode;\n  onClick?: ()"
       ]
     },
