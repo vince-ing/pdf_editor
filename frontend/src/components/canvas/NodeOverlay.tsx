@@ -94,10 +94,10 @@ export function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange,
 
   useEffect(() => {
     if (isEditable && !isEditing && onPropsChange && node.runs && node.runs.length > 0) {
-      const first = node.runs[0];
+      const first = node.runs[0] as any;
       onPropsChange({
-        fontFamily: first.fontFamily ?? node.font_family ?? 'Helvetica',
-        fontSize:   first.fontSize   ?? node.font_size   ?? 12,
+        fontFamily: first.fontFamily ?? first.font_family ?? node.font_family ?? 'Helvetica',
+        fontSize:   first.fontSize   ?? first.font_size   ?? node.font_size   ?? 12,
         color:      first.color      ?? node.color       ?? '#000000',
         isBold:     first.bold       ?? node.bold        ?? false,
         isItalic:   first.italic     ?? node.italic      ?? false,
@@ -201,7 +201,14 @@ export function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange,
   const pw = Math.max(geo.w * scale, 10), ph = Math.max(geo.h * scale, 10);
 
   const storedRuns: TextRun[] = node.runs && node.runs.length > 0
-    ? node.runs
+    ? node.runs.map((r: any) => ({
+        text: r.text,
+        bold: r.bold ?? false,
+        italic: r.italic ?? false,
+        fontFamily: r.fontFamily ?? r.font_family ?? 'Helvetica',
+        fontSize: r.fontSize ?? r.font_size ?? 12,
+        color: r.color ?? '#000000'
+      }))
     : node.text_content
       ? [{ text: node.text_content, bold: node.bold ?? false, italic: node.italic ?? false,
            fontFamily: node.font_family ?? 'Helvetica', fontSize: node.font_size ?? 12, color: node.color ?? '#000000' }]

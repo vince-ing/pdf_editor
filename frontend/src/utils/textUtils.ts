@@ -36,12 +36,15 @@ export function domToRuns(container: HTMLElement, defaultProps: TextProps): Text
       const parent = node.parentElement;
       const span   = parent?.closest('[data-run]') as HTMLElement | null;
       if (span) {
+        let size = parseFloat(span.dataset.fontSize ?? '');
+        if (isNaN(size)) size = defaultProps.fontSize;
+        
         runs.push({
           text,
           bold:       span.dataset.bold       === 'true',
           italic:     span.dataset.italic     === 'true',
           fontFamily: span.dataset.fontFamily ?? defaultProps.fontFamily,
-          fontSize:   parseFloat(span.dataset.fontSize ?? String(defaultProps.fontSize)),
+          fontSize:   size,
           color:      span.dataset.color      ?? defaultProps.color,
         });
       } else {
@@ -123,15 +126,18 @@ export function applyStyleToSelection(
   span.dataset.bold       = String(style.bold       !== undefined ? style.bold       : existingBold);
   span.dataset.italic     = String(style.italic     !== undefined ? style.italic     : existingItalic);
   span.dataset.fontFamily = style.fontFamily ?? existingFontFamily;
-  span.dataset.fontSize   = String(style.fontSize   !== undefined ? style.fontSize   : existingFontSize);
-  span.dataset.color      = style.color      ?? existingColor;
+  
+  const finalFontSize = style.fontSize !== undefined ? style.fontSize : existingFontSize;
+  span.dataset.fontSize   = String(finalFontSize);
+  
+  span.dataset.color      = style.color ?? existingColor;
 
   const family = span.dataset.fontFamily;
   Object.assign(span.style, {
     fontFamily:  FONT_TO_CSS[family] ?? 'Helvetica, Arial, sans-serif',
     fontWeight:  span.dataset.bold   === 'true' ? 'bold'   : 'normal',
     fontStyle:   span.dataset.italic === 'true' ? 'italic' : 'normal',
-    fontSize:    `${parseFloat(span.dataset.fontSize) * scale}px`,
+    fontSize:    `${finalFontSize * scale}px`,
     color:       span.dataset.color,
     lineHeight:  '1.2',
     whiteSpace:  'pre-wrap',
