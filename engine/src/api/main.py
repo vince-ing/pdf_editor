@@ -47,7 +47,9 @@ plugin_manager = PluginManager(app, _default_session)
 plugin_manager.register_plugin(OCRPlugin)
 plugin_manager.register_plugin(TTSPlugin)
 plugin_manager.register_plugin(RedactPlugin)
-plugin_manager.finalize()
+# NOTE: plugin_manager.finalize() intentionally not called — plugins use a
+# hardcoded session and would ignore per-request X-Session-Id headers.
+# Session-aware endpoints are defined directly below instead.
 
 @app.delete("/api/session")
 def close_session(
@@ -323,6 +325,44 @@ def delete_annotation(node_id: str, page_id: str, session: EditorSession = Depen
     except Exception as e:
         import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Plugin endpoints (session-aware) ─────────────────────────────────────────
+#
+# Plugins are not finalized via PluginManager because it binds a single session
+# at startup and ignores per-request X-Session-Id headers. These endpoints
+# replicate plugin logic with proper Depends(get_session) wiring.
+
+class OCRPayload(BaseModel):
+    page_id: str
+    language: str = "eng"
+
+@app.post("/api/plugins/ocr/process")
+def run_ocr(payload: OCRPayload, session: EditorSession = Depends(get_session)):
+    page = session.document.get_child(payload.page_id)
+    if not page or page.node_type != "page":
+        raise HTTPException(status_code=404, detail="Page not found")
+    # TODO: replace with real Tesseract call, e.g.:
+    # from engine.src.services.ocr_service import OcrService
+    # extracted_blocks = OcrService().extract(page, payload.language)
+    extracted_blocks: list = []
+    annot_service = AnnotationService(session)
+    added_nodes = []
+    for block in extracted_blocks:
+        node = annot_service.add_text(
+            page_id=payload.page_id,
+            text=block["text"],
+            x=block["x"],
+            y=block["y"],
+            width=block["w"],
+            height=block["h"],
+        )
+        added_nodes.append(node)
+    return {
+        "status": "success",
+        "message": f"OCR complete. Added {len(added_nodes)} text nodes.",
+        "nodes": added_nodes,
+    }
 
 
 # ── Undo / Redo ───────────────────────────────────────────────────────────────

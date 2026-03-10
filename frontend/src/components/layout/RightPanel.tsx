@@ -1,6 +1,6 @@
 // components/layout/RightPanel.tsx
-import { ChevronDown, ChevronUp, MoreVertical, Sparkles, RotateCw, Crop } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronUp, MoreVertical, Sparkles, RotateCw, Crop, ScanText, Loader2 } from 'lucide-react';
+import { useState, useCallback } from 'react';
 import type { ToolId } from '../../constants/tools';
 import { DEFAULT_TEXT_PROPS, FONT_OPTIONS, type TextProps } from '../../types/textProps';
 import { useTheme } from '../../theme';
@@ -12,15 +12,13 @@ interface RightPanelProps {
   textProps: TextProps; onTextPropsChange: (p: TextProps) => void;
   highlightColor?: string; highlightOpacity?: number;
   onHighlightColorChange?: (color: string) => void; onHighlightOpacityChange?: (opacity: number) => void;
+  sessionId?: string | null;
+  onDocumentChanged?: () => void;
+  onRunOcr?: () => void; isOcrProcessing?: boolean; ocrError?: string | null;
+  openSection?: SectionId | null; onSectionChange?: (s: SectionId | null) => void;
 }
 
 type SectionId = 'text' | 'page' | 'appearance';
-const TOOL_SECTION: Partial<Record<ToolId, SectionId>> = {
-  addtext: 'text', edittext: 'text',
-  highlight: 'appearance', underline: 'appearance', stickynote: 'appearance',
-  stamp: 'appearance', redact: 'appearance',
-  insert: 'page', delete: 'page', rotate: 'page', extract: 'page', crop: 'page',
-};
 
 const bytes = (n?: number) => {
   if (!n) return '—';
@@ -31,6 +29,71 @@ const bytes = (n?: number) => {
 
 const AUTHOR_COLORS: Record<string, string> = { JD: '#f59e0b', MK: '#a855f7', AL: '#22c55e', SA: '#4a90e2' };
 const getAuthorColor = (a: string) => AUTHOR_COLORS[a] ?? '#6b7280';
+
+// ── Small extracted components (hooks cannot be called inside .map or IIFEs) ──
+
+const HoverButton = ({ icon: Icon, label, t }: { icon: React.ComponentType<{ size?: number }>; label: string; t: any }) => {
+  const [hov, setHov] = useState(false);
+  return (
+    <button onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ flex: 1, height: 28, fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, border: 'none', borderRadius: t.radius.md, cursor: 'pointer', transition: t.t.fast, backgroundColor: hov ? t.colors.bgHover : t.colors.bgBase, color: hov ? t.colors.textPrimary : t.colors.textMuted }}>
+      <Icon size={12} /> {label}
+    </button>
+  );
+};
+
+const OcrButton = ({ onRunOcr, isOcrProcessing, ocrError, t }: {
+  onRunOcr?: () => void; isOcrProcessing?: boolean; ocrError?: string | null; t: any;
+}) => {
+  const [hov, setHov] = useState(false);
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onClick={onRunOcr}
+        disabled={isOcrProcessing || !onRunOcr}
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
+        title="Extract text from scanned page using OCR"
+        style={{
+          width: '100%', height: 28, fontSize: '11px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          border: `1px solid ${isOcrProcessing ? t.colors.accent : t.colors.border}`,
+          borderRadius: t.radius.md,
+          cursor: isOcrProcessing || !onRunOcr ? 'not-allowed' : 'pointer',
+          transition: t.t.fast, opacity: !onRunOcr ? 0.4 : 1,
+          backgroundColor: isOcrProcessing ? `${t.colors.accent}18` : hov && onRunOcr ? t.colors.bgHover : t.colors.bgBase,
+          color: isOcrProcessing ? t.colors.accent : hov && onRunOcr ? t.colors.textPrimary : t.colors.textSecondary,
+          fontFamily: t.fonts.ui,
+        }}>
+        {isOcrProcessing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <ScanText size={12} />}
+        {isOcrProcessing ? 'Running OCR…' : 'Run OCR'}
+      </button>
+      {ocrError && (
+        <p style={{ fontSize: '10px', color: t.colors.danger, marginTop: 4, lineHeight: 1.4, fontFamily: t.fonts.ui }}>
+          {ocrError}
+        </p>
+      )}
+    </div>
+  );
+};
+
+const CommentRow = ({ c, t }: { c: { id: number; author: string; time: string; text: string }; t: any }) => {
+  const [hov, setHov] = useState(false);
+  return (
+    <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ padding: '10px 16px', borderBottom: `1px solid ${t.colors.bgBase}`, cursor: 'pointer', backgroundColor: hov ? t.colors.bgHover : 'transparent', transition: t.t.fast }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ width: 24, height: 24, borderRadius: '50%', backgroundColor: getAuthorColor(c.author), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ color: '#fff', fontSize: '10px', fontWeight: 700 }}>{c.author}</span>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '10px', color: t.colors.textMuted, marginBottom: 2 }}>{c.time}</div>
+          <div style={{ fontSize: '12px', color: t.colors.textPrimary, lineHeight: 1.4 }}>{c.text}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const Section = ({ title, isOpen, onToggle, children, t }: {
   title: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode; t: any;
@@ -171,12 +234,14 @@ const AppearanceContent = ({ color = '#FFFF00', opacity = 0.4, onColorChange, on
 export function RightPanel({
   documentState, activePage = 0, activeTool, textProps, onTextPropsChange,
   highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,
+  onRunOcr, isOcrProcessing, ocrError,
+  openSection: controlledSection, onSectionChange,
 }: RightPanelProps) {
   const { theme: t } = useTheme();
-  const [openSection, setOpenSection] = useState<SectionId | null>(null);
+  const openSection = controlledSection ?? null;
+  const toggle = (id: SectionId) => onSectionChange?.(openSection === id ? null : id);
+
   const [commentInput, setCommentInput] = useState('');
-  useEffect(() => { setOpenSection(activeTool ? TOOL_SECTION[activeTool] ?? null : null); }, [activeTool]);
-  const toggle = (id: SectionId) => setOpenSection(prev => prev === id ? null : id);
 
   const recentComments = [
     { id: 1, author: 'JD', time: '2 hours ago', text: 'Lorem ipsum dolor sit amet.' },
@@ -199,16 +264,10 @@ export function RightPanel({
               <PropRowInner key={label} label={label} value={value} t={t} />
             ))}
             <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              {[{ icon: RotateCw, label: 'Rotate' }, { icon: Crop, label: 'Crop' }].map(({ icon: Icon, label }) => {
-                const [hov, setHov] = useState(false);
-                return (
-                  <button key={label} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-                    style={{ flex: 1, height: 28, fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, border: 'none', borderRadius: t.radius.md, cursor: 'pointer', transition: t.t.fast, backgroundColor: hov ? t.colors.bgHover : t.colors.bgBase, color: hov ? t.colors.textPrimary : t.colors.textMuted }}>
-                    <Icon size={12} /> {label}
-                  </button>
-                );
-              })}
+              <HoverButton icon={RotateCw} label="Rotate" t={t} />
+              <HoverButton icon={Crop} label="Crop" t={t} />
             </div>
+            <OcrButton onRunOcr={onRunOcr} isOcrProcessing={isOcrProcessing} ocrError={ocrError} t={t} />
           </div>
         </Section>
         <Section title="Appearance" isOpen={openSection === 'appearance'} onToggle={() => toggle('appearance')} t={t}>
@@ -227,23 +286,7 @@ export function RightPanel({
           </button>
         </div>
         <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-          {recentComments.map(c => {
-            const [hov, setHov] = useState(false);
-            return (
-              <div key={c.id} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-                style={{ padding: '10px 16px', borderBottom: `1px solid ${t.colors.bgBase}`, cursor: 'pointer', backgroundColor: hov ? t.colors.bgHover : 'transparent', transition: t.t.fast }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <div style={{ width: 24, height: 24, borderRadius: '50%', backgroundColor: getAuthorColor(c.author), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <span style={{ color: '#fff', fontSize: '10px', fontWeight: 700 }}>{c.author}</span>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '10px', color: t.colors.textMuted, marginBottom: 2 }}>{c.time}</div>
-                    <div style={{ fontSize: '12px', color: t.colors.textPrimary, lineHeight: 1.4 }}>{c.text}</div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {recentComments.map(c => <CommentRow key={c.id} c={c} t={t} />)}
         </div>
         <div style={{ padding: 12, flexShrink: 0 }}>
           <div style={{ position: 'relative' }}>

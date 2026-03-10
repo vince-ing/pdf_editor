@@ -1,5 +1,5 @@
 // frontend/src/app/App.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
@@ -12,6 +12,7 @@ import { Toolbar }     from '../components/toolbar/Toolbar';
 import { Canvas }      from '../components/canvas/Canvas';
 
 import { useEditorState } from '../hooks/useEditorState';
+import { useOcr } from '../hooks/useOcr';
 import { ThemeProvider, useTheme } from '../theme';
 
 // Register external strategy tools
@@ -24,9 +25,41 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 // ── Inner app — has access to ThemeProvider context ──────────────────────────
 
+const TOOL_SECTION_MAP: Partial<Record<string, 'text' | 'page' | 'appearance'>> = {
+  addtext: 'text', edittext: 'text',
+  highlight: 'appearance', underline: 'appearance', stickynote: 'appearance',
+  stamp: 'appearance', redact: 'appearance',
+  insert: 'page', delete: 'page', rotate: 'page', extract: 'page', crop: 'page',
+};
+
 function AppInner() {
   const editor = useEditorState();
   const { theme: t } = useTheme();
+
+  const ocr = useOcr({
+    activeTabId: editor.activeTabId,
+    onSuccess: editor.refreshDocumentState,
+  });
+
+  // Derive pageId for OCR — null if no document loaded
+  const activePageId = (editor.documentState?.children?.[editor.activePage] as { id?: string } | undefined)?.id ?? null;
+
+  // Section is derived from activeTool with no useEffect — OCR overrides via state only when needed
+  const [ocrSectionOpen, setOcrSectionOpen] = useState(false);
+  const toolSection = TOOL_SECTION_MAP[editor.activeTool] ?? null;
+  // When a tool that maps to a section is selected, clear the OCR override
+  const prevToolSection = React.useRef(toolSection);
+  if (prevToolSection.current !== toolSection) {
+    prevToolSection.current = toolSection;
+    if (ocrSectionOpen) setOcrSectionOpen(false);
+  }
+  const rightPanelSection = ocrSectionOpen ? 'page' : toolSection;
+
+  const handleRunOcr = () => {
+    if (!activePageId) return;
+    setOcrSectionOpen(true);
+    ocr.runOcr(activePageId);
+  };
 
   if (editor.loading) {
     return (
@@ -85,6 +118,7 @@ function AppInner() {
             onReadPage={editor.handleReadPage} onReadSelection={editor.handleReadSelection}
             hasSelection={!!editor.lastSelectedText} ttsActive={editor.tts.visible}
             pageInfo={editor.documentState ? { current: editor.activePage + 1, total: editor.pageCount } : null}
+            onRunOcr={activePageId ? handleRunOcr : undefined} isOcrProcessing={ocr.isProcessing}
           />
 
           <div className="flex-1 flex overflow-hidden min-h-0">
@@ -115,7 +149,12 @@ function AppInner() {
                 onHighlightColorChange={editor.setHighlightColor}
                 onHighlightOpacityChange={editor.setHighlightOpacity}
                 sessionId={editor.activeTabId}
-                onDocumentChanged={editor.refreshDocumentState} 
+                onDocumentChanged={editor.refreshDocumentState}
+                onRunOcr={activePageId ? handleRunOcr : undefined}
+                isOcrProcessing={ocr.isProcessing}
+                ocrError={ocr.error}
+                openSection={rightPanelSection}
+                onSectionChange={s => { if (s !== 'page') setOcrSectionOpen(false); }}
               />
             )}
           </div>

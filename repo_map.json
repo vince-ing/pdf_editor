@@ -67,6 +67,10 @@
           "rects: List[HighlightRect]",
           "color: str = '#FFFF00'",
           "opacity: float = 0.4"
+        ],
+        "class OCRPayload": [
+          "page_id: str",
+          "language: str = 'eng'"
         ]
       },
       "functions": [
@@ -188,6 +192,13 @@
           "params": [
             "node_id: str",
             "page_id: str",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
+          "name": "run_ocr",
+          "params": [
+            "payload: OCRPayload",
             "session: EditorSession = Depends(get_session)"
           ]
         },
@@ -349,6 +360,15 @@
           "params": [
             "node_id: str",
             "page_id: str",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/plugins/ocr/process",
+          "handler": "run_ocr",
+          "params": [
+            "payload: OCRPayload",
             "session: EditorSession = Depends(get_session)"
           ]
         },
@@ -1487,12 +1507,16 @@
           "documentState?: DocumentState | null; activePage?: number; activeTool?: ToolId",
           "textProps: TextProps; onTextPropsChange: (p: TextProps) => void",
           "highlightColor?: string; highlightOpacity?: number",
-          "onHighlightColorChange?: (color: string) => void; onHighlightOpacityChange?: (opacity: number) => void"
+          "onHighlightColorChange?: (color: string) => void; onHighlightOpacityChange?: (opacity: number) => void",
+          "sessionId?: string | null",
+          "onDocumentChanged?: () => void",
+          "onRunOcr?: () => void; isOcrProcessing?: boolean; ocrError?: string | null",
+          "openSection?: SectionId | null; onSectionChange?: (s: SectionId | null) => void"
         ]
       },
       "functions": [
         "TextPropertiesContent({ props, onChange, t }: { props: TextProps; onChange: (p: TextProps)",
-        "RightPanel({\n  documentState, activePage = 0, activeTool, textProps, onTextPropsChange,\n  highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,\n}: RightPanelProps)"
+        "RightPanel({\n  documentState, activePage = 0, activeTool, textProps, onTextPropsChange,\n  highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,\n  onRunOcr, isOcrProcessing, ocrError,\n  openSection: controlledSection, onSectionChange,\n}: RightPanelProps)"
       ]
     },
     "frontend\\src\\components\\layout\\StatusBar.tsx": {
@@ -1559,8 +1583,8 @@
         "ViewTab({ activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
         "EditTab({ activeTool, onToolChange, onUndo, onRedo }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
         "CommentTab({ activeTool, onToolChange, onReadPage, onReadSelection, ttsActive, hasSelection }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
-        "PagesTab({ activeTool, onToolChange }: { activeTool: ToolId; onToolChange: (id: ToolId)",
-        "Toolbar({\n  activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset,\n  onUndo, onRedo, onReadPage, onReadSelection, hasSelection, ttsActive, pageInfo,\n}: ToolbarProps)"
+        "PagesTab({ activeTool, onToolChange, onRunOcr, isOcrProcessing }: {\n  activeTool: ToolId; onToolChange: (id: ToolId)",
+        "Toolbar({\n  activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset,\n  onUndo, onRedo, onReadPage, onReadSelection, hasSelection, ttsActive, pageInfo,\n  onRunOcr, isOcrProcessing,\n}: ToolbarProps)"
       ]
     },
     "frontend\\src\\components\\ui\\Button.tsx": {

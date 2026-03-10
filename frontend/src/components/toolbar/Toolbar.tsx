@@ -1,5 +1,5 @@
 // components/toolbar/Toolbar.tsx
-import { Undo2, Redo2, Volume2, Minus, Plus } from 'lucide-react';
+import { Undo2, Redo2, Volume2, Minus, Plus, ScanText, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { TOOL_DEFS, type ToolId } from '../../constants/tools';
 import { useTheme } from '../../theme';
@@ -13,6 +13,7 @@ interface ToolbarProps {
   onReadPage: () => void; onReadSelection: () => void;
   hasSelection: boolean; ttsActive: boolean;
   pageInfo?: { current: number; total: number } | null;
+  onRunOcr?: () => void; isOcrProcessing?: boolean;
 }
 
 type TabId = 'view' | 'edit' | 'comment' | 'pages';
@@ -159,16 +160,43 @@ function CommentTab({ activeTool, onToolChange, onReadPage, onReadSelection, tts
   );
 }
 
-function PagesTab({ activeTool, onToolChange }: { activeTool: ToolId; onToolChange: (id: ToolId) => void }) {
+function PagesTab({ activeTool, onToolChange, onRunOcr, isOcrProcessing }: {
+  activeTool: ToolId; onToolChange: (id: ToolId) => void;
+  onRunOcr?: () => void; isOcrProcessing?: boolean;
+}) {
+  const { theme: t } = useTheme();
+  const [hovOcr, setHovOcr] = useState(false);
   return (
     <>
-      {byId(['insert', 'delete']).map(t => (
-        <ToolBtn key={t.id} icon={t.icon} label={t.label} isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
+      {byId(['insert', 'delete']).map(td => (
+        <ToolBtn key={td.id} icon={td.icon} label={td.label} isActive={activeTool === td.id} onClick={() => onToolChange(td.id)} />
       ))}
       <Rule />
       <PairCol tools={byId(['rotate', 'extract'])} activeTool={activeTool} onToolChange={onToolChange} />
-      <ToolBtn icon={TOOL_DEFS.find(t => t.id === 'crop')!.icon} label="Crop"
+      <ToolBtn icon={TOOL_DEFS.find(td => td.id === 'crop')!.icon} label="Crop"
         isActive={activeTool === 'crop'} onClick={() => onToolChange('crop')} />
+      <Rule />
+      <button
+        onClick={onRunOcr}
+        disabled={isOcrProcessing || !onRunOcr}
+        title="Run OCR on current page to extract text from scanned content"
+        onMouseEnter={() => setHovOcr(true)}
+        onMouseLeave={() => setHovOcr(false)}
+        style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: '6px', padding: '0 16px', borderRadius: t.radius.md, flexShrink: 0, height: '100%',
+          minWidth: '60px', border: 'none', cursor: isOcrProcessing || !onRunOcr ? 'not-allowed' : 'pointer',
+          transition: t.t.fast, opacity: !onRunOcr ? 0.4 : 1,
+          backgroundColor: hovOcr && !isOcrProcessing && onRunOcr ? t.colors.bgHover : 'transparent',
+          color: isOcrProcessing ? t.colors.accent : hovOcr && onRunOcr ? t.colors.textPrimary : t.colors.textSecondary,
+        }}>
+        {isOcrProcessing
+          ? <Loader2 size={19} style={{ animation: 'spin 1s linear infinite' }} />
+          : <ScanText size={19} />}
+        <span style={{ fontSize: '11px', lineHeight: 1, whiteSpace: 'nowrap' }}>
+          {isOcrProcessing ? 'Running…' : 'OCR'}
+        </span>
+      </button>
     </>
   );
 }
@@ -176,6 +204,7 @@ function PagesTab({ activeTool, onToolChange }: { activeTool: ToolId; onToolChan
 export function Toolbar({
   activeTool, onToolChange, scale, onZoomIn, onZoomOut, onZoomReset,
   onUndo, onRedo, onReadPage, onReadSelection, hasSelection, ttsActive, pageInfo,
+  onRunOcr, isOcrProcessing,
 }: ToolbarProps) {
   const { theme: t } = useTheme();
   const [activeTab, setActiveTab] = useState<TabId>('view');
@@ -194,7 +223,7 @@ export function Toolbar({
         {activeTab === 'view'    && <ViewTab    activeTool={activeTool} onToolChange={handleToolChange} scale={scale} onZoomIn={onZoomIn} onZoomOut={onZoomOut} onZoomReset={onZoomReset} />}
         {activeTab === 'edit'    && <EditTab    activeTool={activeTool} onToolChange={handleToolChange} onUndo={onUndo} onRedo={onRedo} />}
         {activeTab === 'comment' && <CommentTab activeTool={activeTool} onToolChange={handleToolChange} onReadPage={onReadPage} onReadSelection={onReadSelection} ttsActive={ttsActive} hasSelection={hasSelection} />}
-        {activeTab === 'pages'   && <PagesTab   activeTool={activeTool} onToolChange={handleToolChange} />}
+        {activeTab === 'pages'   && <PagesTab   activeTool={activeTool} onToolChange={handleToolChange} onRunOcr={onRunOcr} isOcrProcessing={isOcrProcessing} />}
       </div>
 
       {/* Tab strip */}
