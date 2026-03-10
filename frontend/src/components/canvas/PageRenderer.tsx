@@ -98,7 +98,7 @@ export function PageRenderer({
     toastTimer.current = setTimeout(() => setShowToast(false), 2000);
   }, []);
 
-  const { handleNodeUpdate, handleAction, handleTextCommit } = usePageActions({
+  const { handleNodeUpdate, handleAction, handleTextCommit, handleNodeDelete } = usePageActions({
     pageNode, pageChars, activeTool, textProps, sessionId, setAnnotations, setTransientPos,
     highlightColor, highlightOpacity,
     onAnnotationAdded, onTextSelected, clearSelRef, toast,
@@ -197,6 +197,7 @@ export function PageRenderer({
             activeTool={activeTool} textProps={textProps}
             onPropsChange={onTextPropsChange}
             onUpdate={handleNodeUpdate}
+            onDelete={handleNodeDelete}
             onRegisterBlur={fn => { activeNodeBlurRef.current = fn; }}
           />
         ))}

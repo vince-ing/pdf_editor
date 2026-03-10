@@ -314,6 +314,17 @@ def add_highlight_annotation(payload: HighlightPayload, session: EditorSession =
     return {"status": "success", "nodes": nodes}
 
 
+@app.delete("/api/annotations/{node_id}")
+def delete_annotation(node_id: str, page_id: str, session: EditorSession = Depends(get_session)):
+    service = AnnotationService(session)
+    try:
+        service.delete_annotation(node_id)
+        return {"status": "success", "message": "Annotation deleted."}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Undo / Redo ───────────────────────────────────────────────────────────────
 
 @app.post("/api/undo")

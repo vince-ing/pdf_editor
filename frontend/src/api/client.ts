@@ -104,6 +104,12 @@ export const engineApi = {
     return (await axios.patch(`${API_BASE}/annotations/${nodeId}`, payload, s(sessionId))).data;
   },
 
+  deleteAnnotation: async (nodeId: string, pageId: string, sessionId: string) =>
+    (await axios.delete(`${API_BASE}/annotations/${nodeId}`, {
+      params: { page_id: pageId },
+      ...s(sessionId),
+    })).data,
+
   addHighlight: async (
     pageId: string,
     rects: { x: number; y: number; width: number; height: number }[],

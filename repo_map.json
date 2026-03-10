@@ -184,6 +184,14 @@
           ]
         },
         {
+          "name": "delete_annotation",
+          "params": [
+            "node_id: str",
+            "page_id: str",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
           "name": "undo_last_action",
           "params": [
             "session: EditorSession = Depends(get_session)"
@@ -331,6 +339,16 @@
           "handler": "add_highlight_annotation",
           "params": [
             "payload: HighlightPayload",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/annotations/{node_id}",
+          "handler": "delete_annotation",
+          "params": [
+            "node_id: str",
+            "page_id: str",
             "session: EditorSession = Depends(get_session)"
           ]
         },
@@ -1229,6 +1247,13 @@
           "payload": null
         },
         {
+          "fn": "deleteAnnotation",
+          "signature": "deleteAnnotation(nodeId: string, pageId: string, sessionId: string)",
+          "method": "DELETE",
+          "url": "${API_BASE}/annotations/${nodeId}",
+          "payload": null
+        },
+        {
           "fn": "addHighlight",
           "signature": "addHighlight(pageId: string, rects: { x: number; y: number; width: number; height: number }[], color: string, opacity: number, sessionId: string)",
           "method": "POST",
@@ -1306,16 +1331,17 @@
     "frontend\\src\\components\\canvas\\NodeOverlay.tsx": {
       "interfaces": {
         "NodeOverlayProps": [
-          "node:          AnnotationNode",
-          "scale:         number",
-          "activeTool?:   ToolId",
-          "textProps:     TextProps",
-          "onPropsChange?:(p: TextProps) => void",
-          "onUpdate?:     (id: string, updates: Partial<AnnotationNode & { runs: TextRun[]"
+          "node:            AnnotationNode",
+          "scale:           number",
+          "activeTool?:     ToolId",
+          "textProps:       TextProps",
+          "onPropsChange?:  (p: TextProps) => void",
+          "onUpdate?:       (id: string, updates: Partial<AnnotationNode & { runs: TextRun[]"
         ]
       },
       "functions": [
-        "NodeOverlay({ node, scale, activeTool, textProps, onPropsChange, onUpdate, onRegisterBlur }: NodeOverlayProps)"
+        "ContextMenu({ x, y, onDelete, onClose }: {\n  x: number; y: number;\n  onDelete: ()",
+        "NodeOverlay({ node, scale, activeTool, textProps, onPropsChange, onUpdate, onDelete, onRegisterBlur }: NodeOverlayProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\PageControls.tsx": {
@@ -1813,7 +1839,8 @@
       "returns": [
         "handleNodeUpdate",
         "handleAction",
-        "handleTextCommit"
+        "handleTextCommit",
+        "handleNodeDelete"
       ]
     },
     "frontend\\src\\hooks\\usePageChars.ts": {

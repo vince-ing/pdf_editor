@@ -94,5 +94,15 @@ export function usePageActions({
     } catch (err) { console.error(err); }
   }, [pageNode.id, sessionId, textProps, onAnnotationAdded, setAnnotations, setTransientPos, textToolNotifyCommitted]);
 
-  return { handleNodeUpdate, handleAction, handleTextCommit };
+  const handleNodeDelete = useCallback(async (nodeId: string) => {
+    // Optimistically remove from local state immediately
+    setAnnotations(prev => prev.filter(n => n.id !== nodeId));
+    try {
+      await engineApi.deleteAnnotation(nodeId, pageNode.id, sessionId);
+    } catch (err) {
+      console.error('Failed to delete annotation:', err);
+    }
+  }, [pageNode.id, sessionId, setAnnotations]);
+
+  return { handleNodeUpdate, handleAction, handleTextCommit, handleNodeDelete };
 }
