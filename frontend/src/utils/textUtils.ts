@@ -103,8 +103,6 @@ export function applyStyleToSelection(
 ): boolean {
   const sel = window.getSelection();
 
-  // Use explicit range if provided (survives React state-update cycles), otherwise
-  // fall back to live selection.
   let range: Range | null = explicitRange ?? null;
   if (!range) {
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
@@ -112,10 +110,6 @@ export function applyStyleToSelection(
   }
   if (!container.contains(range.commonAncestorContainer)) return false;
 
-  const span = document.createElement('span');
-  span.dataset.run = '1';
-
-  // Inherit current style from the span the cursor/selection starts in
   const anchor = range.startContainer.parentElement?.closest('[data-run]') as HTMLElement | null;
   const existingBold       = anchor?.dataset.bold       === 'true';
   const existingItalic     = anchor?.dataset.italic     === 'true';
@@ -123,39 +117,44 @@ export function applyStyleToSelection(
   const existingFontSize   = parseFloat(anchor?.dataset.fontSize ?? '12');
   const existingColor      = anchor?.dataset.color      ?? '#000000';
 
-  span.dataset.bold       = String(style.bold       !== undefined ? style.bold       : existingBold);
-  span.dataset.italic     = String(style.italic     !== undefined ? style.italic     : existingItalic);
-  span.dataset.fontFamily = style.fontFamily ?? existingFontFamily;
-  
-  const finalFontSize = style.fontSize !== undefined ? style.fontSize : existingFontSize;
-  span.dataset.fontSize   = String(finalFontSize);
-  
-  span.dataset.color      = style.color ?? existingColor;
+  const fragment = range.extractContents();
 
-  const family = span.dataset.fontFamily;
-  Object.assign(span.style, {
-    fontFamily:  FONT_TO_CSS[family] ?? 'Helvetica, Arial, sans-serif',
-    fontWeight:  span.dataset.bold   === 'true' ? 'bold'   : 'normal',
-    fontStyle:   span.dataset.italic === 'true' ? 'italic' : 'normal',
-    fontSize:    `${finalFontSize * scale}px`,
-    color:       span.dataset.color,
-    lineHeight:  '1.2',
-    whiteSpace:  'pre-wrap',
-  });
+  const applyToSpan = (span: HTMLElement) => {
+    if (style.bold !== undefined) span.dataset.bold = String(style.bold);
+    if (style.italic !== undefined) span.dataset.italic = String(style.italic);
+    if (style.fontFamily !== undefined && style.fontFamily !== '') span.dataset.fontFamily = style.fontFamily;
+    if (style.fontSize !== undefined && style.fontSize !== '') span.dataset.fontSize = String(style.fontSize);
+    if (style.color !== undefined && style.color !== '') span.dataset.color = style.color;
 
-  try {
-    range.surroundContents(span);
-  } catch {
-    // surroundContents throws when selection crosses element boundaries
-    // Fall back: extract → wrap → insert
-    const fragment = range.extractContents();
-    span.appendChild(fragment);
-    range.insertNode(span);
-  }
+    const family = span.dataset.fontFamily ?? 'Helvetica';
+    Object.assign(span.style, {
+      fontFamily:  FONT_TO_CSS[family] ?? 'Helvetica, Arial, sans-serif',
+      fontWeight:  span.dataset.bold   === 'true' ? 'bold'   : 'normal',
+      fontStyle:   span.dataset.italic === 'true' ? 'italic' : 'normal',
+      fontSize:    `${parseFloat(span.dataset.fontSize || '12') * scale}px`,
+      color:       span.dataset.color,
+      lineHeight:  '1.2',
+      whiteSpace:  'pre-wrap',
+    });
+  };
 
-  // Restore selection to the new span
+  const spans = fragment.querySelectorAll('[data-run]');
+  spans.forEach(span => applyToSpan(span as HTMLElement));
+
+  const wrapper = document.createElement('span');
+  wrapper.dataset.run = '1';
+  wrapper.dataset.bold       = String(style.bold       !== undefined ? style.bold       : existingBold);
+  wrapper.dataset.italic     = String(style.italic     !== undefined ? style.italic     : existingItalic);
+  wrapper.dataset.fontFamily = (style.fontFamily !== undefined && style.fontFamily !== '') ? style.fontFamily : existingFontFamily;
+  wrapper.dataset.fontSize   = String((style.fontSize !== undefined && style.fontSize !== '') ? style.fontSize : existingFontSize);
+  wrapper.dataset.color      = (style.color !== undefined && style.color !== '') ? style.color : existingColor;
+  applyToSpan(wrapper);
+
+  wrapper.appendChild(fragment);
+  range.insertNode(wrapper);
+
   const newRange = document.createRange();
-  newRange.selectNodeContents(span);
+  newRange.selectNodeContents(wrapper);
   sel?.removeAllRanges();
   sel?.addRange(newRange);
   return true;

@@ -42,11 +42,11 @@ export function RichTextEditor({
   useEffect(() => {
     const p = textProps, pp = prevProps.current;
     const changes: typeof pendingStyle.current = {};
-    if (p.isBold     !== pp.isBold)     changes.bold       = p.isBold;
-    if (p.isItalic   !== pp.isItalic)   changes.italic     = p.isItalic;
-    if (p.fontFamily !== pp.fontFamily) changes.fontFamily  = p.fontFamily;
-    if (p.fontSize   !== pp.fontSize)   changes.fontSize   = p.fontSize;
-    if (p.color      !== pp.color)      changes.color      = p.color;
+    if (p.isBold !== pp.isBold && p.isBold !== 'mixed') changes.bold = p.isBold as boolean;
+    if (p.isItalic !== pp.isItalic && p.isItalic !== 'mixed') changes.italic = p.isItalic as boolean;
+    if (p.fontFamily !== pp.fontFamily && p.fontFamily !== '') changes.fontFamily = p.fontFamily;
+    if (p.fontSize !== pp.fontSize && p.fontSize !== '') changes.fontSize = p.fontSize as number;
+    if (p.color !== pp.color && p.color !== '') changes.color = p.color;
     prevProps.current = p;
 
     if (!Object.keys(changes).length || !editorRef.current) return;
@@ -94,19 +94,44 @@ export function RichTextEditor({
   const reflectSelection = useCallback(() => {
     if (!onPropsChange || !editorRef.current) return;
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    if (!sel || sel.rangeCount === 0) return;
     if (!editorRef.current.contains(sel.anchorNode)) return;
 
-    savedRange.current = sel.getRangeAt(0).cloneRange();
+    const range = sel.getRangeAt(0);
+    savedRange.current = range.cloneRange();
 
-    const anchor = sel.anchorNode?.parentElement?.closest('[data-run]') as HTMLElement | null;
-    if (!anchor) return;
+    let spans: HTMLElement[] = [];
+    if (sel.isCollapsed) {
+      const anchor = sel.anchorNode?.parentElement?.closest('[data-run]') as HTMLElement | null;
+      if (anchor) spans.push(anchor);
+    } else {
+      const fragment = range.cloneContents();
+      spans = Array.from(fragment.querySelectorAll('[data-run]')) as HTMLElement[];
+      const startAnchor = range.startContainer.parentElement?.closest('[data-run]') as HTMLElement | null;
+      if (startAnchor && !spans.find(s => s.outerHTML === startAnchor.outerHTML)) {
+        spans.unshift(startAnchor);
+      }
+    }
+
+    if (spans.length === 0) return;
+
+    let isBold: boolean | 'mixed' = spans[0].dataset.bold === 'true';
+    let isItalic: boolean | 'mixed' = spans[0].dataset.italic === 'true';
+    let fontFamily = spans[0].dataset.fontFamily ?? textPropsRef.current.fontFamily;
+    let fontSize: number | '' = parseFloat(spans[0].dataset.fontSize ?? String(textPropsRef.current.fontSize));
+    let color = spans[0].dataset.color ?? textPropsRef.current.color;
+
+    for (let i = 1; i < spans.length; i++) {
+      const s = spans[i];
+      if ((s.dataset.bold === 'true') !== isBold) isBold = 'mixed';
+      if ((s.dataset.italic === 'true') !== isItalic) isItalic = 'mixed';
+      if ((s.dataset.fontFamily ?? textPropsRef.current.fontFamily) !== fontFamily) fontFamily = '';
+      if (parseFloat(s.dataset.fontSize ?? String(textPropsRef.current.fontSize)) !== fontSize) fontSize = '';
+      if ((s.dataset.color ?? textPropsRef.current.color) !== color) color = '';
+    }
+
     onPropsChange({
-      fontFamily: anchor.dataset.fontFamily ?? textPropsRef.current.fontFamily,
-      fontSize:   parseFloat(anchor.dataset.fontSize ?? String(textPropsRef.current.fontSize)),
-      color:      anchor.dataset.color      ?? textPropsRef.current.color,
-      isBold:     anchor.dataset.bold       === 'true',
-      isItalic:   anchor.dataset.italic     === 'true',
+      fontFamily, fontSize, color, isBold, isItalic
     });
   }, [onPropsChange]);
 

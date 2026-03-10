@@ -118,7 +118,8 @@ const StyledSelect = ({ value, onChange, options, label, t }: { value: string; o
     <div style={{ position: 'relative' }}>
       <select value={value} onChange={e => onChange(e.target.value)}
         style={{ width: '100%', backgroundColor: t.colors.bgBase, color: t.colors.textPrimary, padding: '6px 28px 6px 10px', borderRadius: t.radius.md, fontSize: '12px', appearance: 'none', cursor: 'pointer', outline: 'none', border: `1px solid ${t.colors.border}`, fontFamily: t.fonts.ui }}>
-        {options.map(o => <option key={o}>{o}</option>)}
+        {value === '' && <option value="" disabled hidden>Mixed</option>}
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
       <ChevronDown size={12} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: t.colors.textMuted, pointerEvents: 'none' }} />
     </div>
@@ -136,18 +137,23 @@ const TEXT_COLOR_SWATCHES = ['#000000', '#ffffff', '#ef4444', '#f59e0b', '#22c55
 
 function TextPropertiesContent({ props, onChange, t }: { props: TextProps; onChange: (p: TextProps) => void; t: any }) {
   const set = useCallback(<K extends keyof TextProps>(key: K, val: TextProps[K]) => onChange({ ...props, [key]: val }), [props, onChange]);
-  const [sizeInput, setSizeInput] = useState(String(props.fontSize));
-  useEffect(() => { setSizeInput(String(props.fontSize)); }, [props.fontSize]);
+  const [sizeInput, setSizeInput] = useState(props.fontSize === '' ? '' : String(props.fontSize));
+  useEffect(() => { setSizeInput(props.fontSize === '' ? '' : String(props.fontSize)); }, [props.fontSize]);
   const commitSize = () => {
     const n = parseFloat(sizeInput);
     if (!isNaN(n) && n > 0) set('fontSize', Math.min(144, Math.max(4, n)));
-    else setSizeInput(String(props.fontSize));
+    else setSizeInput(props.fontSize === '' ? '' : String(props.fontSize));
   };
-  const adjustSize = (delta: number) => { const n = Math.min(144, Math.max(4, props.fontSize + delta)); set('fontSize', n); setSizeInput(String(n)); };
+  const adjustSize = (delta: number) => { 
+    const base = typeof props.fontSize === 'number' ? props.fontSize : 12;
+    const n = Math.min(144, Math.max(4, base + delta)); 
+    set('fontSize', n); 
+    setSizeInput(String(n)); 
+  };
   const previewCss: React.CSSProperties = {
     fontFamily: props.fontFamily === 'Times New Roman' ? '"Times New Roman", Times, serif' : props.fontFamily === 'Courier' ? '"Courier New", Courier, monospace' : 'Helvetica, Arial, sans-serif',
-    fontWeight: props.isBold ? 'bold' : 'normal', fontStyle: props.isItalic ? 'italic' : 'normal',
-    fontSize: Math.min(props.fontSize, 18), color: props.color, lineHeight: 1.3,
+    fontWeight: props.isBold === true ? 'bold' : 'normal', fontStyle: props.isItalic === true ? 'italic' : 'normal',
+    fontSize: Math.min(typeof props.fontSize === 'number' ? props.fontSize : 12, 18), color: props.color || '#000000', lineHeight: 1.3,
   };
 
   const inputStyle = { backgroundColor: t.colors.bgBase, color: t.colors.textPrimary, border: `1px solid ${t.colors.border}`, borderRadius: t.radius.md, fontSize: '12px', fontFamily: t.fonts.mono, outline: 'none' };
@@ -160,10 +166,10 @@ function TextPropertiesContent({ props, onChange, t }: { props: TextProps; onCha
       <div>
         <label style={{ fontSize: '11px', color: t.colors.textMuted, marginBottom: 6, display: 'block', fontFamily: t.fonts.ui }}>Style &amp; Size</label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button onClick={() => set('isBold', !props.isBold)} title="Bold" style={btnStyle(props.isBold)}>B</button>
-          <button onClick={() => set('isItalic', !props.isItalic)} title="Italic" style={{ ...btnStyle(props.isItalic), fontStyle: 'italic', fontFamily: 'serif' }}>I</button>
+          <button onClick={() => set('isBold', props.isBold !== true)} title="Bold" style={btnStyle(props.isBold === true)}>B</button>
+          <button onClick={() => set('isItalic', props.isItalic !== true)} title="Italic" style={{ ...btnStyle(props.isItalic === true), fontStyle: 'italic', fontFamily: 'serif' }}>I</button>
           <div style={{ width: 1, height: 20, backgroundColor: t.colors.border, flexShrink: 0 }} />
-          <input type="text" value={sizeInput} onChange={e => setSizeInput(e.target.value)} onBlur={commitSize} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          <input type="text" value={sizeInput} onChange={e => setSizeInput(e.target.value)} onBlur={commitSize} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} placeholder={props.fontSize === '' ? '-' : ''}
             style={{ ...inputStyle, width: 56, padding: '6px 8px', textAlign: 'center' }} />
           {[{ delta: -1, path: "M2 4l4 4 4-4" }, { delta: 1, path: "M2 8l4-4 4 4" }].map(({ delta, path }, idx) => (
             <button key={idx} onClick={() => adjustSize(delta)}
@@ -183,12 +189,12 @@ function TextPropertiesContent({ props, onChange, t }: { props: TextProps; onCha
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div style={{ width: 32, height: 32, borderRadius: t.radius.md, border: `1px solid ${t.colors.border}`, backgroundColor: props.color, cursor: 'pointer' }} />
-            <input type="color" value={props.color} onChange={e => set('color', e.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+            <div style={{ width: 32, height: 32, borderRadius: t.radius.md, border: `1px solid ${t.colors.border}`, backgroundColor: props.color || 'transparent', cursor: 'pointer' }} />
+            <input type="color" value={props.color || '#000000'} onChange={e => set('color', e.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
           </div>
           <input type="text" value={props.color} maxLength={7}
-            onChange={e => { if (/^#[0-9a-fA-F]{0,6}$/.test(e.target.value)) set('color', e.target.value); }}
-            onBlur={e => { if (!/^#[0-9a-fA-F]{6}$/.test(e.target.value)) set('color', props.color); }}
+            onChange={e => { if (e.target.value === '' || /^#[0-9a-fA-F]{0,6}$/.test(e.target.value)) set('color', e.target.value); }}
+            onBlur={e => { if (e.target.value !== '' && !/^#[0-9a-fA-F]{6}$/.test(e.target.value)) set('color', props.color); }}
             style={{ ...inputStyle, flex: 1, padding: '6px 10px', minWidth: 0 }} />
         </div>
       </div>

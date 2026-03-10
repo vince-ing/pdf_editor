@@ -11,10 +11,10 @@ export interface TextRun {
 
 export interface TextProps {
   fontFamily: string;
-  fontSize:   number;
+  fontSize:   number | '';
   color:      string;
-  isBold:     boolean;
-  isItalic:   boolean;
+  isBold:     boolean | 'mixed';
+  isItalic:   boolean | 'mixed';
 }
 
 export const DEFAULT_TEXT_PROPS: TextProps = {
