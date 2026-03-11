@@ -1553,11 +1553,12 @@
           "onSave?: () => void",
           "onPrint?: () => void",
           "onSettings?: () => void",
-          "menus?: MenuDef[]"
+          "menus?: MenuDef[]",
+          "onToggleMobileSidebar?: () => void; // Added for mobile trigger"
         ]
       },
       "functions": [
-        "TopBar({\n  tabs = [], activeTabId = null,\n  onTabClick, onTabClose, onNewTab,\n  onUndo, onRedo, onSave, onPrint, onSettings,\n  menus = [],\n}: TopBarProps)",
+        "TopBar({\n  tabs = [], activeTabId = null,\n  onTabClick, onTabClose, onNewTab,\n  onUndo, onRedo, onSave, onPrint, onSettings,\n  menus = [], onToggleMobileSidebar\n}: TopBarProps)",
         "TopBarBtn({ children, onClick, title, active = false, danger = false, accentColor, size = 32, style: sx }: {\n  children: React.ReactNode;\n  onClick?: ()"
       ]
     },

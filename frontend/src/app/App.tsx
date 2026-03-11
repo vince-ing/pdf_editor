@@ -1,4 +1,6 @@
 // frontend/src/app/App.tsx
+// Add the new mobile state and wrap the sidebars in responsive containers
+// ... (keep existing imports)
 import React, { useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -23,8 +25,6 @@ import '../core/tools/TextTool';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
-// ── Inner app — has access to ThemeProvider context ──────────────────────────
-
 const TOOL_SECTION_MAP: Partial<Record<string, 'text' | 'page' | 'appearance'>> = {
   addtext: 'text', edittext: 'text',
   highlight: 'appearance', underline: 'appearance', stickynote: 'appearance',
@@ -41,13 +41,12 @@ function AppInner() {
     onSuccess: editor.refreshDocumentState,
   });
 
-  // Derive pageId for OCR — null if no document loaded
   const activePageId = (editor.documentState?.children?.[editor.activePage] as { id?: string } | undefined)?.id ?? null;
 
-  // Section is derived from activeTool with no useEffect — OCR overrides via state only when needed
   const [ocrSectionOpen, setOcrSectionOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // New mobile state
+
   const toolSection = TOOL_SECTION_MAP[editor.activeTool] ?? null;
-  // When a tool that maps to a section is selected, clear the OCR override
   const prevToolSection = React.useRef(toolSection);
   if (prevToolSection.current !== toolSection) {
     prevToolSection.current = toolSection;
@@ -76,39 +75,59 @@ function AppInner() {
         tabs={editor.tabs} activeTabId={editor.activeTabId} onTabClick={editor.setActiveTabId}
         onTabClose={editor.handleTabClose}
         onNewTab={editor.openFileDialog} onUndo={editor.handleUndo} onRedo={editor.handleRedo} onSave={editor.handleExportPdf} menus={editor.menus}
+        onToggleMobileSidebar={() => setMobileSidebarOpen(v => !v)}
       />
 
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        <LeftSidebar
-          showThumbnails={editor.showThumbnails}
-          onToggleThumbnails={() => editor.setShowThumbnails(v => !v)}
-          pdfDoc={editor.pdfDoc} documentState={editor.documentState} activePage={editor.activePage}
-          activeView={editor.sidebarView}
-          sessionId={editor.activeTabId ?? ''}
-          onViewChange={v => {
-            editor.setSidebarView(v);
-            if (v) editor.setShowThumbnails(true);
-            if (v === 'search') editor.search.open();
-          }}
-          onPageClick={i => {
-            editor.setActivePage(i);
-            editor.pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }}
-          onDocumentChanged={editor.refreshDocumentState}
-          search={{
-            query:          editor.search.query,
-            onQueryChange:  editor.search.handleQueryChange,
-            matchCount:     editor.search.matches.length,
-            currentIndex:   editor.search.currentIndex,
-            isSearching:    editor.search.isSearching,
-            pageMatchMap:   editor.search.pageMatchMap,
-            matches:        editor.search.matches,
-            onNext:         editor.search.goNext,
-            onPrev:         editor.search.goPrev,
-            goToMatch:      editor.search.goToMatch,
-            inputRef:       editor.search.inputRef,
-          }}
-        />
+      <div className="flex-1 flex overflow-hidden min-h-0 relative">
+        
+        {/* Mobile Backdrop Overlay */}
+        {mobileSidebarOpen && (
+          <div 
+            className="md:hidden absolute inset-0 z-[8999] bg-black/40 transition-opacity" 
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+        )}
+
+        {/* Responsive Left Sidebar */}
+        <div 
+          className={`
+            absolute inset-y-0 left-0 z-[9000] flex flex-col transform transition-transform duration-200 ease-in-out md:relative md:translate-x-0 md:z-0
+            ${mobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:shadow-none'}
+          `}
+          style={{ backgroundColor: t.colors.bgBase }}
+        >
+          <LeftSidebar
+            showThumbnails={editor.showThumbnails}
+            onToggleThumbnails={() => editor.setShowThumbnails(v => !v)}
+            pdfDoc={editor.pdfDoc} documentState={editor.documentState} activePage={editor.activePage}
+            activeView={editor.sidebarView}
+            sessionId={editor.activeTabId ?? ''}
+            onViewChange={v => {
+              editor.setSidebarView(v);
+              if (v) editor.setShowThumbnails(true);
+              if (v === 'search') editor.search.open();
+            }}
+            onPageClick={i => {
+              editor.setActivePage(i);
+              editor.pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              setMobileSidebarOpen(false); // Close sidebar on mobile after selection
+            }}
+            onDocumentChanged={editor.refreshDocumentState}
+            search={{
+              query:          editor.search.query,
+              onQueryChange:  editor.search.handleQueryChange,
+              matchCount:     editor.search.matches.length,
+              currentIndex:   editor.search.currentIndex,
+              isSearching:    editor.search.isSearching,
+              pageMatchMap:   editor.search.pageMatchMap,
+              matches:        editor.search.matches,
+              onNext:         editor.search.goNext,
+              onPrev:         editor.search.goPrev,
+              goToMatch:      editor.search.goToMatch,
+              inputRef:       editor.search.inputRef,
+            }}
+          />
+        </div>
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <Toolbar
@@ -122,7 +141,7 @@ function AppInner() {
             onRunOcr={activePageId ? handleRunOcr : undefined} isOcrProcessing={ocr.isProcessing}
           />
 
-          <div className="flex-1 flex overflow-hidden min-h-0">
+          <div className="flex-1 flex overflow-hidden min-h-0 relative">
             <Canvas
               pdfDoc={editor.pdfDoc} documentState={editor.documentState}
               activeTool={editor.activeTool} scale={editor.scale}
@@ -139,24 +158,30 @@ function AppInner() {
               pageMatchMap={editor.search.pageMatchMap}
             />
             {editor.rightPanelOpen && (
-              <RightPanel
-                documentState={editor.documentState} 
-                activePage={editor.activePage} 
-                activeTool={editor.activeTool}
-                textProps={editor.textProps}
-                onTextPropsChange={editor.setTextProps}
-                highlightColor={editor.highlightColor}
-                highlightOpacity={editor.highlightOpacity}
-                onHighlightColorChange={editor.setHighlightColor}
-                onHighlightOpacityChange={editor.setHighlightOpacity}
-                sessionId={editor.activeTabId}
-                onDocumentChanged={editor.refreshDocumentState}
-                onRunOcr={activePageId ? handleRunOcr : undefined}
-                isOcrProcessing={ocr.isProcessing}
-                ocrError={ocr.error}
-                openSection={rightPanelSection}
-                onSectionChange={s => { if (s !== 'page') setOcrSectionOpen(false); }}
-              />
+              <div 
+                className="absolute inset-y-0 right-0 z-[8500] md:relative md:z-0 shadow-2xl md:shadow-none"
+                style={{ backgroundColor: t.colors.bgBase }}
+              >
+                {/* Make RightPanel responsive, sliding over canvas on mobile */}
+                <RightPanel
+                  documentState={editor.documentState} 
+                  activePage={editor.activePage} 
+                  activeTool={editor.activeTool}
+                  textProps={editor.textProps}
+                  onTextPropsChange={editor.setTextProps}
+                  highlightColor={editor.highlightColor}
+                  highlightOpacity={editor.highlightOpacity}
+                  onHighlightColorChange={editor.setHighlightColor}
+                  onHighlightOpacityChange={editor.setHighlightOpacity}
+                  sessionId={editor.activeTabId}
+                  onDocumentChanged={editor.refreshDocumentState}
+                  onRunOcr={activePageId ? handleRunOcr : undefined}
+                  isOcrProcessing={ocr.isProcessing}
+                  ocrError={ocr.error}
+                  openSection={rightPanelSection}
+                  onSectionChange={s => { if (s !== 'page') setOcrSectionOpen(false); }}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -177,8 +202,6 @@ function AppInner() {
     </div>
   );
 }
-
-// ── Root export ───────────────────────────────────────────────────────────────
 
 export default function App() {
   return (

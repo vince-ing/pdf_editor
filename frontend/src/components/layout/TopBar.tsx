@@ -1,5 +1,5 @@
 // components/layout/TopBar.tsx
-import { Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb, Save, Printer, Settings } from 'lucide-react';
+import { Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb, Save, Printer, Settings, PanelLeft } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { MenuDef, MenuAction } from '../../constants/menuDefs';
@@ -24,6 +24,7 @@ interface TopBarProps {
   onPrint?: () => void;
   onSettings?: () => void;
   menus?: MenuDef[];
+  onToggleMobileSidebar?: () => void; // Added for mobile trigger
 }
 
 // ── Kbd ───────────────────────────────────────────────────────────────────────
@@ -240,7 +241,7 @@ export function TopBar({
   tabs = [], activeTabId = null,
   onTabClick, onTabClose, onNewTab,
   onUndo, onRedo, onSave, onPrint, onSettings,
-  menus = [],
+  menus = [], onToggleMobileSidebar
 }: TopBarProps) {
   const { theme: t } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -271,16 +272,20 @@ export function TopBar({
       flexShrink: 0, userSelect: 'none',
     }}>
 
-      {/* ── Left side tools (Width matches Left Sidebar precisely: 264px) ── */}
-      <div style={{ 
-        width: '264px', height: '48px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 8px', flexShrink: 0, boxSizing: 'border-box'
-      }}>
+      {/* ── Left side tools (Responsive width, defaults to Sidebar width 264px on desktop) ── */}
+      <div className="w-auto md:w-[264px] flex items-center justify-between px-2 shrink-0 box-border" style={{ height: '48px' }}>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-          {/* Hamburger */}
-          <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          
+          {/* Mobile Sidebar Toggle Button */}
+          <div className="md:hidden flex items-center mr-1">
+            <TopBarBtn onClick={onToggleMobileSidebar} title="Toggle Files" size={32}>
+              <PanelLeft size={18} />
+            </TopBarBtn>
+          </div>
+
+          {/* Hamburger / App Menu */}
+          <div ref={menuRef} className="hidden md:flex relative shrink-0 items-center">
             <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
               <Menu size={18} />
             </TopBarBtn>
@@ -291,7 +296,7 @@ export function TopBar({
             )}
           </div>
           
-          <div style={{ width: '1px', height: '16px', backgroundColor: t.colors.border, margin: '0 4px' }} />
+          <div className="hidden md:block" style={{ width: '1px', height: '16px', backgroundColor: t.colors.border, margin: '0 4px' }} />
 
           {/* Undo / Redo */}
           <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
@@ -299,9 +304,11 @@ export function TopBar({
           
           <div style={{ width: '1px', height: '16px', backgroundColor: t.colors.border, margin: '0 4px' }} />
 
-          {/* Save / Print */}
+          {/* Save / Print (Hide print on very small screens if necessary) */}
           <TopBarBtn onClick={onSave} title="Save (Ctrl+S)"><Save size={16} /></TopBarBtn>
-          <TopBarBtn onClick={onPrint} title="Print (Ctrl+P)"><Printer size={16} /></TopBarBtn>
+          <div className="hidden sm:flex">
+             <TopBarBtn onClick={onPrint} title="Print (Ctrl+P)"><Printer size={16} /></TopBarBtn>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
@@ -315,7 +322,7 @@ export function TopBar({
                 <Lightbulb size={16} />
               </TopBarBtn>
               {helpOpen && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
+                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 9000 }}>
                   <DropdownPanel items={helpMenu.items} onClose={() => setHelpOpen(false)} />
                 </div>
               )}
@@ -324,12 +331,11 @@ export function TopBar({
         </div>
       </div>
 
-      {/* ── Structural Separator (Aligns exactly with Left Sidebar border) ── */}
-      <div style={{ width: '1px', height: '48px', backgroundColor: t.colors.bgBase, flexShrink: 0 }} />
+      {/* ── Structural Separator ── */}
+      <div className="hidden md:block" style={{ width: '1px', height: '48px', backgroundColor: t.colors.bgBase, flexShrink: 0 }} />
 
       {/* ── File tabs ── */}
-      {/* paddingLeft: 16px ensures the first tab perfectly aligns with the Toolbar content padding */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', flex: 1, minWidth: 0, overflow: 'visible', paddingLeft: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', flex: 1, minWidth: 0, overflowX: 'auto', paddingLeft: '8px' }} className="scrollbar-hide md:pl-4">
         {tabs.map(tab => (
           <Tab key={tab.id} tab={tab}
             isActive={tab.id === activeTabId}
@@ -337,15 +343,14 @@ export function TopBar({
             onClose={id => onTabClose?.(id)}
           />
         ))}
-        {/* Open new file button aligned center with tools */}
+        {/* Open new file button */}
         <div style={{ display: 'flex', alignItems: 'center', height: '48px', paddingLeft: '6px' }}>
           <TopBarBtn onClick={onNewTab} title="Open file (Ctrl+O)" style={{ fontSize: '18px' }} size={32}>+</TopBarBtn>
         </div>
       </div>
 
       {/* ── Right side ── */}
-      <div style={{ display: 'flex', alignItems: 'center', height: '48px', gap: '6px', flexShrink: 0, paddingRight: '8px' }}>
-        {/* Window controls */}
+      <div className="hidden sm:flex" style={{ alignItems: 'center', height: '48px', gap: '6px', flexShrink: 0, paddingRight: '8px' }}>
         {[
           { Icon: Minimize2, title: 'Minimize', danger: false },
           { Icon: Maximize2, title: 'Maximize', danger: false },
