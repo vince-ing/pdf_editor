@@ -244,17 +244,24 @@ export function TopBar({
   menus = [], onToggleMobileSidebar, onToggleMobileRightPanel
 }: TopBarProps) {
   const { theme: t } = useTheme();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  
+  // Track portaled menu coordinates instead of just booleans
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [helpPos, setHelpPos] = useState<{ top: number; left: number } | null>(null);
+  
   const menuRef = useRef<HTMLDivElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
+      // Ignore clicks inside any portaled submenus or main menus
       if ((e.target as HTMLElement)?.closest?.('[data-submenu-portal]')) return;
-      if (menuRef.current && !menuRef.current.contains(target)) setMenuOpen(false);
-      if (helpRef.current && !helpRef.current.contains(target)) setHelpOpen(false);
+      if ((e.target as HTMLElement)?.closest?.('[data-main-menu-portal]')) return;
+
+      // Close if click is outside the trigger buttons
+      if (menuRef.current && !menuRef.current.contains(target)) setMenuPos(null);
+      if (helpRef.current && !helpRef.current.contains(target)) setHelpPos(null);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -262,6 +269,22 @@ export function TopBar({
 
   const helpMenu = menus.find(m => m.label === 'Help');
   const appMenus = menus.filter(m => m.label !== 'Help');
+
+  const handleMenuClick = () => {
+    if (menuPos) setMenuPos(null);
+    else if (menuRef.current) {
+      const rect = menuRef.current.getBoundingClientRect();
+      setMenuPos({ top: rect.bottom + 4, left: Math.max(4, rect.left) });
+    }
+  };
+
+  const handleHelpClick = () => {
+    if (helpPos) setHelpPos(null);
+    else if (helpRef.current) {
+      const rect = helpRef.current.getBoundingClientRect();
+      setHelpPos({ top: rect.bottom + 4, left: Math.max(4, rect.left - 100) }); // shift left so it doesn't overflow right edge
+    }
+  };
 
   return (
     <div className="w-full flex items-end shrink-0 select-none border-b" style={{
@@ -282,15 +305,16 @@ export function TopBar({
             </TopBarBtn>
           </div>
 
-          {/* Hamburger / App Menu */}
+          {/* Hamburger / App Menu (Portaled) */}
           <div ref={menuRef} className="relative shrink-0 flex items-center">
-            <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
+            <TopBarBtn onClick={handleMenuClick} title="Menu" active={!!menuPos} size={36}>
               <Menu size={18} />
             </TopBarBtn>
-            {menuOpen && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
-                <AppMenu menus={appMenus} onClose={() => setMenuOpen(false)} />
-              </div>
+            {menuPos && createPortal(
+              <div data-main-menu-portal style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, zIndex: 9000 }}>
+                <AppMenu menus={appMenus} onClose={() => setMenuPos(null)} />
+              </div>,
+              document.body
             )}
           </div>
           
@@ -314,16 +338,17 @@ export function TopBar({
           {/* Settings - VISIBLE ON MOBILE */}
           <TopBarBtn onClick={onSettings} title="Settings"><Settings size={16} /></TopBarBtn>
 
-          {/* Help - VISIBLE ON MOBILE */}
+          {/* Help - Portaled */}
           {helpMenu && (
             <div ref={helpRef} className="relative shrink-0 flex items-center">
-              <TopBarBtn onClick={() => setHelpOpen(o => !o)} title="Help" active={helpOpen} accentColor="#f59e0b">
+              <TopBarBtn onClick={handleHelpClick} title="Help" active={!!helpPos} accentColor="#f59e0b">
                 <Lightbulb size={16} />
               </TopBarBtn>
-              {helpOpen && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
-                  <DropdownPanel items={helpMenu.items} onClose={() => setHelpOpen(false)} />
-                </div>
+              {helpPos && createPortal(
+                <div data-main-menu-portal style={{ position: 'fixed', top: helpPos.top, left: helpPos.left, zIndex: 9000 }}>
+                  <DropdownPanel items={helpMenu.items} onClose={() => setHelpPos(null)} />
+                </div>,
+                document.body
               )}
             </div>
           )}
