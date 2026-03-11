@@ -190,8 +190,6 @@ const Tab = ({ tab, isActive, onClick, onClose }: {
         color: isActive ? t.colors.textPrimary : t.colors.textSecondary,
         cursor: 'pointer', flexShrink: 0, maxWidth: '220px',
         transition: t.t.fast, userSelect: 'none',
-        // Instead of margin, we use a translation to drop the active tab exactly 1px 
-        // to mask the bottom border without triggering vertical scroll overflow
         transform: isActive ? 'translateY(1px)' : 'none',
         zIndex: isActive ? 10 : 1,
         border: 'none',
@@ -272,19 +270,19 @@ export function TopBar({
       borderColor: t.colors.border,
     }}>
 
-      {/* ── Left side tools (Responsive, shrinks on mobile, fixed width on desktop) ── */}
-      <div className="w-auto md:w-[264px] h-full flex items-center justify-between px-2 shrink-0 box-border border-r border-transparent md:border-inherit">
+      {/* ── Left side tools (Scrollable on mobile, max 55% of screen width) ── */}
+      <div className="w-auto md:w-[264px] h-full flex items-center px-2 shrink-0 box-border border-r border-transparent md:border-inherit overflow-x-auto scrollbar-hide max-w-[55vw] md:max-w-none">
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+        <div className="flex items-center gap-[2px] shrink-0">
           
           {/* Mobile Sidebar Toggle Button */}
-          <div className="md:hidden flex items-center mr-1">
+          <div className="md:hidden flex items-center shrink-0">
             <TopBarBtn onClick={onToggleMobileSidebar} title="Files" size={32}>
               <PanelLeft size={18} />
             </TopBarBtn>
           </div>
 
-          {/* Hamburger / App Menu (Always visible now so it shows on mobile) */}
+          {/* Hamburger / App Menu */}
           <div ref={menuRef} className="relative shrink-0 flex items-center">
             <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
               <Menu size={18} />
@@ -296,29 +294,29 @@ export function TopBar({
             )}
           </div>
           
-          <div className="hidden md:block w-px h-4 bg-inherit border-l mx-1" style={{ borderColor: t.colors.border }} />
+          <div className="hidden md:block w-px h-4 bg-inherit border-l mx-1 shrink-0" style={{ borderColor: t.colors.border }} />
 
-          {/* Undo / Redo - Hidden on mobile to save space, accessible via Edit tab */}
-          <div className="hidden sm:flex items-center gap-[2px]">
+          {/* Undo / Redo - Hidden on mobile to save space (accessible via edit tools) */}
+          <div className="hidden sm:flex items-center gap-[2px] shrink-0">
              <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
              <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
-             <div className="w-px h-4 bg-inherit border-l mx-1" style={{ borderColor: t.colors.border }} />
+             <div className="w-px h-4 bg-inherit border-l mx-1 shrink-0" style={{ borderColor: t.colors.border }} />
           </div>
 
-          {/* Save / Print */}
+          {/* Save */}
           <TopBarBtn onClick={onSave} title="Save (Ctrl+S)"><Save size={16} /></TopBarBtn>
-          <div className="hidden sm:flex">
+          
+          {/* Print - Hidden on mobile */}
+          <div className="hidden sm:flex shrink-0">
              <TopBarBtn onClick={onPrint} title="Print (Ctrl+P)"><Printer size={16} /></TopBarBtn>
           </div>
-        </div>
 
-        <div className="hidden md:flex items-center gap-[2px]">
-          {/* Settings */}
+          {/* Settings - VISIBLE ON MOBILE */}
           <TopBarBtn onClick={onSettings} title="Settings"><Settings size={16} /></TopBarBtn>
 
-          {/* Help / Lightbulb */}
+          {/* Help - VISIBLE ON MOBILE */}
           {helpMenu && (
-            <div ref={helpRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+            <div ref={helpRef} className="relative shrink-0 flex items-center">
               <TopBarBtn onClick={() => setHelpOpen(o => !o)} title="Help" active={helpOpen} accentColor="#f59e0b">
                 <Lightbulb size={16} />
               </TopBarBtn>
@@ -332,7 +330,7 @@ export function TopBar({
         </div>
       </div>
 
-      {/* ── File tabs (Scrollable on mobile without vertical scrollbar) ── */}
+      {/* ── File tabs (Scrollable) ── */}
       <div className="flex items-end gap-[2px] flex-1 min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide md:pl-4 px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
         {tabs.map(tab => (
           <Tab key={tab.id} tab={tab}
@@ -342,7 +340,7 @@ export function TopBar({
           />
         ))}
         {/* Open new file button aligned center with tools */}
-        <div style={{ display: 'flex', alignItems: 'center', height: '48px', paddingLeft: '6px' }}>
+        <div className="flex items-center h-12 pl-[6px] shrink-0">
           <TopBarBtn onClick={onNewTab} title="Open file (Ctrl+O)" style={{ fontSize: '18px' }} size={32}>+</TopBarBtn>
         </div>
       </div>
@@ -350,14 +348,14 @@ export function TopBar({
       {/* ── Right side ── */}
       <div className="flex items-center h-12 gap-[6px] shrink-0 pr-2">
          {/* Mobile Right Panel Toggle */}
-         <div className="md:hidden flex items-center ml-1">
+         <div className="md:hidden flex items-center ml-1 shrink-0">
             <TopBarBtn onClick={onToggleMobileRightPanel} title="Properties" size={32}>
                <PanelRight size={18} />
             </TopBarBtn>
          </div>
 
         {/* Window controls (hidden on small screens to save space) */}
-        <div className="hidden sm:flex items-center gap-[6px]">
+        <div className="hidden sm:flex items-center gap-[6px] shrink-0">
             {[
             { Icon: Minimize2, title: 'Minimize', danger: false },
             { Icon: Maximize2, title: 'Maximize', danger: false },
