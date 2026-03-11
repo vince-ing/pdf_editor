@@ -141,22 +141,47 @@ export function applyStyleToSelection(
   const spans = fragment.querySelectorAll('[data-run]');
   spans.forEach(span => applyToSpan(span as HTMLElement));
 
-  const wrapper = document.createElement('span');
-  wrapper.dataset.run = '1';
-  wrapper.dataset.bold       = String(style.bold       !== undefined ? style.bold       : existingBold);
-  wrapper.dataset.italic     = String(style.italic     !== undefined ? style.italic     : existingItalic);
-  wrapper.dataset.fontFamily = (style.fontFamily !== undefined && style.fontFamily !== '') ? style.fontFamily : existingFontFamily;
-  wrapper.dataset.fontSize   = String((style.fontSize !== undefined && style.fontSize !== '') ? style.fontSize : existingFontSize);
-  wrapper.dataset.color      = (style.color !== undefined && style.color !== '') ? style.color : existingColor;
-  applyToSpan(wrapper);
+  const walkAndWrap = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.textContent && node.textContent.length > 0) {
+        const span = document.createElement('span');
+        span.dataset.run = '1';
+        span.dataset.bold       = String(style.bold       !== undefined ? style.bold       : existingBold);
+        span.dataset.italic     = String(style.italic     !== undefined ? style.italic     : existingItalic);
+        span.dataset.fontFamily = (style.fontFamily !== undefined && style.fontFamily !== '') ? style.fontFamily : existingFontFamily;
+        span.dataset.fontSize   = String((style.fontSize !== undefined && style.fontSize !== '') ? style.fontSize : existingFontSize);
+        span.dataset.color      = (style.color !== undefined && style.color !== '') ? style.color : existingColor;
+        applyToSpan(span);
+        node.parentNode?.insertBefore(span, node);
+        span.appendChild(node);
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      if (el.dataset?.run) return;
+      // Do not descend into block-level elements (DIV, P). Their inline content
+      // is already handled by the applyToSpan pass over [data-run] spans above.
+      // Descending and wrapping text nodes inside a block element causes those
+      // wrapped spans to be re-inserted inside the block, forcing a new line.
+      const tag = el.tagName;
+      if (tag === 'DIV' || tag === 'P') return;
+      Array.from(el.childNodes).forEach(walkAndWrap);
+    }
+  };
 
-  wrapper.appendChild(fragment);
-  range.insertNode(wrapper);
+  Array.from(fragment.childNodes).forEach(walkAndWrap);
 
-  const newRange = document.createRange();
-  newRange.selectNodeContents(wrapper);
-  sel?.removeAllRanges();
-  sel?.addRange(newRange);
+  const firstChild = fragment.firstChild;
+  const lastChild = fragment.lastChild;
+  
+  range.insertNode(fragment);
+
+  if (firstChild && lastChild) {
+    const newRange = document.createRange();
+    newRange.setStartBefore(firstChild);
+    newRange.setEndAfter(lastChild);
+    sel?.removeAllRanges();
+    sel?.addRange(newRange);
+  }
   return true;
 }
 

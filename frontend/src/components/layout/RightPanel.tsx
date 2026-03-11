@@ -259,7 +259,7 @@ export function RightPanel({
   const w = (pageProps as any)?.metadata?.width, h = (pageProps as any)?.metadata?.height;
 
   return (
-    <div style={{ width: 256, backgroundColor: t.colors.bgRaised, borderLeft: `1px solid ${t.colors.bgBase}`, display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden', fontFamily: t.fonts.ui }}>
+    <div id="text-props-panel" style={{ width: 256, backgroundColor: t.colors.bgRaised, borderLeft: `1px solid ${t.colors.bgBase}`, display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden', fontFamily: t.fonts.ui }}>
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         <Section title="Text Properties" isOpen={openSection === 'text'} onToggle={() => toggle('text')} t={t}>
           <TextPropertiesContent props={textProps} onChange={onTextPropsChange} t={t} />

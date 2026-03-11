@@ -160,7 +160,6 @@ class DocumentService:
                         fontsize=fs,
                         fontname=fontname,
                         color=rgb,
-                        clip=clip,
                     )
                     cursor_x += len(piece) * fs * 0.6
 

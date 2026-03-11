@@ -36,8 +36,13 @@ export function RichTextEditor({
   }, []);
 
   const pendingStyle = useRef<Partial<{ bold: boolean; italic: boolean; fontFamily: string; fontSize: number; color: string }>>({});
-  const savedRange = useRef<Range | null>(null);
+  // Store selected span elements directly instead of a Range — Range objects
+  // detach when focus moves or DOM changes, but element refs survive.
+  const savedSpans = useRef<HTMLElement[]>([]);
   const prevProps = useRef(textProps);
+  // True while a prop change from the panel is in-flight and hasn't been
+  // applied yet. Blocks reflectSelection from overwriting textProps.
+  const propChangePending = useRef(false);
 
   useEffect(() => {
     const p = textProps, pp = prevProps.current;
@@ -49,24 +54,54 @@ export function RichTextEditor({
     if (p.color !== pp.color && p.color !== '') changes.color = p.color;
     prevProps.current = p;
 
-    if (!Object.keys(changes).length || !editorRef.current) return;
+    if (!Object.keys(changes).length || !editorRef.current) {
+      propChangePending.current = false;
+      return;
+    }
 
+    // Mark that a panel-driven change is being processed. This blocks
+    // reflectSelection from calling onPropsChange with stale span data
+    // (e.g. on keyup after a color change) until the change is resolved.
+    propChangePending.current = true;
+
+    // Try live selection first, then fall back to saved span elements.
     const sel = window.getSelection();
-    const rangeToUse = savedRange.current;
     const liveNonCollapsed = sel && !sel.isCollapsed && sel.rangeCount > 0 &&
       editorRef.current.contains(sel.anchorNode);
-    const hasSelection = rangeToUse || liveNonCollapsed;
+
+    // Filter savedSpans to only those still in the DOM
+    const validSavedSpans = savedSpans.current.filter(s => editorRef.current!.contains(s));
+
+    const hasSelection = liveNonCollapsed || validSavedSpans.length > 0;
 
     if (hasSelection) {
-      if (rangeToUse && sel) {
-        sel.removeAllRanges();
-        sel.addRange(rangeToUse);
+      if (!liveNonCollapsed && validSavedSpans.length > 0) {
+        // Re-select the saved spans so applyStyleToSelection can find them
+        const r = document.createRange();
+        r.setStartBefore(validSavedSpans[0]);
+        r.setEndAfter(validSavedSpans[validSavedSpans.length - 1]);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
       }
       applyStyleToSelection(editorRef.current, changes, scale);
-      savedRange.current = null;
+      // Refresh savedSpans from the new selection (spans may have been split/replaced)
+      const selAfter = window.getSelection();
+      if (selAfter && selAfter.rangeCount > 0 && !selAfter.isCollapsed) {
+        const r = selAfter.getRangeAt(0);
+        savedSpans.current = Array.from(
+          editorRef.current.querySelectorAll('[data-run]')
+        ).filter(el => r.intersectsNode(el)) as HTMLElement[];
+      } else {
+        savedSpans.current = [];
+      }
     } else {
       pendingStyle.current = { ...pendingStyle.current, ...changes };
+      // Clear the pending flag after a short delay — long enough to let the
+      // keyup that immediately follows a panel click pass without clobbering,
+      // but short enough not to block legitimate cursor moves.
+      setTimeout(() => { propChangePending.current = false; }, 100);
     }
+    propChangePending.current = false;
   }, [textProps, scale]);
 
   const commit = useCallback(() => {
@@ -91,26 +126,52 @@ export function RichTextEditor({
     commit();
   }, [commit]);
 
+  const lastReflected = useRef<{ node: Node | null; offset: number, extentOffset: number }>({ node: null, offset: 0, extentOffset: 0 });
+
   const reflectSelection = useCallback(() => {
     if (!onPropsChange || !editorRef.current) return;
+    if (document.activeElement !== editorRef.current) return;
+    // Don't overwrite textProps while a panel change is in-flight — reflectSelection
+    // firing on keyup would read the old span color and call onPropsChange with it,
+    // resetting prevProps and preventing the pending change from being detected.
+    if (propChangePending.current) return;
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     if (!editorRef.current.contains(sel.anchorNode)) return;
 
+    if (
+      lastReflected.current.node === sel.anchorNode &&
+      lastReflected.current.offset === sel.anchorOffset &&
+      lastReflected.current.extentOffset === sel.focusOffset
+    ) {
+      return; 
+    }
+    
+    lastReflected.current = { node: sel.anchorNode, offset: sel.anchorOffset, extentOffset: sel.focusOffset };
+    pendingStyle.current = {};
+
+    // Save selected span elements (not a Range — Ranges detach on focus loss)
     const range = sel.getRangeAt(0);
-    savedRange.current = range.cloneRange();
+    if (!sel.isCollapsed) {
+      savedSpans.current = Array.from(
+        editorRef.current.querySelectorAll('[data-run]')
+      ).filter(el => range.intersectsNode(el)) as HTMLElement[];
+    } else {
+      savedSpans.current = [];
+    }
 
     let spans: HTMLElement[] = [];
     if (sel.isCollapsed) {
       const anchor = sel.anchorNode?.parentElement?.closest('[data-run]') as HTMLElement | null;
       if (anchor) spans.push(anchor);
     } else {
-      const fragment = range.cloneContents();
-      spans = Array.from(fragment.querySelectorAll('[data-run]')) as HTMLElement[];
-      const startAnchor = range.startContainer.parentElement?.closest('[data-run]') as HTMLElement | null;
-      if (startAnchor && !spans.find(s => s.outerHTML === startAnchor.outerHTML)) {
-        spans.unshift(startAnchor);
-      }
+      spans = savedSpans.current.length > 0 ? savedSpans.current : (() => {
+        const fragment = range.cloneContents();
+        const s = Array.from(fragment.querySelectorAll('[data-run]')) as HTMLElement[];
+        const startAnchor = range.startContainer.parentElement?.closest('[data-run]') as HTMLElement | null;
+        if (startAnchor && !s.find(x => x.outerHTML === startAnchor.outerHTML)) s.unshift(startAnchor);
+        return s;
+      })();
     }
 
     if (spans.length === 0) return;
@@ -131,7 +192,7 @@ export function RichTextEditor({
     }
 
     onPropsChange({
-      fontFamily, fontSize, color, isBold, isItalic
+      fontFamily, fontSize: Number.isNaN(fontSize as number) ? '' : fontSize, color, isBold, isItalic
     });
   }, [onPropsChange]);
 
@@ -210,8 +271,8 @@ export function RichTextEditor({
       range.insertNode(span);
 
       const newRange = document.createRange();
-      newRange.setStartAfter(textNode);
-      newRange.collapse(true);
+      newRange.setStart(textNode, 1);
+      newRange.setEnd(textNode, 1);
       sel.removeAllRanges();
       sel.addRange(newRange);
     }
@@ -274,8 +335,9 @@ export function RichTextEditor({
       const range = document.createRange();
       const textChild = (wrapped as HTMLElement).firstChild;
       if (textChild) {
-        range.setStart(textChild, Math.min(cursorOffset, (textChild as Text).length));
-        range.collapse(true);
+        const pos = Math.min(cursorOffset, (textChild as Text).length);
+        range.setStart(textChild, pos);
+        range.setEnd(textChild, pos);
         sel.removeAllRanges();
         sel.addRange(range);
       }
