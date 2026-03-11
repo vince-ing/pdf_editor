@@ -1,4 +1,5 @@
 // frontend/src/app/App.tsx
+// Make sure to add the new onToggleMobileRightPanel prop
 import React, { useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -43,7 +44,7 @@ function AppInner() {
 
   const [ocrSectionOpen, setOcrSectionOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false); // Track mobile right panel state separately
+  const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
 
   const toolSection = TOOL_SECTION_MAP[editor.activeTool] ?? null;
   const prevToolSection = React.useRef(toolSection);
@@ -53,7 +54,6 @@ function AppInner() {
   }
   const rightPanelSection = ocrSectionOpen ? 'page' : toolSection;
 
-  // Sync mobile right panel with tool selection
   React.useEffect(() => {
      if (toolSection && editor.rightPanelOpen) {
         setMobileRightPanelOpen(true);
@@ -82,11 +82,11 @@ function AppInner() {
         onTabClose={editor.handleTabClose}
         onNewTab={editor.openFileDialog} onUndo={editor.handleUndo} onRedo={editor.handleRedo} onSave={editor.handleExportPdf} menus={editor.menus}
         onToggleMobileSidebar={() => setMobileSidebarOpen(v => !v)}
+        onToggleMobileRightPanel={() => setMobileRightPanelOpen(v => !v)}
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0 relative">
         
-        {/* Mobile Backdrop Overlay for Left Sidebar */}
         {mobileSidebarOpen && (
           <div 
             className="md:hidden absolute inset-0 z-[8999] bg-black/40 transition-opacity" 
@@ -94,7 +94,6 @@ function AppInner() {
           />
         )}
 
-        {/* Responsive Left Sidebar */}
         <div 
           className={`
             absolute inset-y-0 left-0 z-[9000] flex flex-col transform transition-transform duration-200 ease-in-out md:relative md:translate-x-0 md:z-0
@@ -116,7 +115,7 @@ function AppInner() {
             onPageClick={i => {
               editor.setActivePage(i);
               editor.pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              setMobileSidebarOpen(false); // Close sidebar on mobile after selection
+              setMobileSidebarOpen(false);
             }}
             onDocumentChanged={editor.refreshDocumentState}
             search={{
@@ -164,7 +163,6 @@ function AppInner() {
               pageMatchMap={editor.search.pageMatchMap}
             />
             
-            {/* Mobile Backdrop Overlay for Right Panel */}
             {mobileRightPanelOpen && (
               <div 
                 className="md:hidden absolute inset-0 z-[8499] bg-black/40 transition-opacity" 

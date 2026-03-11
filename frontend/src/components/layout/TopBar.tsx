@@ -1,5 +1,5 @@
-// components/layout/TopBar.tsx
-import { Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb, Save, Printer, Settings, PanelLeft } from 'lucide-react';
+// frontend/src/components/layout/TopBar.tsx
+import { Minimize2, Maximize2, X, Undo2, Redo2, Menu, Lightbulb, Save, Printer, Settings, PanelLeft, PanelRight } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { MenuDef, MenuAction } from '../../constants/menuDefs';
@@ -24,7 +24,8 @@ interface TopBarProps {
   onPrint?: () => void;
   onSettings?: () => void;
   menus?: MenuDef[];
-  onToggleMobileSidebar?: () => void; // Added for mobile trigger
+  onToggleMobileSidebar?: () => void;
+  onToggleMobileRightPanel?: () => void; // Added trigger for mobile right panel
 }
 
 // ── Kbd ───────────────────────────────────────────────────────────────────────
@@ -241,7 +242,7 @@ export function TopBar({
   tabs = [], activeTabId = null,
   onTabClick, onTabClose, onNewTab,
   onUndo, onRedo, onSave, onPrint, onSettings,
-  menus = [], onToggleMobileSidebar
+  menus = [], onToggleMobileSidebar, onToggleMobileRightPanel
 }: TopBarProps) {
   const { theme: t } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -264,22 +265,20 @@ export function TopBar({
   const appMenus = menus.filter(m => m.label !== 'Help');
 
   return (
-    <div style={{
+    <div className="w-full flex items-end shrink-0 select-none border-b" style={{
       height: '48px',
       backgroundColor: t.colors.bgBase,
-      borderBottom: `1px solid ${t.colors.border}`,
-      display: 'flex', alignItems: 'flex-end',
-      flexShrink: 0, userSelect: 'none',
+      borderColor: t.colors.border,
     }}>
 
-      {/* ── Left side tools (Responsive width, defaults to Sidebar width 264px on desktop) ── */}
-      <div className="w-auto md:w-[264px] flex items-center justify-between px-2 shrink-0 box-border" style={{ height: '48px' }}>
+      {/* ── Left side tools (Responsive, shrinks on mobile, fixed width on desktop) ── */}
+      <div className="w-auto md:w-[264px] h-full flex items-center justify-between px-2 shrink-0 box-border border-r border-transparent md:border-inherit">
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
           
           {/* Mobile Sidebar Toggle Button */}
           <div className="md:hidden flex items-center mr-1">
-            <TopBarBtn onClick={onToggleMobileSidebar} title="Toggle Files" size={32}>
+            <TopBarBtn onClick={onToggleMobileSidebar} title="Files" size={32}>
               <PanelLeft size={18} />
             </TopBarBtn>
           </div>
@@ -296,22 +295,22 @@ export function TopBar({
             )}
           </div>
           
-          <div className="hidden md:block" style={{ width: '1px', height: '16px', backgroundColor: t.colors.border, margin: '0 4px' }} />
+          <div className="hidden md:block w-px h-4 bg-inherit border-l mx-1" style={{ borderColor: t.colors.border }} />
 
           {/* Undo / Redo */}
           <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
           <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
           
-          <div style={{ width: '1px', height: '16px', backgroundColor: t.colors.border, margin: '0 4px' }} />
+          <div className="w-px h-4 bg-inherit border-l mx-1" style={{ borderColor: t.colors.border }} />
 
-          {/* Save / Print (Hide print on very small screens if necessary) */}
+          {/* Save / Print */}
           <TopBarBtn onClick={onSave} title="Save (Ctrl+S)"><Save size={16} /></TopBarBtn>
           <div className="hidden sm:flex">
              <TopBarBtn onClick={onPrint} title="Print (Ctrl+P)"><Printer size={16} /></TopBarBtn>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+        <div className="hidden md:flex items-center gap-[2px]">
           {/* Settings */}
           <TopBarBtn onClick={onSettings} title="Settings"><Settings size={16} /></TopBarBtn>
 
@@ -322,7 +321,7 @@ export function TopBar({
                 <Lightbulb size={16} />
               </TopBarBtn>
               {helpOpen && (
-                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 9000 }}>
+                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 9000 }}>
                   <DropdownPanel items={helpMenu.items} onClose={() => setHelpOpen(false)} />
                 </div>
               )}
@@ -331,11 +330,8 @@ export function TopBar({
         </div>
       </div>
 
-      {/* ── Structural Separator ── */}
-      <div className="hidden md:block" style={{ width: '1px', height: '48px', backgroundColor: t.colors.bgBase, flexShrink: 0 }} />
-
-      {/* ── File tabs ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', flex: 1, minWidth: 0, overflowX: 'auto', paddingLeft: '8px' }} className="scrollbar-hide md:pl-4">
+      {/* ── File tabs (Scrollable on mobile) ── */}
+      <div className="flex items-end gap-[2px] flex-1 min-w-0 overflow-x-auto scrollbar-hide md:pl-4 px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
         {tabs.map(tab => (
           <Tab key={tab.id} tab={tab}
             isActive={tab.id === activeTabId}
@@ -343,21 +339,31 @@ export function TopBar({
             onClose={id => onTabClose?.(id)}
           />
         ))}
-        {/* Open new file button */}
+        {/* Open new file button aligned center with tools */}
         <div style={{ display: 'flex', alignItems: 'center', height: '48px', paddingLeft: '6px' }}>
           <TopBarBtn onClick={onNewTab} title="Open file (Ctrl+O)" style={{ fontSize: '18px' }} size={32}>+</TopBarBtn>
         </div>
       </div>
 
       {/* ── Right side ── */}
-      <div className="hidden sm:flex" style={{ alignItems: 'center', height: '48px', gap: '6px', flexShrink: 0, paddingRight: '8px' }}>
-        {[
-          { Icon: Minimize2, title: 'Minimize', danger: false },
-          { Icon: Maximize2, title: 'Maximize', danger: false },
-          { Icon: X,         title: 'Close',    danger: true  },
-        ].map(({ Icon, title, danger }) => (
-          <TopBarBtn key={title} title={title} danger={danger}><Icon size={13} /></TopBarBtn>
-        ))}
+      <div className="flex items-center h-12 gap-[6px] shrink-0 pr-2">
+         {/* Mobile Right Panel Toggle */}
+         <div className="md:hidden flex items-center ml-1">
+            <TopBarBtn onClick={onToggleMobileRightPanel} title="Properties" size={32}>
+               <PanelRight size={18} />
+            </TopBarBtn>
+         </div>
+
+        {/* Window controls (hidden on small screens to save space) */}
+        <div className="hidden sm:flex items-center gap-[6px]">
+            {[
+            { Icon: Minimize2, title: 'Minimize', danger: false },
+            { Icon: Maximize2, title: 'Maximize', danger: false },
+            { Icon: X,         title: 'Close',    danger: true  },
+            ].map(({ Icon, title, danger }) => (
+            <TopBarBtn key={title} title={title} danger={danger}><Icon size={13} /></TopBarBtn>
+            ))}
+        </div>
       </div>
     </div>
   );
