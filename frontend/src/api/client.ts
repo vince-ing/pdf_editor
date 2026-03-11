@@ -3,14 +3,12 @@
 import axios from 'axios';
 import type { TextRun } from '../types/textProps';
 
-// We'll use a simple check: if the URL includes 'vercel.app', use the HF backend.
 const isProduction = window.location.hostname.includes('vercel.app');
 
 const API_BASE = isProduction 
   ? 'https://vince-ing-pdf-editor-backend.hf.space/api' 
   : 'http://localhost:8000/api';
 
-// Build axios config with session header
 const s = (sessionId: string) => ({ headers: { 'X-Session-Id': sessionId } });
 
 export const engineApi = {
@@ -123,6 +121,24 @@ export const engineApi = {
       color,
       opacity,
     }, s(sessionId))).data,
+
+  addPathAnnotation: async (
+    pageId: string,
+    points: { x: number; y: number }[],
+    color: string,
+    thickness: number,
+    opacity: number,
+    sessionId: string,
+  ) => {
+    const response = await axios.post(`${API_BASE}/annotations/path`, {
+      page_id: pageId,
+      points,
+      color,
+      thickness,
+      opacity,
+    }, s(sessionId));
+    return response.data;
+  },
 
   // --- Plugins ---
   applyRedaction: async (pageId: string, rects: { x: number; y: number; width: number; height: number }[], sessionId: string) =>

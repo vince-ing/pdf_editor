@@ -144,7 +144,7 @@ function CommentTab({ activeTool, onToolChange, onReadPage, onReadSelection, tts
 }) {
   return (
     <>
-      {byId(['highlight', 'underline']).map(t => (
+      {byId(['highlight', 'underline', 'draw']).map(t => (
         <ToolBtn key={t.id} icon={t.icon} label={t.label} isActive={activeTool === t.id} onClick={() => onToolChange(t.id)} />
       ))}
       <Rule />

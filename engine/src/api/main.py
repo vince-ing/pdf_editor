@@ -141,6 +141,16 @@ class HighlightPayload(BaseModel):
     color:   str   = "#FFFF00"
     opacity: float = 0.4
 
+class PointPayload(BaseModel):
+    x: float
+    y: float
+
+class PathAnnotationPayload(BaseModel):
+    page_id:   str
+    points:    List[PointPayload]
+    color:     str   = "#000000"
+    thickness: float = 2.0
+    opacity:   float = 1.0
 
 # ── Document endpoints ────────────────────────────────────────────────────────
 
@@ -329,6 +339,23 @@ def add_highlight_annotation(payload: HighlightPayload, session: EditorSession =
     )
     return {"status": "success", "nodes": nodes}
 
+@app.post("/api/annotations/path")
+def add_path_annotation(payload: PathAnnotationPayload, session: EditorSession = Depends(get_session)):
+    page = session.document.get_child(payload.page_id)
+    if not page or page.node_type != "page":
+        raise HTTPException(status_code=404, detail="Page not found")
+        
+    service = AnnotationService(session)
+    points_data = [{"x": p.x, "y": p.y} for p in payload.points]
+    
+    node = service.add_path(
+        page_id=payload.page_id,
+        points=points_data,
+        color=payload.color,
+        thickness=payload.thickness,
+        opacity=payload.opacity
+    )
+    return {"status": "success", "node": node}
 
 @app.delete("/api/annotations/{node_id}")
 def delete_annotation(node_id: str, page_id: str, session: EditorSession = Depends(get_session)):

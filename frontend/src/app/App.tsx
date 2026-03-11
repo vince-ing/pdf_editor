@@ -1,6 +1,6 @@
 // frontend/src/app/App.tsx
 // Make sure to add the new onToggleMobileRightPanel prop
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
@@ -15,6 +15,8 @@ import { Canvas }      from '../components/canvas/Canvas';
 import { useEditorState } from '../hooks/useEditorState';
 import { useOcr } from '../hooks/useOcr';
 import { ThemeProvider, useTheme } from '../theme';
+import { toolManager } from '../core/tools/ToolManager';
+import { DrawTool } from '../core/tools/DrawTool';
 
 // Register external strategy tools
 import '../core/tools/PanTool';
@@ -27,7 +29,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 const TOOL_SECTION_MAP: Partial<Record<string, 'text' | 'page' | 'appearance'>> = {
   addtext: 'text', edittext: 'text',
   highlight: 'appearance', underline: 'appearance', stickynote: 'appearance',
-  stamp: 'appearance', redact: 'appearance',
+  stamp: 'appearance', redact: 'appearance', draw: 'appearance',
   insert: 'page', delete: 'page', rotate: 'page', extract: 'page', crop: 'page',
 };
 
@@ -45,6 +47,29 @@ function AppInner() {
   const [ocrSectionOpen, setOcrSectionOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
+
+  // Initialize and register the draw tool when the session becomes active
+  useEffect(() => {
+    if (editor.activeTabId) {
+       // Only register if it hasn't been added yet, to avoid duplicate registrations on re-renders
+       if (!toolManager.getActiveTool() || toolManager.getActiveToolId() !== 'draw' || !toolManager['tools']?.has('draw')) {
+           toolManager.registerTool(
+             new DrawTool(editor.activeTabId, editor.highlightColor, 2.0, editor.refreshDocumentState)
+           );
+       }
+    }
+  }, [editor.activeTabId, editor.highlightColor, editor.refreshDocumentState]);
+
+  // Hook into annotation additions so drawn paths refresh the canvas
+  useEffect(() => {
+     // Re-register if color changes and draw tool is active
+     if (editor.activeTabId && toolManager.getActiveToolId() === 'draw') {
+        toolManager.registerTool(
+          new DrawTool(editor.activeTabId, editor.highlightColor, 2.0, editor.refreshDocumentState)
+        );
+     }
+  }, [editor.highlightColor, editor.activeTabId, editor.refreshDocumentState]);
+
 
   const toolSection = TOOL_SECTION_MAP[editor.activeTool] ?? null;
   const prevToolSection = React.useRef(toolSection);

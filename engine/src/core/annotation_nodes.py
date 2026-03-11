@@ -1,9 +1,8 @@
 # engine/src/core/annotation_nodes.py
 
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from pydantic import BaseModel, Field
 from .node import Node
-
 
 class TextRun(BaseModel):
     """
@@ -48,3 +47,15 @@ class HighlightNode(Node):
     color:        str   = "#FFFF00"
     opacity:      float = 0.5
     border_width: float = 0.0
+
+class Point(BaseModel):
+    x: float
+    y: float
+
+class PathNode(Node):
+    """Represents a freehand drawing path added to a page."""
+    node_type:    str   = "path"
+    points:       List[Point] = Field(default_factory=list)
+    color:        str   = "#000000"
+    thickness:    float = 2.0
+    opacity:      float = 1.0

@@ -1,10 +1,9 @@
-// constants/tools.ts — Single source of truth for tool IDs, definitions, cursors.
-// Import ToolId from here (not from Toolbar.tsx) to avoid circular deps.
+// frontend/src/constants/tools.ts
 
 import {
   Hand, MousePointer2, ZoomIn, Type, FileText, Image, Link2,
   Highlighter, Underline, StickyNote, Stamp, FileDown,
-  FilePlus, Trash2, RotateCw, Crop,
+  FilePlus, Trash2, RotateCw, Crop, PenTool
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -13,7 +12,7 @@ import type { LucideIcon } from 'lucide-react';
 export type ToolId =
   | 'hand' | 'select' | 'zoom'
   | 'addtext' | 'edittext' | 'addimage' | 'link'
-  | 'highlight' | 'underline' | 'stickynote' | 'stamp' | 'redact'
+  | 'highlight' | 'underline' | 'stickynote' | 'stamp' | 'redact' | 'draw'
   | 'insert' | 'delete' | 'rotate' | 'extract' | 'crop';
 
 // ── Tool category ─────────────────────────────────────────────────────────────
@@ -44,6 +43,7 @@ export const TOOL_DEFS: ToolDef[] = [
   { id: 'stickynote', icon: StickyNote,    label: 'Sticky Note', category: 'comment' },
   { id: 'stamp',      icon: Stamp,         label: 'Stamp',       category: 'comment' },
   { id: 'redact',     icon: FileDown,      label: 'Redact',      category: 'comment' },
+  { id: 'draw',       icon: PenTool,       label: 'Draw',        category: 'comment' },
   { id: 'insert',     icon: FilePlus,      label: 'Insert',      category: 'pages'   },
   { id: 'delete',     icon: Trash2,        label: 'Delete',      category: 'pages'   },
   { id: 'rotate',     icon: RotateCw,      label: 'Rotate',      category: 'pages'   },
@@ -63,6 +63,7 @@ export const TOOL_CURSORS: Partial<Record<ToolId, string>> = {
   redact:    'crosshair',
   crop:      'crosshair',
   underline: 'crosshair',
+  draw:      'crosshair',
 };
 
 // ── Selection overlay color per tool ─────────────────────────────────────────
@@ -77,4 +78,4 @@ export const TOOL_SEL_COLOR: Partial<Record<ToolId, string>> = {
 
 // ── Drag-capable tools ────────────────────────────────────────────────────────
 
-export const DRAG_TOOLS: ToolId[] = ['highlight', 'redact', 'select', 'crop', 'underline'];
+export const DRAG_TOOLS: ToolId[] = ['highlight', 'redact', 'select', 'crop', 'underline', 'draw'];

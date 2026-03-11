@@ -68,6 +68,17 @@
           "color: str = '#FFFF00'",
           "opacity: float = 0.4"
         ],
+        "class PointPayload": [
+          "x: float",
+          "y: float"
+        ],
+        "class PathAnnotationPayload": [
+          "page_id: str",
+          "points: List[PointPayload]",
+          "color: str = '#000000'",
+          "thickness: float = 2.0",
+          "opacity: float = 1.0"
+        ],
         "class OCRPayload": [
           "page_id: str",
           "language: str = 'eng'"
@@ -184,6 +195,13 @@
           "name": "add_highlight_annotation",
           "params": [
             "payload: HighlightPayload",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
+          "name": "add_path_annotation",
+          "params": [
+            "payload: PathAnnotationPayload",
             "session: EditorSession = Depends(get_session)"
           ]
         },
@@ -350,6 +368,15 @@
           "handler": "add_highlight_annotation",
           "params": [
             "payload: HighlightPayload",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/annotations/path",
+          "handler": "add_path_annotation",
+          "params": [
+            "payload: PathAnnotationPayload",
             "session: EditorSession = Depends(get_session)"
           ]
         },
@@ -598,7 +625,12 @@
         ],
         "class TextNode": [],
         "class ImageNode": [],
-        "class HighlightNode": []
+        "class HighlightNode": [],
+        "class Point": [
+          "x: float",
+          "y: float"
+        ],
+        "class PathNode": []
       }
     },
     "engine\\src\\core\\document.py": {
@@ -931,6 +963,16 @@
               "color: str = '#FFFF00'",
               "border_width: float = 0.0",
               "opacity: float = 0.5"
+            ]
+          },
+          {
+            "name": "add_path",
+            "params": [
+              "page_id: str",
+              "points: List[dict]",
+              "color: str = '#000000'",
+              "thickness: float = 2.0",
+              "opacity: float = 1.0"
             ]
           },
           {
@@ -1281,6 +1323,13 @@
           "payload": "{ page_id: pageId, rects, color, opacity, }"
         },
         {
+          "fn": "addPathAnnotation",
+          "signature": "addPathAnnotation(pageId: string, points: { x: number; y: number }[], color: string, thickness: number, opacity: number, sessionId: string)",
+          "method": "POST",
+          "url": "${API_BASE}/annotations/path",
+          "payload": "{ page_id: pageId, points, color, thickness, opacity, }"
+        },
+        {
           "fn": "applyRedaction",
           "signature": "applyRedaction(pageId: string, rects: { x: number; y: number; width: number; height: number }[], sessionId: string)",
           "method": "POST",
@@ -1349,6 +1398,11 @@
           "onZoom?: (delta: number) => void; // New prop to handle zoom"
         ]
       }
+    },
+    "frontend\\src\\components\\canvas\\LiveDrawLayer.tsx": {
+      "functions": [
+        "LiveDrawLayer({ pageId, scale }: { pageId: string, scale: number })"
+      ]
     },
     "frontend\\src\\components\\canvas\\NodeOverlay.tsx": {
       "interfaces": {

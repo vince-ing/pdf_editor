@@ -1,3 +1,5 @@
+// frontend/src/components/canvas/NodeOverlay.tsx
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Trash2 } from 'lucide-react';
 import { runToSpanStyle, runsToHtml } from '../../utils/textUtils';
@@ -171,6 +173,49 @@ export function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange,
     if (onUpdate) onUpdate(node.id, { ...node, runs, text_content: plain });
   }, [node, onUpdate]);
 
+  if (node.node_type === 'path') {
+    if (!node.bbox || !node.points) return null;
+    
+    const pts = node.points as {x: number, y: number}[];
+    // Translate points relative to the bounding box rendering context
+    const d = pts.length > 0 
+      ? `M ${(pts[0].x - node.bbox.x) * scale} ${(pts[0].y - node.bbox.y) * scale} ` + 
+        pts.slice(1).map(p => `L ${(p.x - node.bbox.x) * scale} ${(p.y - node.bbox.y) * scale}`).join(' ')
+      : '';
+
+    return (
+      <>
+        <svg 
+          style={{
+            position: 'absolute', zIndex: 20,
+            left: node.bbox.x * scale, top: node.bbox.y * scale,
+            width: node.bbox.width * scale, height: node.bbox.height * scale,
+            pointerEvents: 'none',
+          }}
+        >
+          <path 
+            d={d}
+            stroke={node.color ?? '#000000'}
+            strokeWidth={(node.thickness ?? 2) * scale}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+            opacity={node.opacity ?? 1.0}
+            style={{ pointerEvents: 'auto', cursor: 'context-menu' }}
+            onContextMenu={handleContextMenu}
+          />
+        </svg>
+        {ctxMenu && (
+          <ContextMenu
+            x={ctxMenu.x} y={ctxMenu.y}
+            onDelete={() => onDelete?.(node.id)}
+            onClose={() => setCtxMenu(null)}
+          />
+        )}
+      </>
+    );
+  }
+
   if (node.node_type === 'highlight') {
     if (!node.bbox) return null;
     const s: React.CSSProperties = {
@@ -196,6 +241,7 @@ export function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange,
       </>
     );
   }
+
   if (node.node_type !== 'text' || !node.bbox) return null;
 
   const pw = Math.max(geo.w * scale, 10), ph = Math.max(geo.h * scale, 10);

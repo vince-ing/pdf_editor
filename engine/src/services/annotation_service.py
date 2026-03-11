@@ -2,10 +2,9 @@
 
 from typing import List, Optional
 from engine.src.editor.editor_session import EditorSession
-from engine.src.core.annotation_nodes import TextNode, TextRun, ImageNode, HighlightNode
-from engine.src.core.node import BoundingBox
+from engine.src.core.annotation_nodes import TextNode, TextRun, ImageNode, HighlightNode, PathNode, Point
 from engine.src.commands.node_commands import AddNodeCommand, DeleteNodeCommand, BatchAddNodeCommand
-
+from engine.src.core.node import BoundingBox
 
 class AnnotationService:
     def __init__(self, session: EditorSession):
@@ -86,6 +85,44 @@ class AnnotationService:
         command = BatchAddNodeCommand(parent_id=page_id, new_nodes=nodes)
         self.session.execute(command)
         return nodes
+    
+    def add_path(
+        self,
+        page_id:   str,
+        points:    List[dict],
+        color:     str   = "#000000",
+        thickness: float = 2.0,
+        opacity:   float = 1.0,
+    ) -> PathNode:
+        
+        # Calculate bounding box from points
+        if not points:
+            bbox = BoundingBox(x=0, y=0, width=0, height=0)
+        else:
+            xs = [p["x"] for p in points]
+            ys = [p["y"] for p in points]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            bbox = BoundingBox(
+                x=min_x, 
+                y=min_y, 
+                width=max_x - min_x, 
+                height=max_y - min_y
+            )
+
+        point_objects = [Point(**p) for p in points]
+
+        path_node = PathNode(
+            points=point_objects,
+            color=color,
+            thickness=thickness,
+            opacity=opacity,
+            bbox=bbox
+        )
+        
+        command = AddNodeCommand(parent_id=page_id, new_node=path_node)
+        self.session.execute(command)
+        return path_node
 
     def update_annotation(self, page_id: str, node_id: str, updates: dict):
         from engine.src.commands.node_commands import UpdateAnnotationCommand

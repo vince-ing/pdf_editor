@@ -19,6 +19,7 @@ import { TransientTextBox } from './TransientTextBox';
 import { NodeOverlay } from './NodeOverlay';
 import { CopyToast } from './CopyToast';
 import { PageControls } from './PageControls';
+import { LiveDrawLayer } from './LiveDrawLayer';
 
 const CURSORS: Partial<Record<ToolId, string>> = {
   hand: 'grab', select: 'default', zoom: 'zoom-in',
@@ -208,6 +209,19 @@ export function PageRenderer({
           }}
           onZoom={onZoom}
         />
+
+        <LiveDrawLayer pageId={pageNode.id} scale={scale} />
+
+        {annotations.map(node => (
+          <NodeOverlay
+            key={node.id} node={node} scale={scale}
+            activeTool={activeTool} textProps={textProps}
+            onPropsChange={onTextPropsChange}
+            onUpdate={handleNodeUpdate}
+            onDelete={handleNodeDelete}
+            onRegisterBlur={fn => { activeNodeBlurRef.current = fn; }}
+          />
+        ))}
 
         {annotations.map(node => (
           <NodeOverlay
