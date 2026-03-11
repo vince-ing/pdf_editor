@@ -188,7 +188,8 @@ function TextPropertiesContent({ props, onChange, t }: { props: TextProps; onCha
           ))}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div style={{ position: 'relative', flexShrink: 0 }}
+            onMouseDown={e => e.preventDefault()}>
             <div style={{ width: 32, height: 32, borderRadius: t.radius.md, border: `1px solid ${t.colors.border}`, backgroundColor: props.color || 'transparent', cursor: 'pointer' }} />
             <input type="color" value={props.color || '#000000'} onChange={e => set('color', e.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
           </div>

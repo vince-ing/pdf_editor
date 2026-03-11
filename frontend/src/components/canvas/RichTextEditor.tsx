@@ -36,13 +36,37 @@ export function RichTextEditor({
   }, []);
 
   const pendingStyle = useRef<Partial<{ bold: boolean; italic: boolean; fontFamily: string; fontSize: number; color: string }>>({});
-  // Store selected span elements directly instead of a Range — Range objects
-  // detach when focus moves or DOM changes, but element refs survive.
-  const savedSpans = useRef<HTMLElement[]>([]);
-  const prevProps = useRef(textProps);
-  // True while a prop change from the panel is in-flight and hasn't been
-  // applied yet. Blocks reflectSelection from overwriting textProps.
+  const prevProps    = useRef(textProps);
   const propChangePending = useRef(false);
+
+  // The last non-collapsed selection the user made inside the editor.
+  // Saved eagerly on every mouseup/keyup so it's always available when
+  // a panel control fires and changes textProps — regardless of whether
+  // the editor still has focus or the browser cleared the selection.
+  const savedRange = useRef<Range | null>(null);
+
+  const applyChanges = useCallback((
+    changes: Partial<{ bold: boolean; italic: boolean; fontFamily: string; fontSize: number; color: string }>,
+  ) => {
+    if (!editorRef.current || !Object.keys(changes).length) return;
+
+    // Restore savedRange into the live selection so applyStyleToSelection can use it.
+    if (savedRange.current && !savedRange.current.collapsed) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(savedRange.current);
+    }
+
+    const sel = window.getSelection();
+    const hasSelection = sel && !sel.isCollapsed && sel.rangeCount > 0 &&
+      editorRef.current.contains(sel.anchorNode);
+
+    if (hasSelection) {
+      applyStyleToSelection(editorRef.current, changes, scale);
+    } else {
+      pendingStyle.current = { ...pendingStyle.current, ...changes };
+    }
+  }, [scale]);
 
   useEffect(() => {
     const p = textProps, pp = prevProps.current;
@@ -59,50 +83,10 @@ export function RichTextEditor({
       return;
     }
 
-    // Mark that a panel-driven change is being processed. This blocks
-    // reflectSelection from calling onPropsChange with stale span data
-    // (e.g. on keyup after a color change) until the change is resolved.
     propChangePending.current = true;
-
-    // Try live selection first, then fall back to saved span elements.
-    const sel = window.getSelection();
-    const liveNonCollapsed = sel && !sel.isCollapsed && sel.rangeCount > 0 &&
-      editorRef.current.contains(sel.anchorNode);
-
-    // Filter savedSpans to only those still in the DOM
-    const validSavedSpans = savedSpans.current.filter(s => editorRef.current!.contains(s));
-
-    const hasSelection = liveNonCollapsed || validSavedSpans.length > 0;
-
-    if (hasSelection) {
-      if (!liveNonCollapsed && validSavedSpans.length > 0) {
-        // Re-select the saved spans so applyStyleToSelection can find them
-        const r = document.createRange();
-        r.setStartBefore(validSavedSpans[0]);
-        r.setEndAfter(validSavedSpans[validSavedSpans.length - 1]);
-        sel?.removeAllRanges();
-        sel?.addRange(r);
-      }
-      applyStyleToSelection(editorRef.current, changes, scale);
-      // Refresh savedSpans from the new selection (spans may have been split/replaced)
-      const selAfter = window.getSelection();
-      if (selAfter && selAfter.rangeCount > 0 && !selAfter.isCollapsed) {
-        const r = selAfter.getRangeAt(0);
-        savedSpans.current = Array.from(
-          editorRef.current.querySelectorAll('[data-run]')
-        ).filter(el => r.intersectsNode(el)) as HTMLElement[];
-      } else {
-        savedSpans.current = [];
-      }
-    } else {
-      pendingStyle.current = { ...pendingStyle.current, ...changes };
-      // Clear the pending flag after a short delay — long enough to let the
-      // keyup that immediately follows a panel click pass without clobbering,
-      // but short enough not to block legitimate cursor moves.
-      setTimeout(() => { propChangePending.current = false; }, 100);
-    }
-    propChangePending.current = false;
-  }, [textProps, scale]);
+    applyChanges(changes);
+    setTimeout(() => { propChangePending.current = false; }, 50);
+  }, [textProps, scale, applyChanges]);
 
   const commit = useCallback(() => {
     if (!editorRef.current) return;
@@ -126,52 +110,34 @@ export function RichTextEditor({
     commit();
   }, [commit]);
 
-  const lastReflected = useRef<{ node: Node | null; offset: number, extentOffset: number }>({ node: null, offset: 0, extentOffset: 0 });
-
   const reflectSelection = useCallback(() => {
-    if (!onPropsChange || !editorRef.current) return;
+    if (!editorRef.current) return;
     if (document.activeElement !== editorRef.current) return;
-    // Don't overwrite textProps while a panel change is in-flight — reflectSelection
-    // firing on keyup would read the old span color and call onPropsChange with it,
-    // resetting prevProps and preventing the pending change from being detected.
     if (propChangePending.current) return;
+
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     if (!editorRef.current.contains(sel.anchorNode)) return;
 
-    if (
-      lastReflected.current.node === sel.anchorNode &&
-      lastReflected.current.offset === sel.anchorOffset &&
-      lastReflected.current.extentOffset === sel.focusOffset
-    ) {
-      return; 
-    }
-    
-    lastReflected.current = { node: sel.anchorNode, offset: sel.anchorOffset, extentOffset: sel.focusOffset };
-    pendingStyle.current = {};
-
-    // Save selected span elements (not a Range — Ranges detach on focus loss)
-    const range = sel.getRangeAt(0);
+    // Always persist the latest selection so panel controls can consume it.
     if (!sel.isCollapsed) {
-      savedSpans.current = Array.from(
-        editorRef.current.querySelectorAll('[data-run]')
-      ).filter(el => range.intersectsNode(el)) as HTMLElement[];
-    } else {
-      savedSpans.current = [];
+      savedRange.current = sel.getRangeAt(0).cloneRange();
     }
 
+    if (!onPropsChange) return;
+
+    const range = sel.getRangeAt(0);
     let spans: HTMLElement[] = [];
     if (sel.isCollapsed) {
       const anchor = sel.anchorNode?.parentElement?.closest('[data-run]') as HTMLElement | null;
       if (anchor) spans.push(anchor);
     } else {
-      spans = savedSpans.current.length > 0 ? savedSpans.current : (() => {
-        const fragment = range.cloneContents();
-        const s = Array.from(fragment.querySelectorAll('[data-run]')) as HTMLElement[];
+      spans = (Array.from(editorRef.current.querySelectorAll('[data-run]')) as HTMLElement[])
+        .filter(el => range.intersectsNode(el));
+      if (spans.length === 0) {
         const startAnchor = range.startContainer.parentElement?.closest('[data-run]') as HTMLElement | null;
-        if (startAnchor && !s.find(x => x.outerHTML === startAnchor.outerHTML)) s.unshift(startAnchor);
-        return s;
-      })();
+        if (startAnchor) spans.push(startAnchor);
+      }
     }
 
     if (spans.length === 0) return;
@@ -192,7 +158,7 @@ export function RichTextEditor({
     }
 
     onPropsChange({
-      fontFamily, fontSize: Number.isNaN(fontSize as number) ? '' : fontSize, color, isBold, isItalic
+      fontFamily, fontSize: Number.isNaN(fontSize as number) ? '' : fontSize, color, isBold, isItalic,
     });
   }, [onPropsChange]);
 
@@ -222,7 +188,7 @@ export function RichTextEditor({
       lineHeight:  '1.2',
       whiteSpace:  'pre-wrap',
     });
-    pendingStyle.current = {}; 
+    pendingStyle.current = {};
     return span;
   }, [scale]);
 
@@ -294,25 +260,53 @@ export function RichTextEditor({
 
         const tp = textPropsRef.current;
         const ps = pendingStyle.current;
-        const bold       = ps.bold       !== undefined ? ps.bold       : tp.isBold;
-        const italic     = ps.italic     !== undefined ? ps.italic     : tp.isItalic;
-        const fontFamily = ps.fontFamily ?? tp.fontFamily;
-        const fontSize   = ps.fontSize   ?? tp.fontSize;
-        const color      = ps.color      ?? tp.color;
+        const hasPending = Object.keys(ps).length > 0;
+
+        let inheritSpan: HTMLElement | null = null;
+
+        if (!hasPending) {
+          // First try immediate [data-run] siblings
+          let sib: Node | null = node.previousSibling;
+          while (sib) {
+            if ((sib as HTMLElement).dataset?.run) { inheritSpan = sib as HTMLElement; break; }
+            sib = sib.previousSibling;
+          }
+          if (!inheritSpan) {
+            sib = node.nextSibling;
+            while (sib) {
+              if ((sib as HTMLElement).dataset?.run) { inheritSpan = sib as HTMLElement; break; }
+              sib = sib.nextSibling;
+            }
+          }
+          // Fall back to the last span anywhere in the editor (e.g. first char on new line).
+          // This is always the span the user was just typing in.
+          if (!inheritSpan) {
+            const allSpans = Array.from(editor.querySelectorAll('[data-run]')) as HTMLElement[];
+            for (let i = allSpans.length - 1; i >= 0; i--) {
+              if (!allSpans[i].contains(node)) { inheritSpan = allSpans[i]; break; }
+            }
+          }
+        }
+
+        const bold       = ps.bold       !== undefined ? ps.bold       : inheritSpan ? inheritSpan.dataset.bold === 'true'       : tp.isBold;
+        const italic     = ps.italic     !== undefined ? ps.italic     : inheritSpan ? inheritSpan.dataset.italic === 'true'     : tp.isItalic;
+        const fontFamily = ps.fontFamily ?? (inheritSpan?.dataset.fontFamily ?? tp.fontFamily);
+        const fontSize   = ps.fontSize   ?? (inheritSpan ? parseFloat(inheritSpan.dataset.fontSize ?? String(tp.fontSize)) : tp.fontSize);
+        const color      = ps.color      ?? (inheritSpan?.dataset.color ?? tp.color);
         const cssFont    = FONT_TO_CSS[fontFamily] ?? 'Helvetica, Arial, sans-serif';
 
         const span = document.createElement('span');
         span.dataset.run        = '1';
         span.dataset.bold       = String(bold);
         span.dataset.italic     = String(italic);
-        span.dataset.fontFamily = fontFamily;
+        span.dataset.fontFamily = String(fontFamily);
         span.dataset.fontSize   = String(fontSize);
-        span.dataset.color      = color;
+        span.dataset.color      = String(color);
         Object.assign(span.style, {
           fontFamily: cssFont,
           fontWeight: bold   ? 'bold'   : 'normal',
           fontStyle:  italic ? 'italic' : 'normal',
-          fontSize:   `${fontSize * scale}px`,
+          fontSize:   `${(fontSize as number) * scale}px`,
           color,
           lineHeight: '1.2',
           whiteSpace: 'pre-wrap',
@@ -321,7 +315,7 @@ export function RichTextEditor({
         node.parentNode!.insertBefore(span, node);
         span.appendChild(node);
         if (node === cursorNode) wrapped = span;
-        pendingStyle.current = {};
+        if (hasPending) pendingStyle.current = {};
         return;
       }
 
