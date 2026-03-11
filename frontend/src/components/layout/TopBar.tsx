@@ -25,7 +25,7 @@ interface TopBarProps {
   onSettings?: () => void;
   menus?: MenuDef[];
   onToggleMobileSidebar?: () => void;
-  onToggleMobileRightPanel?: () => void; // Added trigger for mobile right panel
+  onToggleMobileRightPanel?: () => void;
 }
 
 // ── Kbd ───────────────────────────────────────────────────────────────────────
@@ -190,8 +190,9 @@ const Tab = ({ tab, isActive, onClick, onClose }: {
         color: isActive ? t.colors.textPrimary : t.colors.textSecondary,
         cursor: 'pointer', flexShrink: 0, maxWidth: '220px',
         transition: t.t.fast, userSelect: 'none',
-        // Pull down by exactly 1px to seamlessly mask the TopBar's bottom border
-        marginBottom: isActive ? '-1px' : '0',
+        // Instead of margin, we use a translation to drop the active tab exactly 1px 
+        // to mask the bottom border without triggering vertical scroll overflow
+        transform: isActive ? 'translateY(1px)' : 'none',
         zIndex: isActive ? 10 : 1,
         border: 'none',
       }}
@@ -283,8 +284,8 @@ export function TopBar({
             </TopBarBtn>
           </div>
 
-          {/* Hamburger / App Menu */}
-          <div ref={menuRef} className="hidden md:flex relative shrink-0 items-center">
+          {/* Hamburger / App Menu (Always visible now so it shows on mobile) */}
+          <div ref={menuRef} className="relative shrink-0 flex items-center">
             <TopBarBtn onClick={() => setMenuOpen(o => !o)} title="Menu" active={menuOpen} size={36}>
               <Menu size={18} />
             </TopBarBtn>
@@ -297,11 +298,12 @@ export function TopBar({
           
           <div className="hidden md:block w-px h-4 bg-inherit border-l mx-1" style={{ borderColor: t.colors.border }} />
 
-          {/* Undo / Redo */}
-          <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
-          <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
-          
-          <div className="w-px h-4 bg-inherit border-l mx-1" style={{ borderColor: t.colors.border }} />
+          {/* Undo / Redo - Hidden on mobile to save space, accessible via Edit tab */}
+          <div className="hidden sm:flex items-center gap-[2px]">
+             <TopBarBtn onClick={onUndo} title="Undo (Ctrl+Z)"><Undo2 size={16} /></TopBarBtn>
+             <TopBarBtn onClick={onRedo} title="Redo (Ctrl+Y)"><Redo2 size={16} /></TopBarBtn>
+             <div className="w-px h-4 bg-inherit border-l mx-1" style={{ borderColor: t.colors.border }} />
+          </div>
 
           {/* Save / Print */}
           <TopBarBtn onClick={onSave} title="Save (Ctrl+S)"><Save size={16} /></TopBarBtn>
@@ -330,8 +332,8 @@ export function TopBar({
         </div>
       </div>
 
-      {/* ── File tabs (Scrollable on mobile) ── */}
-      <div className="flex items-end gap-[2px] flex-1 min-w-0 overflow-x-auto scrollbar-hide md:pl-4 px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+      {/* ── File tabs (Scrollable on mobile without vertical scrollbar) ── */}
+      <div className="flex items-end gap-[2px] flex-1 min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide md:pl-4 px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
         {tabs.map(tab => (
           <Tab key={tab.id} tab={tab}
             isActive={tab.id === activeTabId}

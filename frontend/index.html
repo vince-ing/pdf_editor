@@ -6,7 +6,6 @@
     <title>PDF Editor Engine</title>
     <style>
       /* Reset basic body margins so the app takes up the full screen */
-      /* Add fixed positioning and touch-action none to prevent bounce/overscroll on mobile iOS/Android */
       html, body {
         margin: 0;
         padding: 0;
@@ -14,18 +13,29 @@
         height: 100%;
         position: fixed;
         overflow: hidden;
-        touch-action: none;
+        touch-action: none; /* Prevents rubber-banding and pull-to-refresh on mobile iOS/Android */
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
+      
       #root {
         width: 100%;
         height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      
+      /* Universally hide scrollbars while still allowing elements to scroll via swiping/trackpads */
+      ::-webkit-scrollbar {
+        display: none;
+      }
+      * {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
       }
     </style>
   </head>
   <body>
     <div id="root"></div>
-    
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

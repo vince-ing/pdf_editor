@@ -1556,7 +1556,7 @@
           "onSettings?: () => void",
           "menus?: MenuDef[]",
           "onToggleMobileSidebar?: () => void",
-          "onToggleMobileRightPanel?: () => void; // Added trigger for mobile right panel"
+          "onToggleMobileRightPanel?: () => void"
         ]
       },
       "functions": [
