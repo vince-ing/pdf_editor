@@ -1,3 +1,4 @@
+// frontend/src/core/tools/PanTool.ts
 import { BaseTool, InteractionContext } from './BaseTool';
 import { toolManager } from './ToolManager';
 
@@ -8,8 +9,8 @@ export class PanTool extends BaseTool {
   private lastY = 0;
 
   onPointerDown(context: InteractionContext) {
-    // Respond to Left click (0) or Middle click (1)
-    if (context.originalEvent.button !== 0 && context.originalEvent.button !== 1) return;
+    // Respond to Left click (0), Middle click (1), AND touch (usually mapped to 0)
+    // We remove the strict button check or expand it to ensure touch is accepted
     
     this.isDragging = true;
     this.lastX = context.originalEvent.clientX;

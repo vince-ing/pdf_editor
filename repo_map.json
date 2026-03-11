@@ -1326,11 +1326,12 @@
           "onDocumentChanged?: () => Promise<void>; onTextSelected?: (text: string) => void",
           "pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>",
           "canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>",
-          "pageMatchMap?: PageMatchMap"
+          "pageMatchMap?: PageMatchMap",
+          "onZoom?: (delta: number) => void; // Passed down to handle pinch"
         ]
       },
       "functions": [
-        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n}: CanvasProps)"
+        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n  onZoom\n}: CanvasProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\CopyToast.tsx": {
@@ -1344,7 +1345,8 @@
           "scale: number",
           "pageId: string",
           "cursor: string",
-          "onPointerDownCapture?: () => void"
+          "onPointerDownCapture?: () => void",
+          "onZoom?: (delta: number) => void; // New prop to handle zoom"
         ]
       }
     },
@@ -1402,7 +1404,7 @@
         ]
       },
       "functions": [
-        "PageRenderer({\n  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId,\n  highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,\n  searchMatches = [],\n}: PageRendererProps)"
+        "PageRenderer({\n  pageNode, pdfDoc, pageIndex, totalPages, scale, activeTool, textProps, sessionId,\n  highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,\n  searchMatches = [],\n  onZoom\n}: PageRendererProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\ResizeHandles.tsx": {

@@ -1,5 +1,4 @@
 // frontend/src/components/canvas/Canvas.tsx
-// Add touchAction: 'none' to the wrapper to prevent native browser gesture hijacking
 import React from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { DEFAULT_TEXT_PROPS, type TextProps } from '../../types/textProps';
@@ -19,6 +18,7 @@ export interface CanvasProps {
   canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
   // Search
   pageMatchMap?: PageMatchMap;
+  onZoom?: (delta: number) => void; // Passed down to handle pinch
 }
 
 export function Canvas({
@@ -27,25 +27,15 @@ export function Canvas({
   onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,
   canvasScrollRef,
   pageMatchMap = {},
+  onZoom
 }: CanvasProps) {
   const { theme: t } = useTheme();
 
   return (
     <div
       ref={canvasScrollRef}
-      style={{ 
-        flex: 1, 
-        backgroundColor: t.colors.bgHover, 
-        overflow: 'auto', 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
-        paddingTop: 32, 
-        paddingBottom: 32, 
-        paddingLeft: 16, 
-        paddingRight: 16,
-        touchAction: 'none' // Prevents native mobile pull-to-refresh & swipe-to-go-back
-      }}
+      className="overflow-auto" // Added explicit class for PanTool querySelector
+      style={{ flex: 1, backgroundColor: t.colors.bgHover, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 32, paddingBottom: 32, paddingLeft: 16, paddingRight: 16, touchAction: 'none' }}
     >
       {!documentState ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 20, userSelect: 'none' }}>
@@ -72,6 +62,7 @@ export function Canvas({
               onAnnotationAdded={onAnnotationAdded} onDocumentChanged={onDocumentChanged}
               onTextSelected={onTextSelected}
               searchMatches={pageMatchMap[page.id] ?? []}
+              onZoom={onZoom}
             />
           </div>
         ))

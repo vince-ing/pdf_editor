@@ -1,3 +1,6 @@
+// frontend/src/components/canvas/PageRenderer.tsx
+// (Add onZoom to props and pass to InteractionLayer)
+// ... Keep existing imports
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { engineApi } from '../../api/client';
@@ -44,8 +47,8 @@ export interface PageRendererProps {
   onDocumentChanged?: () => Promise<void>;
   onTextSelected?: (text: string) => void;
   containerRef?: React.Ref<HTMLDivElement>;
-  // Search
   searchMatches?: { rects: { x: number; y: number; width: number; height: number }[]; matchIndex: number; isCurrent: boolean }[];
+  onZoom?: (delta: number) => void; // New prop
 }
 
 export function PageRenderer({
@@ -53,6 +56,7 @@ export function PageRenderer({
   highlightColor, highlightOpacity, onTextPropsChange,
   onAnnotationAdded, onDocumentChanged, onTextSelected, containerRef,
   searchMatches = [],
+  onZoom
 }: PageRendererProps) {
   const clearSelRef = useRef<(() => void) | null>(null);
   const toastTimer  = useRef<ReturnType<typeof setTimeout>>();
@@ -202,6 +206,7 @@ export function PageRenderer({
           onPointerDownCapture={() => {
             if (activeNodeBlurRef.current) activeNodeBlurRef.current();
           }}
+          onZoom={onZoom}
         />
 
         {annotations.map(node => (
