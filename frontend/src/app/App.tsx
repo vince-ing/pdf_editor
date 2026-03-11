@@ -1,6 +1,4 @@
 // frontend/src/app/App.tsx
-// Add the new mobile state and wrap the sidebars in responsive containers
-// ... (keep existing imports)
 import React, { useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -44,7 +42,8 @@ function AppInner() {
   const activePageId = (editor.documentState?.children?.[editor.activePage] as { id?: string } | undefined)?.id ?? null;
 
   const [ocrSectionOpen, setOcrSectionOpen] = useState(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // New mobile state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false); // Track mobile right panel state separately
 
   const toolSection = TOOL_SECTION_MAP[editor.activeTool] ?? null;
   const prevToolSection = React.useRef(toolSection);
@@ -53,6 +52,13 @@ function AppInner() {
     if (ocrSectionOpen) setOcrSectionOpen(false);
   }
   const rightPanelSection = ocrSectionOpen ? 'page' : toolSection;
+
+  // Sync mobile right panel with tool selection
+  React.useEffect(() => {
+     if (toolSection && editor.rightPanelOpen) {
+        setMobileRightPanelOpen(true);
+     }
+  }, [toolSection, editor.rightPanelOpen]);
 
   const handleRunOcr = () => {
     if (!activePageId) return;
@@ -80,7 +86,7 @@ function AppInner() {
 
       <div className="flex-1 flex overflow-hidden min-h-0 relative">
         
-        {/* Mobile Backdrop Overlay */}
+        {/* Mobile Backdrop Overlay for Left Sidebar */}
         {mobileSidebarOpen && (
           <div 
             className="md:hidden absolute inset-0 z-[8999] bg-black/40 transition-opacity" 
@@ -157,12 +163,23 @@ function AppInner() {
               canvasScrollRef={editor.canvasScrollRef}
               pageMatchMap={editor.search.pageMatchMap}
             />
+            
+            {/* Mobile Backdrop Overlay for Right Panel */}
+            {mobileRightPanelOpen && (
+              <div 
+                className="md:hidden absolute inset-0 z-[8499] bg-black/40 transition-opacity" 
+                onClick={() => setMobileRightPanelOpen(false)}
+              />
+            )}
+
             {editor.rightPanelOpen && (
               <div 
-                className="absolute inset-y-0 right-0 z-[8500] md:relative md:z-0 shadow-2xl md:shadow-none"
+                className={`
+                   absolute inset-y-0 right-0 z-[8500] md:relative md:z-0 shadow-2xl md:shadow-none transform transition-transform duration-200 ease-in-out md:translate-x-0
+                   ${mobileRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
+                `}
                 style={{ backgroundColor: t.colors.bgBase }}
               >
-                {/* Make RightPanel responsive, sliding over canvas on mobile */}
                 <RightPanel
                   documentState={editor.documentState} 
                   activePage={editor.activePage} 
@@ -180,6 +197,7 @@ function AppInner() {
                   ocrError={ocr.error}
                   openSection={rightPanelSection}
                   onSectionChange={s => { if (s !== 'page') setOcrSectionOpen(false); }}
+                  onCloseMobile={() => setMobileRightPanelOpen(false)}
                 />
               </div>
             )}

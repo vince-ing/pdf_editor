@@ -1515,12 +1515,13 @@
           "sessionId?: string | null",
           "onDocumentChanged?: () => void",
           "onRunOcr?: () => void; isOcrProcessing?: boolean; ocrError?: string | null",
-          "openSection?: SectionId | null; onSectionChange?: (s: SectionId | null) => void"
+          "openSection?: SectionId | null; onSectionChange?: (s: SectionId | null) => void",
+          "onCloseMobile?: () => void; // Added explicitly to handle closing the panel on mobile"
         ]
       },
       "functions": [
         "TextPropertiesContent({ props, onChange, t }: { props: TextProps; onChange: (p: TextProps)",
-        "RightPanel({\n  documentState, activePage = 0, activeTool, textProps, onTextPropsChange,\n  highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,\n  onRunOcr, isOcrProcessing, ocrError,\n  openSection: controlledSection, onSectionChange,\n}: RightPanelProps)"
+        "RightPanel({\n  documentState, activePage = 0, activeTool, textProps, onTextPropsChange,\n  highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,\n  onRunOcr, isOcrProcessing, ocrError,\n  openSection: controlledSection, onSectionChange, onCloseMobile\n}: RightPanelProps)"
       ]
     },
     "frontend\\src\\components\\layout\\StatusBar.tsx": {

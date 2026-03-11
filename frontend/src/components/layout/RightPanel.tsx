@@ -1,5 +1,5 @@
 // components/layout/RightPanel.tsx
-import { ChevronDown, ChevronUp, MoreVertical, Sparkles, RotateCw, Crop, ScanText, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, MoreVertical, Sparkles, RotateCw, Crop, ScanText, Loader2, X } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react'
 import type { ToolId } from '../../constants/tools';
 import { DEFAULT_TEXT_PROPS, FONT_OPTIONS, type TextProps } from '../../types/textProps';
@@ -16,6 +16,7 @@ interface RightPanelProps {
   onDocumentChanged?: () => void;
   onRunOcr?: () => void; isOcrProcessing?: boolean; ocrError?: string | null;
   openSection?: SectionId | null; onSectionChange?: (s: SectionId | null) => void;
+  onCloseMobile?: () => void; // Added explicitly to handle closing the panel on mobile
 }
 
 type SectionId = 'text' | 'page' | 'appearance';
@@ -242,7 +243,7 @@ export function RightPanel({
   documentState, activePage = 0, activeTool, textProps, onTextPropsChange,
   highlightColor, highlightOpacity, onHighlightColorChange, onHighlightOpacityChange,
   onRunOcr, isOcrProcessing, ocrError,
-  openSection: controlledSection, onSectionChange,
+  openSection: controlledSection, onSectionChange, onCloseMobile
 }: RightPanelProps) {
   const { theme: t } = useTheme();
   const openSection = controlledSection ?? null;
@@ -260,7 +261,16 @@ export function RightPanel({
   const w = (pageProps as any)?.metadata?.width, h = (pageProps as any)?.metadata?.height;
 
   return (
-    <div id="text-props-panel" style={{ width: 256, backgroundColor: t.colors.bgRaised, borderLeft: `1px solid ${t.colors.bgBase}`, display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden', fontFamily: t.fonts.ui }}>
+    <div id="text-props-panel" className="w-64 flex flex-col shrink-0 overflow-hidden h-full" style={{ backgroundColor: t.colors.bgRaised, borderLeft: `1px solid ${t.colors.bgBase}`, fontFamily: t.fonts.ui }}>
+      
+      {/* Mobile Header with Close Button */}
+      <div className="md:hidden flex items-center justify-between p-3 border-b" style={{ borderColor: t.colors.bgBase }}>
+         <span style={{ fontSize: '11px', fontWeight: 600, color: t.colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Properties</span>
+         <button onClick={onCloseMobile} style={{ color: t.colors.textMuted, background: 'none', border: 'none', cursor: 'pointer' }}>
+            <X size={16} />
+         </button>
+      </div>
+
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         <Section title="Text Properties" isOpen={openSection === 'text'} onToggle={() => toggle('text')} t={t}>
           <TextPropertiesContent props={textProps} onChange={onTextPropsChange} t={t} />
