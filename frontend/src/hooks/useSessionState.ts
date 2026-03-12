@@ -40,9 +40,9 @@ export function useSessionState({
   const refreshDocumentState = useCallback(async () => {
     if (!activeTabId) return;
     try {
-      const data = await engineApi.getDocumentState(activeTabId);
-      if ((data as any)?.node_type === 'document') {
-        patchSession(activeTabId, { documentState: data as DocumentState });
+      const documentState = await engineApi.getDocumentState(activeTabId);
+      if (documentState) {
+        patchSession(activeTabId, { documentState });
       }
     } catch (e) {
       console.error('[useSessionState] refresh failed:', e);

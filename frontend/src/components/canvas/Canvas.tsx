@@ -3,6 +3,7 @@ import React from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { DEFAULT_TEXT_PROPS, type TextProps } from '../../types/textProps';
 import { PageRenderer } from './PageRenderer';
+import { PageErrorBoundary } from './PageErrorBoundary';
 import type { ToolId } from '../toolbar/Toolbar';
 import type { DocumentState } from './types';
 import { useTheme } from '../../theme';
@@ -16,9 +17,8 @@ export interface CanvasProps {
   onDocumentChanged?: () => Promise<void>; onTextSelected?: (text: string) => void;
   pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>;
   canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
-  // Search
   pageMatchMap?: PageMatchMap;
-  onZoom?: (delta: number) => void; // Passed down to handle pinch
+  onZoom?: (delta: number) => void;
 }
 
 export function Canvas({
@@ -27,15 +27,20 @@ export function Canvas({
   onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,
   canvasScrollRef,
   pageMatchMap = {},
-  onZoom
+  onZoom,
 }: CanvasProps) {
   const { theme: t } = useTheme();
 
   return (
     <div
       ref={canvasScrollRef}
-      className="overflow-auto" // Added explicit class for PanTool querySelector
-      style={{ flex: 1, backgroundColor: t.colors.bgHover, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 32, paddingBottom: 32, paddingLeft: 16, paddingRight: 16, touchAction: 'none' }}
+      className="overflow-auto"
+      style={{
+        flex: 1, backgroundColor: t.colors.bgHover,
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        paddingTop: 32, paddingBottom: 32, paddingLeft: 16, paddingRight: 16,
+        touchAction: 'none',
+      }}
     >
       {!documentState ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 20, userSelect: 'none' }}>
@@ -52,19 +57,31 @@ export function Canvas({
         </div>
       ) : (
         documentState.children?.map((page, i) => (
-          <div key={page.id} ref={el => { if (pageRefs) pageRefs.current[i] = el; }}>
-            <PageRenderer
-              pageNode={page} pdfDoc={pdfDoc!} pageIndex={i}
-              totalPages={documentState.children?.length ?? 1}
-              scale={scale} activeTool={activeTool} sessionId={sessionId}
-              textProps={textProps} highlightColor={highlightColor} highlightOpacity={highlightOpacity}
-              onTextPropsChange={onTextPropsChange}
-              onAnnotationAdded={onAnnotationAdded} onDocumentChanged={onDocumentChanged}
-              onTextSelected={onTextSelected}
-              searchMatches={pageMatchMap[page.id] ?? []}
-              onZoom={onZoom}
-            />
-          </div>
+          // key on the boundary so React resets error state when pages are
+          // reordered or deleted — the boundary for page N is tied to that
+          // page's identity, not its position in the list.
+          <PageErrorBoundary key={page.id} pageIndex={i}>
+            <div ref={el => { if (pageRefs) pageRefs.current[i] = el; }}>
+              <PageRenderer
+                pageNode={page}
+                pdfDoc={pdfDoc!}
+                pageIndex={i}
+                totalPages={documentState.children?.length ?? 1}
+                scale={scale}
+                activeTool={activeTool}
+                sessionId={sessionId}
+                textProps={textProps}
+                highlightColor={highlightColor}
+                highlightOpacity={highlightOpacity}
+                onTextPropsChange={onTextPropsChange}
+                onAnnotationAdded={onAnnotationAdded}
+                onDocumentChanged={onDocumentChanged}
+                onTextSelected={onTextSelected}
+                searchMatches={pageMatchMap[page.id] ?? []}
+                onZoom={onZoom}
+              />
+            </div>
+          </PageErrorBoundary>
         ))
       )}
     </div>

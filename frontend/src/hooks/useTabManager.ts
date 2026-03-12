@@ -2,7 +2,6 @@
 import { useState, useCallback, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { engineApi } from '../api/client';
-import { normalizeDocumentState } from '../api/normalize';
 import type { FileTab } from '../components/layout/TopBar';
 import type { DocumentState } from '../components/canvas/types';
 
@@ -49,12 +48,13 @@ export function useTabManager(
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
 
       await engineApi.uploadDocument(file, sessionId);
-      const raw = await engineApi.getDocumentState(sessionId);
+      // getDocumentState already normalizes — returns DocumentState | null
+      const documentState = await engineApi.getDocumentState(sessionId);
 
       const session: TabSession = {
         sessionId,
         pdfDoc:        pdf,
-        documentState: raw?.node_type === 'document' ? normalizeDocumentState(raw) : null,
+        documentState: documentState ?? null,
         activePage:    0,
         scale:         1.0,
       };
