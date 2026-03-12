@@ -1225,29 +1225,29 @@
     "frontend\\src\\api\\client.ts": {
       "api_calls": [
         {
-          "fn": "closeSession",
-          "signature": "closeSession(sessionId: string)",
+          "fn": "close",
+          "signature": "close(sessionId: string)",
           "method": "DELETE",
           "url": "${API_BASE}/session",
           "payload": null
         },
         {
-          "fn": "uploadDocument",
-          "signature": "uploadDocument(file: File, sessionId: string)",
+          "fn": "upload",
+          "signature": "upload(file: File, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/document/upload",
           "payload": "{ headers: { 'Content-Type': 'multipart/form-data', 'X-Session-Id': sessionId }, }"
         },
         {
-          "fn": "getDocumentState",
-          "signature": "getDocumentState(sessionId: string)",
+          "fn": "getState",
+          "signature": "getState(sessionId: string)",
           "method": "GET",
           "url": "${API_BASE}/document",
           "payload": null
         },
         {
-          "fn": "exportDocument",
-          "signature": "exportDocument(outputPath: string, sessionId: string)",
+          "fn": "export",
+          "signature": "export(outputPath: string, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/document/export",
           "payload": "{ output_path: outputPath }"
@@ -1267,29 +1267,29 @@
           "payload": "{}"
         },
         {
-          "fn": "rotatePage",
-          "signature": "rotatePage(pageId: string, sessionId: string, degrees = 90)",
+          "fn": "rotate",
+          "signature": "rotate(pageId: string, sessionId: string, degrees = 90)",
           "method": "POST",
           "url": "${API_BASE}/pages/${pageId}/rotate",
           "payload": "{ degrees }"
         },
         {
-          "fn": "deletePage",
-          "signature": "deletePage(pageId: string, sessionId: string)",
+          "fn": "delete",
+          "signature": "delete(pageId: string, sessionId: string)",
           "method": "DELETE",
           "url": "${API_BASE}/pages/${pageId}",
           "payload": null
         },
         {
-          "fn": "movePage",
-          "signature": "movePage(pageId: string, newIndex: number, sessionId: string)",
+          "fn": "move",
+          "signature": "move(pageId: string, newIndex: number, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/pages/${pageId}/move",
           "payload": "{ new_index: newIndex }"
         },
         {
-          "fn": "cropPage",
-          "signature": "cropPage(pageId: string, x: number, y: number, width: number, height: number, sessionId: string)",
+          "fn": "crop",
+          "signature": "crop(pageId: string, x: number, y: number, width: number, height: number, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/pages/${pageId}/crop",
           "payload": "{ x, y, width, height }"
@@ -1302,36 +1302,36 @@
           "payload": null
         },
         {
-          "fn": "getPageChars",
-          "signature": "getPageChars(pageId: string, sessionId: string)",
+          "fn": "getChars",
+          "signature": "getChars(pageId: string, sessionId: string)",
           "method": "GET",
           "url": "${API_BASE}/pages/${pageId}/chars",
           "payload": null
         },
         {
-          "fn": "deleteAnnotation",
-          "signature": "deleteAnnotation(nodeId: string, pageId: string, sessionId: string)",
+          "fn": "delete",
+          "signature": "delete(nodeId: string, pageId: string, sessionId: string)",
           "method": "DELETE",
           "url": "${API_BASE}/annotations/${nodeId}",
           "payload": null
         },
         {
           "fn": "addHighlight",
-          "signature": "addHighlight(pageId: string, rects: { x: number; y: number; width: number; height: number }[], color: string, opacity: number, sessionId: string)",
+          "signature": "addHighlight(pageId:    string, rects:     { x: number; y: number; width: number; height: number }[], color:     string, opacity:   number, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/annotations/highlight",
           "payload": "{ page_id: pageId, rects, color, opacity, }"
         },
         {
-          "fn": "addPathAnnotation",
-          "signature": "addPathAnnotation(pageId: string, points: { x: number; y: number }[], color: string, thickness: number, opacity: number, sessionId: string)",
+          "fn": "addPath",
+          "signature": "addPath(pageId:    string, points:    { x: number; y: number }[], color:     string, thickness: number, opacity:   number, sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/annotations/path",
           "payload": "{ page_id: pageId, points, color, thickness, opacity, }"
         },
         {
           "fn": "applyRedaction",
-          "signature": "applyRedaction(pageId: string, rects: { x: number; y: number; width: number; height: number }[], sessionId: string)",
+          "signature": "applyRedaction(pageId:    string, rects:     { x: number; y: number; width: number; height: number }[], sessionId: string)",
           "method": "POST",
           "url": "${API_BASE}/plugins/redact/apply",
           "payload": null
@@ -1344,15 +1344,15 @@
           "payload": "{ page_id: pageId, language }"
         },
         {
-          "fn": "ttsPlay",
-          "signature": "ttsPlay(text: string, speed = 1.0)",
+          "fn": "play",
+          "signature": "play(text: string, speed = 1.0)",
           "method": "POST",
           "url": "${API_BASE}/plugins/tts/play",
           "payload": "{ text, speed }"
         },
         {
-          "fn": "ttsStop",
-          "signature": "ttsStop()",
+          "fn": "stop",
+          "signature": "stop()",
           "method": "POST",
           "url": "${API_BASE}/plugins/tts/stop",
           "payload": null
@@ -1360,11 +1360,57 @@
       ]
     },
     "frontend\\src\\api\\normalize.ts": {
+      "interfaces": {
+        "RawRun": [
+          "text?:        unknown",
+          "bold?:        unknown",
+          "italic?:      unknown",
+          "fontFamily?:  unknown",
+          "font_family?: unknown",
+          "fontSize?:    unknown",
+          "font_size?:   unknown",
+          "color?:       unknown"
+        ],
+        "RawAnnotation": [
+          "id?:           unknown",
+          "node_type?:    unknown",
+          "bbox?:         unknown",
+          "color?:        unknown",
+          "opacity?:      unknown",
+          "text_content?: unknown",
+          "font_size?:    unknown",
+          "fontSize?:     unknown",
+          "font_family?:  unknown",
+          "fontFamily?:   unknown",
+          "bold?:         unknown",
+          "italic?:       unknown",
+          "runs?:         unknown",
+          "points?:       unknown",
+          "thickness?:    unknown"
+        ],
+        "RawPage": [
+          "id?:          unknown",
+          "page_number?: unknown",
+          "rotation?:    unknown",
+          "metadata?:    unknown",
+          "crop_box?:    unknown",
+          "children?:    unknown"
+        ],
+        "RawDocument": [
+          "node_type?: unknown",
+          "file_name?: unknown",
+          "file_size?: unknown",
+          "children?:  unknown"
+        ]
+      },
       "functions": [
-        "normalizeRun(r: any)",
-        "normalizeAnnotation(raw: any)",
-        "normalizePage(raw: any)",
-        "normalizeDocumentState(raw: any)"
+        "asString(v: unknown, fallback: string)",
+        "asNumber(v: unknown, fallback: number)",
+        "asBool(v: unknown, fallback: boolean)",
+        "normalizeRun(r: RawRun)",
+        "normalizeAnnotation(raw: RawAnnotation)",
+        "normalizePage(raw: RawPage)",
+        "normalizeDocumentState(raw: RawDocument)"
       ]
     },
     "frontend\\src\\app\\App.tsx": {
@@ -1392,7 +1438,14 @@
       ]
     },
     "frontend\\src\\components\\canvas\\CopyToast.tsx": {
+      "interfaces": {
+        "ToastContextValue": [
+          "showCopyToast: () => void"
+        ]
+      },
       "functions": [
+        "useToast()",
+        "ToastProvider({ children }: { children: React.ReactNode })",
         "CopyToast({ visible }: { visible: boolean })"
       ]
     },
@@ -1560,7 +1613,6 @@
           "totalPages:  number",
           "sessionId:   string",
           "busy:        boolean",
-          "showToast:   boolean",
           "cropActive:  boolean; // hide controls while crop rect is active",
           "setLocalRotation: (r: number | ((prev: number) => number)) => void",
           "onDocumentChanged?: () => Promise<void>",
@@ -1569,7 +1621,7 @@
         ]
       },
       "functions": [
-        "PageChrome({\n  pageId, pageIndex, totalPages, sessionId,\n  busy, showToast, cropActive,\n  setLocalRotation, onDocumentChanged, withBusy,\n  children,\n}: PageChromeProps)"
+        "PageChrome({\n  pageId, pageIndex, totalPages, sessionId,\n  busy, cropActive,\n  setLocalRotation, onDocumentChanged, withBusy,\n  children,\n}: PageChromeProps)"
       ]
     },
     "frontend\\src\\components\\canvas\\PageRenderer\\SearchLayer.tsx": {
@@ -1919,9 +1971,14 @@
           "id: ToolId",
           "icon: LucideIcon",
           "label: string",
-          "category: ToolCategory"
+          "category: ToolCategory",
+          "/** Which right-panel section this tool should open, if any. */",
+          "panelSection?: PanelSection"
         ]
-      }
+      },
+      "functions": [
+        "getPanelSection(toolId: ToolId)"
+      ]
     },
     "frontend\\src\\core\\tools\\BaseTool.ts": {
       "interfaces": {
@@ -1991,6 +2048,18 @@
         "committedRects",
         "clearSelection",
         "setCommittedRects"
+      ]
+    },
+    "frontend\\src\\hooks\\useDrawToolRegistration.ts": {
+      "interfaces": {
+        "UseDrawToolRegistrationArgs": [
+          "activeTabId:          string | null",
+          "highlightColor:       string",
+          "refreshDocumentState: () => Promise<void>"
+        ]
+      },
+      "functions": [
+        "useDrawToolRegistration({\n  activeTabId,\n  highlightColor,\n  refreshDocumentState,\n}: UseDrawToolRegistrationArgs)"
       ]
     },
     "frontend\\src\\hooks\\useEditorState.ts": {
@@ -2075,6 +2144,12 @@
     },
     "frontend\\src\\hooks\\usePageActions.ts": {
       "interfaces": {
+        "ActionRect": [
+          "x: number",
+          "y: number",
+          "width: number",
+          "height: number"
+        ],
         "UsePageActionsProps": [
           "pageNode: PageNode",
           "pageChars: any[]",

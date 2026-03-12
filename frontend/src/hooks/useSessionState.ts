@@ -30,8 +30,6 @@ export function useSessionState({
 
   const setScale = useCallback((updater: number | ((prev: number) => number)) => {
     if (!activeTabId) return;
-    // Read the current scale from the session to avoid stale closure
-    // patchSession uses functional setState internally so this is safe
     const cur = activeSession?.scale ?? 1.0;
     const next = typeof updater === 'function' ? updater(cur) : updater;
     patchSession(activeTabId, { scale: next });
@@ -49,7 +47,14 @@ export function useSessionState({
     }
   }, [activeTabId, patchSession]);
 
-  // IntersectionObserver — update activePage as user scrolls
+  // IntersectionObserver — update activePage as user scrolls.
+  //
+  // We depend on `documentState?.children` (the page list) rather than just
+  // `pdfDoc` so that the observers are rebuilt whenever pages are added,
+  // removed or reordered. Without this, the observer set would reference
+  // stale DOM nodes (or miss new pages) after any page-level mutation.
+  const pageCount = documentState?.children?.length ?? 0;
+
   useEffect(() => {
     if (!documentState || !activeTabId) return;
     const observers: IntersectionObserver[] = [];
@@ -65,8 +70,11 @@ export function useSessionState({
     });
 
     return () => observers.forEach(o => o.disconnect());
-  }, [pdfDoc, activeTabId, patchSession]);
-  // Note: pdfDoc in deps intentionally triggers re-observation when a new doc loads
+
+  // pageCount drives re-observation after page add/remove/reorder.
+  // pdfDoc still triggers re-observation when a new document loads.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfDoc, activeTabId, pageCount, patchSession]);
 
   return {
     documentState, pdfDoc, activePage, scale,

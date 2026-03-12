@@ -25,6 +25,10 @@ export const usePageChars = ({ pageNodeId, localRotation, sessionId, metadata }:
         let alive = true;
         if (!pageNodeId) return;
 
+        // Clear immediately when the page changes so stale chars from a
+        // previous page never bleed through while the new fetch is in-flight.
+        setRawChars([]);
+
         engineApi.getPageChars(pageNodeId, sessionId)
             .then(chars => {
                 if (!alive) return;
@@ -32,8 +36,12 @@ export const usePageChars = ({ pageNodeId, localRotation, sessionId, metadata }:
             })
             .catch(err => console.error('[usePageChars] fetch error:', err));
             
-        return () => { alive = false; };
-    }, [pageNodeId]);
+        return () => {
+            alive = false;
+            // Clear on unmount so a remounted page never sees stale state.
+            setRawChars([]);
+        };
+    }, [pageNodeId, sessionId]);
 
     useEffect(() => {
         if (!rawChars.length) { 

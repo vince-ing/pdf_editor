@@ -1,10 +1,10 @@
 // frontend/src/components/canvas/PageRenderer/PageChrome.tsx
-// UI chrome: PageControls, busy overlay, CopyToast.
-// Owns only hover/showCtrl state (purely cosmetic).
+// UI chrome: PageControls and busy overlay.
+// CopyToast is now app-level (see ToastProvider in CopyToast.tsx) so it
+// can't stack across pages.
 
 import React, { useState } from 'react';
 import { PageControls } from '../PageControls';
-import { CopyToast } from '../CopyToast';
 
 interface PageChromeProps {
   pageId:      string;
@@ -12,7 +12,6 @@ interface PageChromeProps {
   totalPages:  number;
   sessionId:   string;
   busy:        boolean;
-  showToast:   boolean;
   cropActive:  boolean; // hide controls while crop rect is active
   setLocalRotation: (r: number | ((prev: number) => number)) => void;
   onDocumentChanged?: () => Promise<void>;
@@ -22,7 +21,7 @@ interface PageChromeProps {
 
 export function PageChrome({
   pageId, pageIndex, totalPages, sessionId,
-  busy, showToast, cropActive,
+  busy, cropActive,
   setLocalRotation, onDocumentChanged, withBusy,
   children,
 }: PageChromeProps) {
@@ -56,8 +55,6 @@ export function PageChrome({
           </div>
         </div>
       )}
-
-      <CopyToast visible={showToast} />
     </div>
   );
 }

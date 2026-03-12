@@ -1,8 +1,16 @@
+// frontend/src/hooks/usePageActions.ts
 import { useCallback } from 'react';
 import { engineApi } from '../api/client';
 import type { TextRun, TextProps } from '../types/textProps';
 import type { AnnotationNode, PageNode } from '../components/canvas/types';
 import type { ToolId } from '../components/toolbar/Toolbar';
+
+export interface ActionRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 interface UsePageActionsProps {
   pageNode: PageNode;
@@ -47,28 +55,51 @@ export function usePageActions({
     } catch (err) { console.error('Failed to update node:', err); }
   }, [pageNode.id, sessionId, setAnnotations]);
 
-  const handleAction = useCallback(async (rects: { x: number; y: number; width: number; height: number }[]) => {
+  // onAction signature now matches what useDragSelection actually passes:
+  // the color and opacity parameters are accepted explicitly instead of
+  // being silently ignored while claiming to be in the type signature.
+  const handleAction = useCallback(async (
+    rects: ActionRect[],
+    color?: string,
+    opacity?: number,
+  ) => {
     if (activeTool === 'crop') return;
+
     if (activeTool === 'select') {
       const tol = 4;
       const sel = pageChars
-        .filter(c => { const cx = c.x + c.width / 2, cy = c.y + c.height / 2; return rects.some(r => cx >= r.x - tol && cx <= r.x + r.width + tol && cy >= r.y - tol && cy <= r.y + r.height + tol); })
+        .filter(c => {
+          const cx = c.x + c.width / 2, cy = c.y + c.height / 2;
+          return rects.some(r =>
+            cx >= r.x - tol && cx <= r.x + r.width  + tol &&
+            cy >= r.y - tol && cy <= r.y + r.height + tol,
+          );
+        })
         .sort((a, b) => Math.abs(a.y - b.y) > 5 ? a.y - b.y : a.x - b.x);
+
       if (!sel.length) return;
       let text = sel[0].text;
       for (let i = 1; i < sel.length; i++) {
         const p = sel[i - 1], c = sel[i];
         const avgH = (p.height + c.height) / 2;
-        text += Math.abs((p.y + p.height / 2) - (c.y + c.height / 2)) > avgH * 0.75 ? '\n' + c.text : (c.x - (p.x + p.width) > p.width * 0.4 ? ' ' : '') + c.text;
+        text += Math.abs((p.y + p.height / 2) - (c.y + c.height / 2)) > avgH * 0.75
+          ? '\n' + c.text
+          : (c.x - (p.x + p.width) > p.width * 0.4 ? ' ' : '') + c.text;
       }
       try { await navigator.clipboard.writeText(text); toast(); onTextSelected?.(text); }
       catch { window.prompt('Copy (Ctrl+C):', text); onTextSelected?.(text); }
       return;
     }
+
+    // Use the passed-through color/opacity for highlights, falling back to
+    // the props values only if the caller didn't supply them.
+    const resolvedColor   = color   ?? highlightColor;
+    const resolvedOpacity = opacity ?? highlightOpacity;
+
     try {
       if (activeTool === 'highlight') {
         const res = await engineApi.addHighlight(
-          pageNode.id, rects, highlightColor, highlightOpacity, sessionId,
+          pageNode.id, rects, resolvedColor, resolvedOpacity, sessionId,
         );
         const nodes = res?.nodes ?? (res?.node ? [res.node] : []);
         if (nodes.length) { setAnnotations(p => [...p, ...nodes]); onAnnotationAdded?.(); }
@@ -79,7 +110,11 @@ export function usePageActions({
       }
       clearSelRef.current?.();
     } catch (e) { console.error(e); }
-  }, [activeTool, pageNode.id, sessionId, pageChars, highlightColor, highlightOpacity, toast, onAnnotationAdded, onTextSelected, setAnnotations, clearSelRef]);
+  }, [
+    activeTool, pageNode.id, sessionId, pageChars,
+    highlightColor, highlightOpacity,
+    toast, onAnnotationAdded, onTextSelected, setAnnotations, clearSelRef,
+  ]);
 
   const handleTextCommit = useCallback(async (runs: TextRun[], plain: string, x: number, y: number, w: number, h: number) => {
     setTransientPos(null);

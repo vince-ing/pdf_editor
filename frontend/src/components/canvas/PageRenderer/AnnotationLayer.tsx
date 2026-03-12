@@ -1,7 +1,7 @@
 // frontend/src/components/canvas/PageRenderer/AnnotationLayer.tsx
 // Renders persisted annotation overlays and the in-progress transient text box.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { NodeOverlay } from '../NodeOverlay';
 import { TransientTextBox } from '../TransientTextBox';
 import { textTool } from '../../../core/tools/TextTool';
@@ -34,10 +34,17 @@ export function AnnotationLayer({
     x: number; y: number; w?: number; h?: number; isDrawing?: boolean;
   } | null>(null);
 
-  // Register clear function so parent (via usePageActions) can dismiss transient box
+  // Stable callback ref so the parent's ref assignment never triggers
+  // a re-render loop regardless of how often onRegisterClearTransient changes.
+  const clearTransient = useCallback(() => setTransientPos(null), []);
+  const onRegisterClearTransientRef = useRef(onRegisterClearTransient);
+  useEffect(() => { onRegisterClearTransientRef.current = onRegisterClearTransient; }, [onRegisterClearTransient]);
+
+  // Register clear function exactly once (or when the stable callback
+  // identity changes — which should be never in practice).
   useEffect(() => {
-    onRegisterClearTransient(() => setTransientPos(null));
-  }, [onRegisterClearTransient]);
+    onRegisterClearTransientRef.current(clearTransient);
+  }, [clearTransient]);
 
   // Subscribe to TextTool position events for this page only
   useEffect(() => {

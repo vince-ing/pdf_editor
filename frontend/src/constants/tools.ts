@@ -19,6 +19,11 @@ export type ToolId =
 
 export type ToolCategory = 'view' | 'edit' | 'comment' | 'pages';
 
+// ── Right-panel section opened by the tool ────────────────────────────────────
+// Colocated here so adding a new tool only requires editing this file.
+
+export type PanelSection = 'text' | 'page' | 'appearance';
+
 // ── Tool definition ───────────────────────────────────────────────────────────
 
 export interface ToolDef {
@@ -26,6 +31,8 @@ export interface ToolDef {
   icon: LucideIcon;
   label: string;
   category: ToolCategory;
+  /** Which right-panel section this tool should open, if any. */
+  panelSection?: PanelSection;
 }
 
 // ── All tools ─────────────────────────────────────────────────────────────────
@@ -34,22 +41,31 @@ export const TOOL_DEFS: ToolDef[] = [
   { id: 'hand',       icon: Hand,          label: 'Hand',        category: 'view'    },
   { id: 'select',     icon: MousePointer2, label: 'Select',      category: 'view'    },
   { id: 'zoom',       icon: ZoomIn,        label: 'Zoom',        category: 'view'    },
-  { id: 'addtext',    icon: Type,          label: 'Add Text',    category: 'edit'    },
-  { id: 'edittext',   icon: FileText,      label: 'Edit Text',   category: 'edit'    },
+  { id: 'addtext',    icon: Type,          label: 'Add Text',    category: 'edit',    panelSection: 'text'       },
+  { id: 'edittext',   icon: FileText,      label: 'Edit Text',   category: 'edit',    panelSection: 'text'       },
   { id: 'addimage',   icon: Image,         label: 'Add Image',   category: 'edit'    },
   { id: 'link',       icon: Link2,         label: 'Link',        category: 'edit'    },
-  { id: 'highlight',  icon: Highlighter,   label: 'Highlight',   category: 'comment' },
-  { id: 'underline',  icon: Underline,     label: 'Underline',   category: 'comment' },
-  { id: 'stickynote', icon: StickyNote,    label: 'Sticky Note', category: 'comment' },
-  { id: 'stamp',      icon: Stamp,         label: 'Stamp',       category: 'comment' },
-  { id: 'redact',     icon: FileDown,      label: 'Redact',      category: 'comment' },
-  { id: 'draw',       icon: PenTool,       label: 'Draw',        category: 'comment' },
-  { id: 'insert',     icon: FilePlus,      label: 'Insert',      category: 'pages'   },
-  { id: 'delete',     icon: Trash2,        label: 'Delete',      category: 'pages'   },
-  { id: 'rotate',     icon: RotateCw,      label: 'Rotate',      category: 'pages'   },
-  { id: 'extract',    icon: FileDown,      label: 'Extract',     category: 'pages'   },
-  { id: 'crop',       icon: Crop,          label: 'Crop',        category: 'pages'   },
+  { id: 'highlight',  icon: Highlighter,   label: 'Highlight',   category: 'comment', panelSection: 'appearance' },
+  { id: 'underline',  icon: Underline,     label: 'Underline',   category: 'comment', panelSection: 'appearance' },
+  { id: 'stickynote', icon: StickyNote,    label: 'Sticky Note', category: 'comment', panelSection: 'appearance' },
+  { id: 'stamp',      icon: Stamp,         label: 'Stamp',       category: 'comment', panelSection: 'appearance' },
+  { id: 'redact',     icon: FileDown,      label: 'Redact',      category: 'comment', panelSection: 'appearance' },
+  { id: 'draw',       icon: PenTool,       label: 'Draw',        category: 'comment', panelSection: 'appearance' },
+  { id: 'insert',     icon: FilePlus,      label: 'Insert',      category: 'pages',   panelSection: 'page'       },
+  { id: 'delete',     icon: Trash2,        label: 'Delete',      category: 'pages',   panelSection: 'page'       },
+  { id: 'rotate',     icon: RotateCw,      label: 'Rotate',      category: 'pages',   panelSection: 'page'       },
+  { id: 'extract',    icon: FileDown,      label: 'Extract',     category: 'pages',   panelSection: 'page'       },
+  { id: 'crop',       icon: Crop,          label: 'Crop',        category: 'pages',   panelSection: 'page'       },
 ];
+
+// ── Convenience lookup ────────────────────────────────────────────────────────
+
+export const TOOL_BY_ID = Object.fromEntries(TOOL_DEFS.map(t => [t.id, t])) as Record<ToolId, ToolDef>;
+
+/** Returns the right-panel section for a given tool, or null if none. */
+export function getPanelSection(toolId: ToolId): PanelSection | null {
+  return TOOL_BY_ID[toolId]?.panelSection ?? null;
+}
 
 // ── Cursor per tool ───────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
 // Owns only state that doesn't belong to any single sub-hook:
 //   activeTool, sidebar/panel UI prefs, textProps, highlight color/opacity.
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { buildMenuDefs } from '../constants/menuDefs';
 import { DEFAULT_TEXT_PROPS, type TextProps } from '../types/textProps';
 import { toolManager } from '../core/tools/ToolManager';
@@ -86,7 +86,9 @@ export function useEditorState() {
   });
 
   // ── Menus ──────────────────────────────────────────────────────────────────
-  const menus = buildMenuDefs({
+  // buildMenuDefs creates new arrays every call, so memoize against its
+  // inputs to avoid unnecessary re-renders of TopBar on every keystroke.
+  const menus = useMemo(() => buildMenuDefs({
     openFileDialog:      tabManager.openFileDialog,
     handleExportPdf:     actions.handleExportPdf,
     handleUndo:          actions.handleUndo,
@@ -100,7 +102,19 @@ export function useEditorState() {
     documentState:       session.documentState,
     themeId, setTheme,
     openSearch:          search.open,
-  });
+  }), [
+    tabManager.openFileDialog,
+    actions.handleExportPdf,
+    actions.handleUndo,
+    actions.handleRedo,
+    actions.handleReadPage,
+    actions.handleReadSelection,
+    actions.ttsStop,
+    zoomIn, zoomOut, zoomReset,
+    session.documentState,
+    themeId, setTheme,
+    search.open,
+  ]);
 
   const pageCount = session.documentState?.children?.length ?? 0;
 

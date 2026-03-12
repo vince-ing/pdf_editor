@@ -3,7 +3,8 @@
 // Thin orchestrator. Responsibilities:
 //   - Calls hooks (usePdfCanvas, usePageChars, usePageActions, useDragSelection)
 //   - Computes crop box layout (outerW/H, innerX/Y)
-//   - Owns localRotation, busy, showToast (cross-cutting state)
+//   - Owns localRotation, busy (cross-cutting state)
+//   - Delegates copy-toast to the app-level ToastProvider via useToast()
 //   - Composes sub-components; passes them only what they need
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
@@ -14,6 +15,7 @@ import { usePageChars }    from '../../../hooks/usePageChars';
 import { usePageActions }  from '../../../hooks/usePageActions';
 import { useDragSelection } from '../../../hooks/useDragSelection';
 import { textTool }        from '../../../core/tools/TextTool';
+import { useToast }        from '../CopyToast';
 
 import { PageCanvas }      from './PageCanvas';
 import { SearchLayer }     from './SearchLayer';
@@ -60,12 +62,13 @@ export function PageRenderer({
   const activeNodeBlurRef      = useRef<(() => void) | null>(null);
   const clearTransientPosRef   = useRef<(() => void) | null>(null);
   const busyRef                = useRef(false);
-  const toastTimer             = useRef<ReturnType<typeof setTimeout>>();
 
   const [annotations,   setAnnotations]  = useState<AnnotationNode[]>(pageNode.children ?? []);
   const [localRotation, setLocalRotation] = useState(pageNode.rotation ?? 0);
   const [busy,          setBusy]          = useState(false);
-  const [showToast,     setShowToast]     = useState(false);
+
+  // App-level singleton toast — no more per-page fixed overlays that can stack
+  const { showCopyToast } = useToast();
 
   useEffect(() => { setAnnotations(pageNode.children ?? []); }, [pageNode.children]);
   useEffect(() => {
@@ -87,18 +90,13 @@ export function PageRenderer({
     try { await fn(); } finally { busyRef.current = false; setBusy(false); }
   }, []);
 
-  const toast = useCallback(() => {
-    setShowToast(true);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setShowToast(false), 2000);
-  }, []);
-
   const { handleNodeUpdate, handleAction, handleTextCommit, handleNodeDelete } = usePageActions({
     pageNode, pageChars, activeTool, textProps, sessionId,
     setAnnotations,
     setTransientPos: (v) => { if (v === null) clearTransientPosRef.current?.(); },
     highlightColor, highlightOpacity,
-    onAnnotationAdded, onTextSelected, clearSelRef, toast,
+    onAnnotationAdded, onTextSelected, clearSelRef,
+    toast: showCopyToast,
     textToolNotifyCommitted: () => textTool.notifyCommitted(),
   });
 
@@ -128,7 +126,6 @@ export function PageRenderer({
       totalPages={totalPages}
       sessionId={sessionId}
       busy={busy}
-      showToast={showToast}
       cropActive={!!cropRect}
       setLocalRotation={setLocalRotation}
       onDocumentChanged={onDocumentChanged}

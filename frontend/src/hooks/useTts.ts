@@ -2,7 +2,11 @@
 import { useState, useRef, useCallback } from 'react';
 import { engineApi } from '../api/client';
 
-const API = 'http://localhost:8000/api/plugins/tts';
+// Re-use the same base URL logic as client.ts so production builds don't break.
+const isProduction = window.location.hostname.includes('vercel.app');
+const API_BASE = isProduction
+  ? 'https://vince-ing-pdf-editor-backend.hf.space/api'
+  : 'http://localhost:8000/api';
 
 export interface TtsProgress {
     done: number;
@@ -79,7 +83,8 @@ export const useTts = () => {
 
     const pauseResume = useCallback(async () => {
         try {
-            const res = await fetch(`${API}/pause`, { method: 'POST' });
+            // Use the shared API_BASE so this works in production too.
+            const res = await fetch(`${API_BASE}/plugins/tts/pause`, { method: 'POST' });
             const data = await res.json();
             setIsPaused(data.paused);
         } catch (err) {

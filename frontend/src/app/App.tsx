@@ -14,6 +14,7 @@ import { Canvas }      from '../components/canvas/Canvas';
 import { useEditorState } from '../hooks/useEditorState';
 import { useOcr } from '../hooks/useOcr';
 import { ThemeProvider, useTheme } from '../theme';
+import { ToastProvider } from '../components/canvas/CopyToast';
 import { toolManager } from '../core/tools/ToolManager';
 import { DrawTool } from '../core/tools/DrawTool';
 
@@ -22,15 +23,9 @@ import '../core/tools/PanTool';
 import '../core/tools/DragTool';
 import '../core/tools/SelectTool'; 
 import '../core/tools/TextTool';
+import { getPanelSection } from '../constants/tools';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-
-const TOOL_SECTION_MAP: Partial<Record<string, 'text' | 'page' | 'appearance'>> = {
-  addtext: 'text', edittext: 'text',
-  highlight: 'appearance', underline: 'appearance', stickynote: 'appearance',
-  stamp: 'appearance', redact: 'appearance', draw: 'appearance',
-  insert: 'page', delete: 'page', rotate: 'page', extract: 'page', crop: 'page',
-};
 
 function AppInner() {
   const editor = useEditorState();
@@ -47,6 +42,7 @@ function AppInner() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
 
+  // ── DrawTool lifecycle ─────────────────────────────────────────────────────
   // Register DrawTool once when a tab becomes active.
   // The tool instance persists for the lifetime of that tab.
   useEffect(() => {
@@ -66,13 +62,22 @@ function AppInner() {
     tool?.setColor(editor.highlightColor);
   }, [editor.highlightColor]);
 
+  // Keep sessionId current when the active tab changes.
+  // Previously this was never called, so switching tabs left the DrawTool
+  // writing annotations to the wrong session.
+  useEffect(() => {
+    if (!editor.activeTabId) return;
+    const tool = toolManager.getTool('draw') as DrawTool | undefined;
+    tool?.setSessionId(editor.activeTabId);
+  }, [editor.activeTabId]);
+
   // Keep refreshDocumentState current on the instance without re-registering.
   useEffect(() => {
     const tool = toolManager.getTool('draw') as DrawTool | undefined;
     tool?.setOnSuccess(editor.refreshDocumentState);
   }, [editor.refreshDocumentState]);
 
-  const toolSection = TOOL_SECTION_MAP[editor.activeTool] ?? null;
+  const toolSection = getPanelSection(editor.activeTool);
   const prevToolSection = React.useRef(toolSection);
   if (prevToolSection.current !== toolSection) {
     prevToolSection.current = toolSection;
@@ -248,7 +253,9 @@ function AppInner() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AppInner />
+      <ToastProvider>
+        <AppInner />
+      </ToastProvider>
     </ThemeProvider>
   );
 }
