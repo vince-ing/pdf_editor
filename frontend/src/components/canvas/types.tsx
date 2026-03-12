@@ -1,3 +1,4 @@
+// frontend/src/components/canvas/types.tsx
 import type { TextRun } from '../../types/textProps';
 
 export interface AnnotationNode {
@@ -11,7 +12,11 @@ export interface AnnotationNode {
   font_family?: string;
   bold?:        boolean;
   italic?:      boolean;
+  // runs are always normalized to camelCase by normalize.ts
   runs?:        TextRun[];
+  // path-specific
+  points?:      { x: number; y: number }[];
+  thickness?:   number;
 }
 
 export interface PageNode {
@@ -22,6 +27,8 @@ export interface PageNode {
 }
 
 export interface DocumentState { 
+  node_type?: string;
   children?: PageNode[]; 
-  file_name?: string; 
+  file_name?: string;
+  file_size?: number;
 }

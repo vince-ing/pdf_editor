@@ -49,7 +49,7 @@ export interface PageRendererProps {
   onTextSelected?: (text: string) => void;
   containerRef?: React.Ref<HTMLDivElement>;
   searchMatches?: { rects: { x: number; y: number; width: number; height: number }[]; matchIndex: number; isCurrent: boolean }[];
-  onZoom?: (delta: number) => void; // New prop
+  onZoom?: (delta: number) => void;
 }
 
 export function PageRenderer({
@@ -212,17 +212,7 @@ export function PageRenderer({
 
         <LiveDrawLayer pageId={pageNode.id} scale={scale} />
 
-        {annotations.map(node => (
-          <NodeOverlay
-            key={node.id} node={node} scale={scale}
-            activeTool={activeTool} textProps={textProps}
-            onPropsChange={onTextPropsChange}
-            onUpdate={handleNodeUpdate}
-            onDelete={handleNodeDelete}
-            onRegisterBlur={fn => { activeNodeBlurRef.current = fn; }}
-          />
-        ))}
-
+        {/* ── Annotation overlays — rendered exactly once ── */}
         {annotations.map(node => (
           <NodeOverlay
             key={node.id} node={node} scale={scale}

@@ -1359,6 +1359,14 @@
         }
       ]
     },
+    "frontend\\src\\api\\normalize.ts": {
+      "functions": [
+        "normalizeRun(r: any)",
+        "normalizeAnnotation(raw: any)",
+        "normalizePage(raw: any)",
+        "normalizeDocumentState(raw: any)"
+      ]
+    },
     "frontend\\src\\app\\App.tsx": {
       "functions": [
         "AppInner()",
@@ -1514,8 +1522,10 @@
           "metadata?: { width: number; height: number"
         ],
         "DocumentState": [
+          "node_type?: string",
           "children?: PageNode[]",
-          "file_name?: string"
+          "file_name?: string",
+          "file_size?: number"
         ]
       }
     },
@@ -1822,6 +1832,33 @@
         "useActiveTool()"
       ]
     },
+    "frontend\\src\\hooks\\useDocumentActions.ts": {
+      "interfaces": {
+        "UseDocumentActionsArgs": [
+          "activeTabId:          string | null",
+          "documentState:        DocumentState | null",
+          "pdfDoc:               pdfjsLib.PDFDocumentProxy | null",
+          "activePage:           number",
+          "refreshDocumentState: () => Promise<void>"
+        ]
+      },
+      "functions": [
+        "useDocumentActions({\n  activeTabId,\n  documentState,\n  pdfDoc,\n  activePage,\n  refreshDocumentState,\n}: UseDocumentActionsArgs)"
+      ],
+      "returns": [
+        "handleUndo",
+        "handleRedo",
+        "handleExportPdf",
+        "handleReadPage",
+        "handleReadSelection",
+        "lastSelectedText",
+        "setLastSelectedText",
+        "tts",
+        "ttsStop",
+        "pauseResume",
+        "setSpeed"
+      ]
+    },
     "frontend\\src\\hooks\\useDragSelection.ts": {
       "interfaces": {
         "GeoRect": [
@@ -1850,31 +1887,32 @@
       ]
     },
     "frontend\\src\\hooks\\useEditorState.ts": {
-      "interfaces": {
-        "TabSession": [
-          "sessionId: string",
-          "pdfDoc:    pdfjsLib.PDFDocumentProxy | null",
-          "documentState: DocumentState | null",
-          "activePage: number",
-          "scale: number"
-        ]
-      },
       "functions": [
-        "makeSession(sessionId: string)",
         "useEditorState()"
       ],
       "returns": [
-        "setTabs",
         "activeTabId",
         "setActiveTabId",
         "handleTabClose",
-        "setDocumentState",
+        "loading",
         "pdfDoc",
-        "setPdfDoc",
         "activePage",
         "setActivePage",
         "scale",
-        "activeTool",
+        "refreshDocumentState",
+        "zoomOut",
+        "zoomReset",
+        "handleRedo",
+        "handleExportPdf",
+        "handleReadPage",
+        "handleReadSelection",
+        "lastSelectedText",
+        "setLastSelectedText",
+        "tts",
+        "ttsStop",
+        "pauseResume",
+        "setSpeed",
+        "handleFileUpload",
         "setActiveTool",
         "sidebarView",
         "setSidebarView",
@@ -1882,8 +1920,6 @@
         "setShowThumbnails",
         "rightPanelOpen",
         "setRightPanelOpen",
-        "lastSelectedText",
-        "setLastSelectedText",
         "textProps",
         "setTextProps",
         "highlightColor",
@@ -1893,21 +1929,25 @@
         "setTheme",
         "pageRefs",
         "canvasScrollRef",
-        "ttsStop",
-        "pauseResume",
-        "setSpeed",
-        "handleUndo",
-        "handleRedo",
-        "handleReadPage",
-        "handleReadSelection",
-        "handleExportPdf",
-        "zoomIn",
-        "zoomOut",
-        "zoomReset",
-        "openFileDialog",
-        "refreshDocumentState",
-        "menus",
         "pageCount"
+      ]
+    },
+    "frontend\\src\\hooks\\useKeyboardShortcuts.ts": {
+      "interfaces": {
+        "UseKeyboardShortcutsArgs": [
+          "handleUndo:        () => void",
+          "handleRedo:        () => void",
+          "handleExportPdf:   () => void",
+          "openFileDialog:    () => void",
+          "zoomIn:            () => void",
+          "zoomOut:           () => void",
+          "setSidebarView:    (v: SidebarView) => void",
+          "setShowThumbnails: (fn: (v: boolean) => boolean) => void",
+          "openSearch:        () => void"
+        ]
+      },
+      "functions": [
+        "useKeyboardShortcuts({\n  handleUndo,\n  handleRedo,\n  handleExportPdf,\n  openFileDialog,\n  zoomIn,\n  zoomOut,\n  setSidebarView,\n  setShowThumbnails,\n  openSearch,\n}: UseKeyboardShortcutsArgs)"
       ]
     },
     "frontend\\src\\hooks\\useOcr.ts": {
@@ -2025,6 +2065,56 @@
         "inputRef"
       ]
     },
+    "frontend\\src\\hooks\\useSessionState.ts": {
+      "interfaces": {
+        "UseSessionStateArgs": [
+          "activeTabId:  string | null",
+          "activeSession: TabSession | null",
+          "patchSession: (tabId: string, patch: Partial<TabSession>) => void",
+          "pageRefs:     React.MutableRefObject<(HTMLDivElement | null)[]>"
+        ]
+      },
+      "functions": [
+        "useSessionState({\n  activeTabId,\n  activeSession,\n  patchSession,\n  pageRefs,\n}: UseSessionStateArgs)"
+      ],
+      "returns": [
+        "documentState",
+        "pdfDoc",
+        "activePage",
+        "scale",
+        "setActivePage",
+        "setScale",
+        "refreshDocumentState"
+      ]
+    },
+    "frontend\\src\\hooks\\useTabManager.ts": {
+      "interfaces": {
+        "TabSession": [
+          "sessionId:     string",
+          "pdfDoc:        pdfjsLib.PDFDocumentProxy | null",
+          "documentState: DocumentState | null",
+          "activePage:    number",
+          "scale:         number"
+        ]
+      },
+      "functions": [
+        "makeSession(sessionId: string)",
+        "useTabManager(fileInputRef: React.RefObject<HTMLInputElement>, pageRefs: React.MutableRefObject<(HTMLDivElement | null)"
+      ],
+      "returns": [
+        "tabs",
+        "setTabs",
+        "activeTabId",
+        "setActiveTabId",
+        "activeSession",
+        "tabSessions",
+        "loading",
+        "openFileDialog",
+        "handleFileUpload",
+        "handleTabClose",
+        "patchSession"
+      ]
+    },
     "frontend\\src\\hooks\\useTts.ts": {
       "interfaces": {
         "TtsProgress": [
@@ -2047,6 +2137,16 @@
         "stop",
         "pauseResume",
         "setSpeed"
+      ]
+    },
+    "frontend\\src\\hooks\\useZoom.ts": {
+      "functions": [
+        "useZoom(setScale: (updater: (prev: number)"
+      ],
+      "returns": [
+        "zoomIn",
+        "zoomOut",
+        "zoomReset"
       ]
     },
     "frontend\\src\\theme\\ThemeContext.tsx": {

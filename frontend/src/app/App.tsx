@@ -1,5 +1,4 @@
 // frontend/src/app/App.tsx
-// Make sure to add the new onToggleMobileRightPanel prop
 import React, { useState, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -48,28 +47,30 @@ function AppInner() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
 
-  // Initialize and register the draw tool when the session becomes active
+  // Register DrawTool once when a tab becomes active.
+  // The tool instance persists for the lifetime of that tab.
   useEffect(() => {
-    if (editor.activeTabId) {
-       // Only register if it hasn't been added yet, to avoid duplicate registrations on re-renders
-       if (!toolManager.getActiveTool() || toolManager.getActiveToolId() !== 'draw' || !toolManager['tools']?.has('draw')) {
-           toolManager.registerTool(
-             new DrawTool(editor.activeTabId, editor.highlightColor, 2.0, editor.refreshDocumentState)
-           );
-       }
-    }
-  }, [editor.activeTabId, editor.highlightColor, editor.refreshDocumentState]);
+    if (!editor.activeTabId) return;
+    const tool = new DrawTool(
+      editor.activeTabId,
+      editor.highlightColor,
+      2.0,
+      editor.refreshDocumentState,
+    );
+    toolManager.registerTool(tool);
+  }, [editor.activeTabId]); // intentionally excludes color and refreshDocumentState
 
-  // Hook into annotation additions so drawn paths refresh the canvas
+  // Update color on the existing instance — no re-registration needed.
   useEffect(() => {
-     // Re-register if color changes and draw tool is active
-     if (editor.activeTabId && toolManager.getActiveToolId() === 'draw') {
-        toolManager.registerTool(
-          new DrawTool(editor.activeTabId, editor.highlightColor, 2.0, editor.refreshDocumentState)
-        );
-     }
-  }, [editor.highlightColor, editor.activeTabId, editor.refreshDocumentState]);
+    const tool = toolManager.getTool('draw') as DrawTool | undefined;
+    tool?.setColor(editor.highlightColor);
+  }, [editor.highlightColor]);
 
+  // Keep refreshDocumentState current on the instance without re-registering.
+  useEffect(() => {
+    const tool = toolManager.getTool('draw') as DrawTool | undefined;
+    tool?.setOnSuccess(editor.refreshDocumentState);
+  }, [editor.refreshDocumentState]);
 
   const toolSection = TOOL_SECTION_MAP[editor.activeTool] ?? null;
   const prevToolSection = React.useRef(toolSection);
@@ -80,9 +81,9 @@ function AppInner() {
   const rightPanelSection = ocrSectionOpen ? 'page' : toolSection;
 
   React.useEffect(() => {
-     if (toolSection && editor.rightPanelOpen) {
-        setMobileRightPanelOpen(true);
-     }
+    if (toolSection && editor.rightPanelOpen) {
+      setMobileRightPanelOpen(true);
+    }
   }, [toolSection, editor.rightPanelOpen]);
 
   const handleRunOcr = () => {

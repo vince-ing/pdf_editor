@@ -1,3 +1,5 @@
+// frontend/src/core/tools/ToolManager.ts
+
 import { BaseTool } from './BaseTool';
 
 type Listener = (activeToolId: string) => void;
@@ -11,14 +13,19 @@ class ToolManager {
     this.tools.set(tool.id, tool);
   }
 
+  // Retrieve a registered tool by id — use this instead of accessing private fields
+  getTool(id: string): BaseTool | undefined {
+    return this.tools.get(id);
+  }
+
   setActiveTool(id: string) {
     if (this.activeToolId === id) return;
-    
+
     const currentTool = this.getActiveTool();
     if (currentTool) currentTool.onDeactivate();
-    
+
     this.activeToolId = id;
-    
+
     const newTool = this.getActiveTool();
     if (newTool) newTool.onActivate();
 

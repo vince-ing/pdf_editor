@@ -94,15 +94,17 @@ export function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange,
       setGeo({ x: node.bbox.x, y: node.bbox.y, w: node.bbox.width, h: node.bbox.height });
   }, [node.bbox]);
 
+  // Sync text props panel when selecting a text node.
+  // Data is guaranteed camelCase by normalize.ts — no fallback chains needed.
   useEffect(() => {
     if (isEditable && !isEditing && onPropsChange && node.runs && node.runs.length > 0) {
-      const first = node.runs[0] as any;
+      const first = node.runs[0];
       onPropsChange({
-        fontFamily: first.fontFamily ?? first.font_family ?? node.font_family ?? 'Helvetica',
-        fontSize:   first.fontSize   ?? first.font_size   ?? node.font_size   ?? 12,
-        color:      first.color      ?? node.color       ?? '#000000',
-        isBold:     first.bold       ?? node.bold        ?? false,
-        isItalic:   first.italic     ?? node.italic      ?? false,
+        fontFamily: first.fontFamily ?? 'Helvetica',
+        fontSize:   first.fontSize   ?? 12,
+        color:      first.color      ?? '#000000',
+        isBold:     first.bold       ?? false,
+        isItalic:   first.italic     ?? false,
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -177,7 +179,6 @@ export function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange,
     if (!node.bbox || !node.points) return null;
     
     const pts = node.points as {x: number, y: number}[];
-    // Translate points relative to the bounding box rendering context
     const d = pts.length > 0 
       ? `M ${(pts[0].x - node.bbox.x) * scale} ${(pts[0].y - node.bbox.y) * scale} ` + 
         pts.slice(1).map(p => `L ${(p.x - node.bbox.x) * scale} ${(p.y - node.bbox.y) * scale}`).join(' ')
@@ -246,18 +247,18 @@ export function NodeOverlay({ node, scale, activeTool, textProps, onPropsChange,
 
   const pw = Math.max(geo.w * scale, 10), ph = Math.max(geo.h * scale, 10);
 
+  // Runs are guaranteed normalized (camelCase) by normalize.ts
   const storedRuns: TextRun[] = node.runs && node.runs.length > 0
-    ? node.runs.map((r: any) => ({
-        text: r.text,
-        bold: r.bold ?? false,
-        italic: r.italic ?? false,
-        fontFamily: r.fontFamily ?? r.font_family ?? 'Helvetica',
-        fontSize: r.fontSize ?? r.font_size ?? 12,
-        color: r.color ?? '#000000'
-      }))
+    ? node.runs
     : node.text_content
-      ? [{ text: node.text_content, bold: node.bold ?? false, italic: node.italic ?? false,
-           fontFamily: node.font_family ?? 'Helvetica', fontSize: node.font_size ?? 12, color: node.color ?? '#000000' }]
+      ? [{ 
+          text:       node.text_content,
+          bold:       node.bold       ?? false,
+          italic:     node.italic     ?? false,
+          fontFamily: node.font_family ?? 'Helvetica',
+          fontSize:   node.font_size   ?? 12,
+          color:      node.color       ?? '#000000',
+        }]
       : [];
 
   const displayContent = storedRuns.length > 0 ? (

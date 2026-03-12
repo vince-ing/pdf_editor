@@ -2,6 +2,7 @@
 
 import axios from 'axios';
 import type { TextRun } from '../types/textProps';
+import { normalizeDocumentState } from './normalize';
 
 const isProduction = window.location.hostname.includes('vercel.app');
 
@@ -25,8 +26,16 @@ export const engineApi = {
     });
     return response.data;
   },
-  getDocumentState: async (sessionId: string) =>
-    (await axios.get(`${API_BASE}/document`, s(sessionId))).data,
+
+  getDocumentState: async (sessionId: string) => {
+    const raw = (await axios.get(`${API_BASE}/document`, s(sessionId))).data;
+    // Normalize here — all downstream code receives clean camelCase types
+    if (raw?.node_type === 'document') {
+      return normalizeDocumentState(raw);
+    }
+    return raw;
+  },
+
   exportDocument: async (outputPath: string, sessionId: string) =>
     (await axios.post(`${API_BASE}/document/export`, { output_path: outputPath }, s(sessionId))).data,
   undo: async (sessionId: string) => axios.post(`${API_BASE}/undo`, {}, s(sessionId)),

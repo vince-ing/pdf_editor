@@ -6,20 +6,25 @@ import { engineApi } from '../../api/client';
 export class DrawTool extends BaseTool {
   id = 'draw';
   private isDrawing = false;
-  private currentPath: {x: number, y: number}[] = [];
-  
+  private currentPath: { x: number; y: number }[] = [];
+
   constructor(
-    private sessionId: string, 
-    private color: string = '#000000', 
+    private sessionId: string,
+    private color: string = '#000000',
     private thickness: number = 2.0,
-    private onSuccess?: () => void // Add callback to trigger canvas refresh
+    private onSuccess?: () => void,
   ) {
     super();
   }
 
+  // Update in place — no need to re-register the tool
+  setColor(color: string) { this.color = color; }
+  setSessionId(id: string) { this.sessionId = id; }
+  setOnSuccess(fn: () => void) { this.onSuccess = fn; }
+
   private notify(pageId: string) {
     window.dispatchEvent(new CustomEvent('draw-update', {
-      detail: { pageId, path: this.currentPath, color: this.color, thickness: this.thickness }
+      detail: { pageId, path: this.currentPath, color: this.color, thickness: this.thickness },
     }));
   }
 
@@ -38,38 +43,40 @@ export class DrawTool extends BaseTool {
   async onPointerUp(context: InteractionContext) {
     if (!this.isDrawing) return;
     this.isDrawing = false;
-    
+
     if (this.currentPath.length > 1) {
-      // Keep a copy to save, then immediately clear the transient state
       const pathToSave = [...this.currentPath];
       this.currentPath = [];
       this.notify(context.pageId);
 
       try {
         await engineApi.addPathAnnotation(
-          context.pageId, 
-          pathToSave, 
-          this.color, 
-          this.thickness, 
-          1.0, 
-          this.sessionId
+          context.pageId,
+          pathToSave,
+          this.color,
+          this.thickness,
+          1.0,
+          this.sessionId,
         );
-        // Inform the application to re-fetch the document state so the path renders
-        if (this.onSuccess) {
-          this.onSuccess();
-        }
+        this.onSuccess?.();
       } catch (err) {
-        console.error("Failed to add path annotation:", err);
+        console.error('Failed to add path annotation:', err);
       }
     } else {
       this.currentPath = [];
       this.notify(context.pageId);
     }
   }
-  
+
   onPointerLeave(context: InteractionContext) {
+    if (this.isDrawing) this.onPointerUp(context);
+  }
+
+  onDeactivate() {
+    // Clean up any in-progress stroke if tool is switched mid-draw
     if (this.isDrawing) {
-      this.onPointerUp(context);
+      this.isDrawing = false;
+      this.currentPath = [];
     }
   }
 }
