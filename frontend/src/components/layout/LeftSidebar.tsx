@@ -106,6 +106,28 @@ export function LeftSidebar({
   const thumbRefs = useRef<(HTMLDivElement | null)[]>([]);
   const effectivePage = activePage ?? localActivePage;
 
+  // Arrow key navigation — left/right moves between pages when the sidebar
+  // thumbnail list has focus (i.e. after clicking a thumbnail).
+  const [sidebarFocused, setSidebarFocused] = useState(false);
+
+  useEffect(() => {
+    if (!sidebarFocused) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      // Don't intercept if focus is inside an input (e.g. search box)
+      if (document.activeElement?.tagName === 'INPUT') return;
+      e.preventDefault();
+      const next = e.key === 'ArrowRight'
+        ? Math.min(effectivePage + 1, pages.length - 1)
+        : Math.max(effectivePage - 1, 0);
+      if (next === effectivePage) return;
+      setLocalActivePage(next);
+      onPageClick?.(next);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [sidebarFocused, effectivePage, pages.length, onPageClick]);
+
   useEffect(() => {
     const el = thumbRefs.current[effectivePage];
     const container = scrollContainerRef.current;
@@ -176,7 +198,10 @@ export function LeftSidebar({
           </div>
 
           {/* Scroll area */}
-          <div ref={scrollContainerRef} className="scrollbar-thumb-only" style={{ flex: 1, overflowY: 'auto', padding: drawerView === 'search' ? '0' : '8px 12px', display: 'flex', flexDirection: 'column', gap: drawerView === 'search' ? 0 : 8 }}>
+          <div ref={scrollContainerRef} className="scrollbar-thumb-only" tabIndex={-1}
+            onFocus={() => setSidebarFocused(true)}
+            onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setSidebarFocused(false); }}
+            style={{ flex: 1, overflowY: 'auto', padding: drawerView === 'search' ? '0' : '8px 12px', display: 'flex', flexDirection: 'column', gap: drawerView === 'search' ? 0 : 8 }}>
             {drawerView === 'pages' && (<>
               {!pdfDoc && pages.length === 0 && [1,2,3,4].map(n => (
                 <div key={n} style={{ position: 'relative', borderRadius: t.radius.md, overflow: 'hidden', border: n === 1 ? `2px solid ${t.colors.accent}` : 'none' }}>
@@ -204,7 +229,7 @@ export function LeftSidebar({
                       await onDocumentChanged?.();
                     });
                   }}
-                  onClick={() => { setLocalActivePage(i); onPageClick?.(i); }}
+                  onClick={() => { setLocalActivePage(i); onPageClick?.(i); scrollContainerRef.current?.focus({ preventScroll: true }); }}
                   style={{ position: 'relative', cursor: 'pointer', borderRadius: t.radius.md, opacity: dragSrc === i ? 0.4 : 1, transition: t.t.fast }}>
 
                   {insertBefore === i && dragSrc !== i && (
