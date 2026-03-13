@@ -1,7 +1,25 @@
 // frontend/src/app/App.tsx
 import React, { useState, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+
+// ── pdf.js 5.x asset configuration ────────────────────────────────────────────
+// In pdf.js 5.x the worker no longer bundles WASM codecs (OpenJPEG for
+// JPEG2000, Jbig2, etc.) inline. Instead it fetches them at runtime via
+// fetch() from a path relative to the worker script.
+//
+// vite.config.ts copies all pdfjs assets to /pdfjs/ in the build output.
+// We must tell pdf.js exactly where to find:
+//   1. The worker script itself
+//   2. The cMaps directory (for CJK / special-encoding text)
+//   3. The standard fonts directory (fallback fonts)
+//
+// The WASM files are loaded automatically by the worker from the same
+// directory as the worker script — which is why vite.config.ts copies
+// both the worker AND the .wasm files into /pdfjs/.
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.mjs';
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 import { TopBar }      from '../components/layout/TopBar';
 import { LeftSidebar } from '../components/layout/LeftSidebar';
@@ -18,14 +36,16 @@ import { ToastProvider } from '../components/canvas/CopyToast';
 import { toolManager } from '../core/tools/ToolManager';
 import { DrawTool } from '../core/tools/DrawTool';
 
-// Register external strategy tools
 import '../core/tools/PanTool';
 import '../core/tools/DragTool';
-import '../core/tools/SelectTool'; 
+import '../core/tools/SelectTool';
 import '../core/tools/TextTool';
 import { getPanelSection } from '../constants/tools';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+// cMap and standard font URLs — passed to getDocument() so pdf.js can
+// correctly render non-Latin text and PDFs without embedded fonts.
+export const PDFJS_CMAP_URL           = '/pdfjs/cmaps/';
+export const PDFJS_STANDARD_FONT_URL  = '/pdfjs/standard_fonts/';
 
 function AppInner() {
   const editor = useEditorState();
@@ -42,9 +62,6 @@ function AppInner() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
 
-  // ── DrawTool lifecycle ─────────────────────────────────────────────────────
-  // Register DrawTool once when a tab becomes active.
-  // The tool instance persists for the lifetime of that tab.
   useEffect(() => {
     if (!editor.activeTabId) return;
     const tool = new DrawTool(
@@ -54,24 +71,19 @@ function AppInner() {
       editor.refreshDocumentState,
     );
     toolManager.registerTool(tool);
-  }, [editor.activeTabId]); // intentionally excludes color and refreshDocumentState
+  }, [editor.activeTabId]);
 
-  // Update color on the existing instance — no re-registration needed.
   useEffect(() => {
     const tool = toolManager.getTool('draw') as DrawTool | undefined;
     tool?.setColor(editor.highlightColor);
   }, [editor.highlightColor]);
 
-  // Keep sessionId current when the active tab changes.
-  // Previously this was never called, so switching tabs left the DrawTool
-  // writing annotations to the wrong session.
   useEffect(() => {
     if (!editor.activeTabId) return;
     const tool = toolManager.getTool('draw') as DrawTool | undefined;
     tool?.setSessionId(editor.activeTabId);
   }, [editor.activeTabId]);
 
-  // Keep refreshDocumentState current on the instance without re-registering.
   useEffect(() => {
     const tool = toolManager.getTool('draw') as DrawTool | undefined;
     tool?.setOnSuccess(editor.refreshDocumentState);
@@ -117,15 +129,15 @@ function AppInner() {
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0 relative">
-        
+
         {mobileSidebarOpen && (
-          <div 
-            className="md:hidden absolute inset-0 z-[8999] bg-black/40 transition-opacity" 
+          <div
+            className="md:hidden absolute inset-0 z-[8999] bg-black/40 transition-opacity"
             onClick={() => setMobileSidebarOpen(false)}
           />
         )}
 
-        <div 
+        <div
           className={`
             absolute inset-y-0 left-0 z-[9000] flex flex-col transform transition-transform duration-200 ease-in-out md:relative md:translate-x-0 md:z-0
             ${mobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:shadow-none'}
@@ -193,16 +205,16 @@ function AppInner() {
               canvasScrollRef={editor.canvasScrollRef}
               pageMatchMap={editor.search.pageMatchMap}
             />
-            
+
             {mobileRightPanelOpen && (
-              <div 
-                className="md:hidden absolute inset-0 z-[8499] bg-black/40 transition-opacity" 
+              <div
+                className="md:hidden absolute inset-0 z-[8499] bg-black/40 transition-opacity"
                 onClick={() => setMobileRightPanelOpen(false)}
               />
             )}
 
             {editor.rightPanelOpen && (
-              <div 
+              <div
                 className={`
                    absolute inset-y-0 right-0 z-[8500] md:relative md:z-0 shadow-2xl md:shadow-none transform transition-transform duration-200 ease-in-out md:translate-x-0
                    ${mobileRightPanelOpen ? 'translate-x-0' : 'translate-x-full'}
@@ -210,8 +222,8 @@ function AppInner() {
                 style={{ backgroundColor: t.colors.bgBase }}
               >
                 <RightPanel
-                  documentState={editor.documentState} 
-                  activePage={editor.activePage} 
+                  documentState={editor.documentState}
+                  activePage={editor.activePage}
                   activeTool={editor.activeTool}
                   textProps={editor.textProps}
                   onTextPropsChange={editor.setTextProps}

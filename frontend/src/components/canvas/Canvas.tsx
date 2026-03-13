@@ -1,5 +1,5 @@
 // frontend/src/components/canvas/Canvas.tsx
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { DEFAULT_TEXT_PROPS, type TextProps } from '../../types/textProps';
 import { PageRenderer } from './PageRenderer';
@@ -21,6 +21,64 @@ export interface CanvasProps {
   onZoom?: (delta: number) => void;
 }
 
+// ── LazyPage ──────────────────────────────────────────────────────────────────
+// Renders a placeholder until the page scrolls near the viewport, then mounts
+// the real PageRenderer.
+//
+// IMPORTANT: We must NOT permanently commit `visible = true` until pdfDoc is
+// confirmed non-null. If the IntersectionObserver fires while pdfDoc is still
+// null (which happens on page 1 because the observer fires synchronously during
+// the React commit phase, before the async tab-load has finished batching
+// pdfDoc + documentState into the same render), PageRenderer mounts with
+// pdfDoc=null, usePdfCanvas bails out immediately, and since we already
+// disconnected the observer the page is permanently blank.
+//
+// Fix: split into two phases:
+//   triggered  — observer fired (page is/was in viewport)
+//   visible    — triggered AND pdfDoc is ready → safe to mount PageRenderer
+
+interface LazyPageProps {
+  pdfDocReady:     boolean;
+  estimatedHeight: number;
+  children:        (visible: boolean) => React.ReactNode;
+}
+
+function LazyPage({ pdfDocReady, estimatedHeight, children }: LazyPageProps) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [triggered, setTriggered] = useState(false);
+  const [visible,   setVisible]   = useState(false);
+
+  // Phase 1: observe proximity to viewport
+  useEffect(() => {
+    if (visible) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setTriggered(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '100% 0px', threshold: 0 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  // Phase 2: only go visible once BOTH triggered AND pdfDoc arrived.
+  useEffect(() => {
+    if (triggered && pdfDocReady) setVisible(true);
+  }, [triggered, pdfDocReady]);
+
+  return (
+    <div ref={sentinelRef} style={{ minHeight: visible ? undefined : estimatedHeight }}>
+      {children(visible)}
+    </div>
+  );
+}
+
 export function Canvas({
   pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,
   textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,
@@ -30,6 +88,8 @@ export function Canvas({
   onZoom,
 }: CanvasProps) {
   const { theme: t } = useTheme();
+  const pdfDocReady    = !!pdfDoc;
+  const approxPageHeight = 792 * scale;
 
   return (
     <div
@@ -57,30 +117,33 @@ export function Canvas({
         </div>
       ) : (
         documentState.children?.map((page, i) => (
-          // key on the boundary so React resets error state when pages are
-          // reordered or deleted — the boundary for page N is tied to that
-          // page's identity, not its position in the list.
           <PageErrorBoundary key={page.id} pageIndex={i}>
-            <div ref={el => { if (pageRefs) pageRefs.current[i] = el; }}>
-              <PageRenderer
-                pageNode={page}
-                pdfDoc={pdfDoc!}
-                pageIndex={i}
-                totalPages={documentState.children?.length ?? 1}
-                scale={scale}
-                activeTool={activeTool}
-                sessionId={sessionId}
-                textProps={textProps}
-                highlightColor={highlightColor}
-                highlightOpacity={highlightOpacity}
-                onTextPropsChange={onTextPropsChange}
-                onAnnotationAdded={onAnnotationAdded}
-                onDocumentChanged={onDocumentChanged}
-                onTextSelected={onTextSelected}
-                searchMatches={pageMatchMap[page.id] ?? []}
-                onZoom={onZoom}
-              />
-            </div>
+            <LazyPage pdfDocReady={pdfDocReady} estimatedHeight={approxPageHeight}>
+              {(visible) => (
+                <div ref={el => { if (pageRefs) pageRefs.current[i] = el; }}>
+                  {visible && (
+                    <PageRenderer
+                      pageNode={page}
+                      pdfDoc={pdfDoc!}
+                      pageIndex={i}
+                      totalPages={documentState.children?.length ?? 1}
+                      scale={scale}
+                      activeTool={activeTool}
+                      sessionId={sessionId}
+                      textProps={textProps}
+                      highlightColor={highlightColor}
+                      highlightOpacity={highlightOpacity}
+                      onTextPropsChange={onTextPropsChange}
+                      onAnnotationAdded={onAnnotationAdded}
+                      onDocumentChanged={onDocumentChanged}
+                      onTextSelected={onTextSelected}
+                      searchMatches={pageMatchMap[page.id] ?? []}
+                      onZoom={onZoom}
+                    />
+                  )}
+                </div>
+              )}
+            </LazyPage>
           </PageErrorBoundary>
         ))
       )}

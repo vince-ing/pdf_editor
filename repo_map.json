@@ -1431,9 +1431,15 @@
           "canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>",
           "pageMatchMap?: PageMatchMap",
           "onZoom?: (delta: number) => void"
+        ],
+        "LazyPageProps": [
+          "pdfDocReady:     boolean",
+          "estimatedHeight: number",
+          "children:        (visible: boolean) => React.ReactNode"
         ]
       },
       "functions": [
+        "LazyPage({ pdfDocReady, estimatedHeight, children }: LazyPageProps)",
         "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n  onZoom,\n}: CanvasProps)"
       ]
     },
@@ -2206,6 +2212,8 @@
         ]
       },
       "functions": [
+        "acquireRenderSlot()",
+        "releaseRenderSlot()",
         "usePdfCanvas({ pdfDoc, pageNode, pageIndex, scale, localRotation }: UsePdfCanvasArgs)"
       ],
       "returns": [
