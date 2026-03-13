@@ -1,5 +1,5 @@
 // frontend/src/app/App.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // ── pdf.js 5.x asset configuration ────────────────────────────────────────────
@@ -27,7 +27,7 @@ import { RightPanel }  from '../components/layout/RightPanel';
 import { TtsBar }      from '../components/layout/TtsBar';
 import { StatusBar }   from '../components/layout/StatusBar';
 import { Toolbar }     from '../components/toolbar/Toolbar';
-import { Canvas }      from '../components/canvas/Canvas';
+import { Canvas, type CanvasHandle } from '../components/canvas/Canvas';
 
 import { useEditorState } from '../hooks/useEditorState';
 import { useOcr } from '../hooks/useOcr';
@@ -55,6 +55,10 @@ function AppInner() {
     activeTabId: editor.activeTabId,
     onSuccess: editor.refreshDocumentState,
   });
+
+  // Ref to Canvas imperative handle — used by thumbnail clicks to force-render
+  // and scroll to pages that haven't been lazily loaded yet.
+  const canvasRef = useRef<CanvasHandle>(null);
 
   const activePageId = (editor.documentState?.children?.[editor.activePage] as { id?: string } | undefined)?.id ?? null;
 
@@ -157,7 +161,14 @@ function AppInner() {
             }}
             onPageClick={i => {
               editor.setActivePage(i);
-              editor.pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              // jumpToPage force-renders the target page if not yet loaded,
+              // then scrolls to it. Raw scrollIntoView breaks for unrendered
+              // pages because they have no real height yet (lazy placeholder).
+              if (canvasRef.current) {
+                canvasRef.current.jumpToPage(i);
+              } else {
+                editor.pageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
               setMobileSidebarOpen(false);
             }}
             onDocumentChanged={editor.refreshDocumentState}
@@ -191,6 +202,7 @@ function AppInner() {
 
           <div className="flex-1 flex overflow-hidden min-h-0 relative">
             <Canvas
+              ref={canvasRef}
               pdfDoc={editor.pdfDoc} documentState={editor.documentState}
               activeTool={editor.activeTool} scale={editor.scale}
               sessionId={editor.activeTabId ?? ''}

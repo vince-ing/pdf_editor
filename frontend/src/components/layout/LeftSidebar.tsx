@@ -35,28 +35,52 @@ interface LeftSidebarProps {
   sessionId?: string;
 }
 
+// Thumbnail renders lazily — only starts the pdf.js render once it scrolls
+// into view in the sidebar. For a 726-page document this prevents all 726
+// getPage() calls firing simultaneously, which was making the sidebar sluggish
+// and competing with the main canvas for pdf.js resources.
 const Thumbnail = ({ pdfDoc, pageNumber, rotation }: {
   pdfDoc: pdfjsLib.PDFDocumentProxy; pageNumber: number; rotation: number;
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
   const W = 100;
+
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setInView(true); obs.disconnect(); } },
+      { rootMargin: '200px 0px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!inView) return;
     let alive = true; let task: pdfjsLib.RenderTask | null = null;
     (async () => {
       try {
         const page = await pdfDoc.getPage(pageNumber + 1);
         if (!alive) return;
         const vp0 = page.getViewport({ scale: 1, rotation });
-        const vp = page.getViewport({ scale: W / vp0.width, rotation });
-        const cv = canvasRef.current; if (!cv) return;
-        cv.width = vp.width; cv.height = vp.height;
+        const vp  = page.getViewport({ scale: W / vp0.width, rotation });
+        const cv  = canvasRef.current; if (!cv) return;
+        cv.width  = vp.width; cv.height = vp.height;
         task = page.render({ canvasContext: cv.getContext('2d')!, viewport: vp });
         await task.promise;
       } catch (e: unknown) { if ((e as Error)?.name !== 'RenderingCancelledException') console.error(e); }
     })();
     return () => { alive = false; task?.cancel(); };
-  }, [pdfDoc, pageNumber, rotation]);
-  return <canvas ref={canvasRef} style={{ width: W, display: 'block', borderRadius: 3 }} />;
+  }, [inView, pdfDoc, pageNumber, rotation]);
+
+  return (
+    <div ref={containerRef} style={{ width: W, minHeight: Math.round(W * 11 / 8.5), borderRadius: 3, overflow: 'hidden' }}>
+      <canvas ref={canvasRef} style={{ width: W, display: 'block', borderRadius: 3 }} />
+    </div>
+  );
 };
 
 const VIEW_ITEMS: Array<{ id: SidebarView; icon: React.ComponentType<{ size?: number }>; label: string }> = [
