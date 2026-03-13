@@ -126,7 +126,7 @@ const DropdownPanel = ({ items, onClose, keepOpenOnClick = false }: { items: Men
       boxShadow: t.shadow.menu,
       overflow: 'visible',
     }}>
-      <div style={{ maxHeight: '60vh', overflowY: 'auto', padding: '4px', borderRadius: t.radius.md }}>
+      <div className="scrollbar-thumb-only" style={{ maxHeight: '60vh', overflowY: 'auto', padding: '4px', borderRadius: t.radius.md }}>
         {items.map((item, i) => <DropdownItem key={i} item={item} onClose={onClose} keepOpen={keepOpenOnClick} />)}
       </div>
     </div>
@@ -146,7 +146,7 @@ const AppMenu = ({ menus, onClose }: { menus: MenuDef[]; onClose: () => void }) 
       boxShadow: t.shadow.menu,
       overflow: 'visible',
     }}>
-      <div style={{ maxHeight: '70vh', overflowY: 'auto', padding: '4px', borderRadius: t.radius.md }}>
+      <div className="scrollbar-thumb-only" style={{ maxHeight: '70vh', overflowY: 'auto', padding: '4px', borderRadius: t.radius.md }}>
         {menus.map((menu, mi) => (
           <div key={mi}>
             {mi > 0 && <div style={{ height: '1px', backgroundColor: t.colors.border, margin: '3px 4px' }} />}

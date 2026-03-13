@@ -152,7 +152,7 @@ export function LeftSidebar({
           </div>
 
           {/* Scroll area */}
-          <div ref={scrollContainerRef} style={{ flex: 1, overflowY: 'auto', padding: drawerView === 'search' ? '0' : '8px 12px', display: 'flex', flexDirection: 'column', gap: drawerView === 'search' ? 0 : 8 }}>
+          <div ref={scrollContainerRef} className="scrollbar-thumb-only" style={{ flex: 1, overflowY: 'auto', padding: drawerView === 'search' ? '0' : '8px 12px', display: 'flex', flexDirection: 'column', gap: drawerView === 'search' ? 0 : 8 }}>
             {drawerView === 'pages' && (<>
               {!pdfDoc && pages.length === 0 && [1,2,3,4].map(n => (
                 <div key={n} style={{ position: 'relative', borderRadius: t.radius.md, overflow: 'hidden', border: n === 1 ? `2px solid ${t.colors.accent}` : 'none' }}>

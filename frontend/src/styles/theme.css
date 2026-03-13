@@ -138,11 +138,21 @@
     @apply bg-background text-foreground;
   }
 
-  /* Scrollbars — minimal dark */
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #3d4449; border-radius: 99px; }
-  ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+  /* Scrollbars — desktop only, thumb visible (hidden on mobile/touch) */
+  @media (hover: hover) and (pointer: fine) {
+    /* Firefox */
+    * { scrollbar-width: thin; scrollbar-color: #6b7280 transparent; }
+
+    /* Chromium / Safari */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: #6b7280;
+      border-radius: 99px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+    ::-webkit-scrollbar-corner { background: transparent; }
+  }
 
   /* Animations */
   @keyframes spin        { to { transform: rotate(360deg); } }
@@ -166,4 +176,24 @@
   .animate-toast-in    { animation: toastIn 0.16s ease; }
   .animate-fade-in     { animation: fadeIn 0.15s ease; }
   .animate-spin-slow   { animation: spin 0.7s linear infinite; }
+}
+
+/* Thumb-only scrollbar utility — desktop pointer devices only.
+   Add class="scrollbar-thumb-only" to any scrollable container. */
+.scrollbar-thumb-only {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-thumb-only::-webkit-scrollbar { display: none; }
+
+@media (hover: hover) and (pointer: fine) {
+  .scrollbar-thumb-only {
+    scrollbar-width: thin;
+    scrollbar-color: #6b7280 transparent;
+  }
+  .scrollbar-thumb-only::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+  .scrollbar-thumb-only::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thumb-only::-webkit-scrollbar-thumb { background: #6b7280; border-radius: 99px; }
+  .scrollbar-thumb-only::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+  .scrollbar-thumb-only::-webkit-scrollbar-corner { background: transparent; }
 }

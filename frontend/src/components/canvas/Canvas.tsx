@@ -34,7 +34,7 @@ export function Canvas({
   return (
     <div
       ref={canvasScrollRef}
-      className="overflow-auto"
+      className="overflow-auto scrollbar-thumb-only"
       style={{
         flex: 1, backgroundColor: t.colors.bgHover,
         display: 'flex', flexDirection: 'column', alignItems: 'center',

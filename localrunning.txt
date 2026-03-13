@@ -1,9 +1,16 @@
+Two terminals
+C:\py\v>
+.\Scripts\Activate.ps1
+
 backend
+root folder
 
 uvicorn engine.src.api.main:app --reload --port 8000
 
 frontend
 
+cd frontend
+$env:PATH="$PWD\..\..\nodejs;$env:PATH"
 ..\..\nodejs\npm.cmd run dev
 
-Put nodejs just outside folder
+Put nodejs just outside root folder
