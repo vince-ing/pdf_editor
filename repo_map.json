@@ -1433,7 +1433,8 @@
           "pageRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>",
           "canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>",
           "pageMatchMap?: PageMatchMap",
-          "onZoom?: (delta: number) => void"
+          "onZoom?: (delta: number) => void",
+          "onActivePageChange?: (pageIndex: number) => void; // Add this line"
         ],
         "LazyPageProps": [
           "pdfDocReady:   boolean",
@@ -1445,7 +1446,7 @@
       },
       "functions": [
         "LazyPage({ pdfDocReady, estimatedHeight, forceVisible, outerRef, children }: LazyPageProps)",
-        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n  onZoom,\n}, ref)"
+        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n  onZoom,\n  onActivePageChange, \n}, ref)"
       ]
     },
     "frontend\\src\\components\\canvas\\CopyToast.tsx": {

@@ -26,6 +26,7 @@ export interface CanvasProps {
   canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
   pageMatchMap?: PageMatchMap;
   onZoom?: (delta: number) => void;
+  onActivePageChange?: (pageIndex: number) => void; // Add this line
 }
 
 // ── LazyPage ──────────────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   canvasScrollRef,
   pageMatchMap = {},
   onZoom,
+  onActivePageChange, 
 }, ref) {
   const { theme: t } = useTheme();
   const pdfDocReady      = !!pdfDoc;
@@ -143,6 +145,64 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
   // Reset forced pages when document changes (new tab / new file)
   useEffect(() => { setForcedPages(new Set()); }, [sessionId]);
+
+  // Reset forced pages when document changes (new tab / new file)
+  useEffect(() => { setForcedPages(new Set()); }, [sessionId]);
+
+  // NEW: Scroll tracking to update the active page
+  const lastActiveRef = useRef<number>(-1);
+
+  useEffect(() => {
+    const container = canvasScrollRef?.current;
+    if (!container || !pageRefs?.current || !onActivePageChange) return;
+
+    let ticking = false;
+
+    const handleScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const containerRect = container.getBoundingClientRect();
+          // Target line: 1/3rd down the container's height gives a natural reading feel
+          const targetY = containerRect.top + containerRect.height / 3;
+
+          let bestIndex = -1;
+          let minDistance = Infinity;
+
+          for (let i = 0; i < pageRefs.current.length; i++) {
+            const el = pageRefs.current[i];
+            if (!el) continue;
+            
+            const rect = el.getBoundingClientRect();
+
+            // If the target line is currently inside this page's boundaries
+            if (rect.top <= targetY && rect.bottom >= targetY) {
+               bestIndex = i;
+               break;
+            }
+
+            // Fallback: finding the closest top edge if scrolling fast between large gaps
+            const dist = Math.abs(rect.top - targetY);
+            if (dist < minDistance) {
+              minDistance = dist;
+              bestIndex = i;
+            }
+          }
+
+          if (bestIndex !== -1 && bestIndex !== lastActiveRef.current) {
+            lastActiveRef.current = bestIndex;
+            onActivePageChange(bestIndex);
+          }
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll(); // Check initially on load/mount
+
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [canvasScrollRef, pageRefs, onActivePageChange, documentState?.children?.length]);
 
   return (
     <div

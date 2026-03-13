@@ -216,6 +216,7 @@ function AppInner() {
               pageRefs={editor.pageRefs}
               canvasScrollRef={editor.canvasScrollRef}
               pageMatchMap={editor.search.pageMatchMap}
+              onActivePageChange={editor.setActivePage} 
             />
 
             {mobileRightPanelOpen && (
