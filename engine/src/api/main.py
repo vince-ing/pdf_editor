@@ -141,6 +141,10 @@ class HighlightPayload(BaseModel):
     color:   str   = "#FFFF00"
     opacity: float = 0.4
 
+class RedactPayload(BaseModel):
+    page_id: str
+    rects: List[HighlightRect]
+
 class PointPayload(BaseModel):
     x: float
     y: float
@@ -457,6 +461,29 @@ def run_ocr(payload: OCRPayload, session: EditorSession = Depends(get_session)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"OCR processing failed: {str(e)}")
 
+@app.post("/api/plugins/redact/apply")
+def apply_redaction(payload: RedactPayload, session: EditorSession = Depends(get_session)):
+    page = session.document.get_child(payload.page_id)
+    if not page or page.node_type != "page":
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    annot_service = AnnotationService(session)
+    rect_dicts = [{"x": r.x, "y": r.y, "width": r.width, "height": r.height} for r in payload.rects]
+    
+    # We add redactions to the scene graph as 100% opaque black highlights.
+    # The DocumentService handles the true redaction burn-in during export.
+    added_nodes = annot_service.add_highlights(
+        page_id=payload.page_id,
+        rects=rect_dicts,
+        color="#000000",
+        opacity=1.0
+    )
+
+    return {
+        "status": "success",
+        "message": f"Applied {len(added_nodes)} redaction zones.",
+        "nodes": added_nodes
+    }
 
 # ── Undo / Redo ───────────────────────────────────────────────────────────────
 

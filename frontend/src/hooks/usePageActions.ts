@@ -105,7 +105,7 @@ export function usePageActions({
         if (nodes.length) { setAnnotations(p => [...p, ...nodes]); onAnnotationAdded?.(); }
       } else if (activeTool === 'redact') {
         const res = await engineApi.applyRedaction(pageNode.id, rects, sessionId);
-        const nodes = res?.node ? [res.node] : (res?.nodes ?? []);
+        const nodes = res?.nodes ?? (res?.node ? [res.node] : []);
         if (nodes.length) { setAnnotations(p => [...p, ...nodes]); onAnnotationAdded?.(); }
       }
       clearSelRef.current?.();

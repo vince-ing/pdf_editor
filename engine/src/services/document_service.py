@@ -63,8 +63,9 @@ class DocumentService:
 
     def _apply_annotations(self, out_page: fitz.Page, page_node: PageNode) -> None:
         """Write all annotations from a PageNode onto a fitz page."""
+        has_redactions = False
+        
         for child in page_node.get_annotations():
-
             if isinstance(child, TextNode) and child.bbox:
                 self._render_text_node(out_page, child)
 
@@ -72,10 +73,20 @@ class DocumentService:
                 rect  = fitz.Rect(child.bbox.x, child.bbox.y,
                                   child.bbox.x + child.bbox.width,
                                   child.bbox.y + child.bbox.height)
-                annot = out_page.add_highlight_annot(rect)
-                annot.set_colors(stroke=self._hex_to_rgb(child.color))
-                annot.set_opacity(child.opacity)
-                annot.update()
+                
+                # Check if this HighlightNode is acting as a redaction
+                if child.color == "#000000" and child.opacity == 1.0:
+                    out_page.add_redact_annot(rect, fill=(0.0, 0.0, 0.0))
+                    has_redactions = True
+                else:
+                    annot = out_page.add_highlight_annot(rect)
+                    annot.set_colors(stroke=self._hex_to_rgb(child.color))
+                    annot.set_opacity(child.opacity)
+                    annot.update()
+
+        # Apply redactions to destroy the underlying content
+        if has_redactions:
+            out_page.apply_redactions()
 
     def _render_text_node(self, out_page: fitz.Page, node: TextNode) -> None:
         """

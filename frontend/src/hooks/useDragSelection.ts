@@ -134,17 +134,26 @@ export const useDragSelection = ({
             const dy = Math.abs(ctx.y - startPos.current.y);
             if (dx < 3 && dy < 3) return;
 
-            if (activeTool === 'crop') {
+            // Crop AND Redact should allow freeform rectangle selection if dragging not near text
+            if (activeTool === 'crop' || activeTool === 'redact') {
                 const W = metadata?.width || 612;
                 const H = metadata?.height || 792;
-                liveRectsRef.current = [{
-                    x: Math.max(0, Math.min(startPos.current.x, ctx.x)),
-                    y: Math.max(0, Math.min(startPos.current.y, ctx.y)),
-                    width: Math.min(Math.abs(ctx.x - startPos.current.x), W),
-                    height: Math.min(Math.abs(ctx.y - startPos.current.y), H),
-                }];
-                bumpSel();
-                return;
+                
+                // For redaction, check if we're doing a freeform drag rather than text selection
+                // If we started near text, and we're dragging over text, use text selection logic
+                // Otherwise fallback to freeform box
+                const useFreeform = activeTool === 'crop' || startIdx.current === -1 || pageChars.length === 0;
+
+                if (useFreeform) {
+                    liveRectsRef.current = [{
+                        x: Math.max(0, Math.min(startPos.current.x, ctx.x)),
+                        y: Math.max(0, Math.min(startPos.current.y, ctx.y)),
+                        width: Math.min(Math.abs(ctx.x - startPos.current.x), W),
+                        height: Math.min(Math.abs(ctx.y - startPos.current.y), H),
+                    }];
+                    bumpSel();
+                    return;
+                }
             }
 
             if (startIdx.current !== -1 && pageChars.length > 0) {
@@ -179,7 +188,12 @@ export const useDragSelection = ({
             bumpSel();
 
             if (onActionRef.current) {
-                onActionRef.current(rects, highlightColorRef.current, highlightOpacityRef.current);
+                // Pass black color explicitly if the tool is redact
+                if (activeTool === 'redact') {
+                   onActionRef.current(rects, '#000000', 1.0);
+                } else {
+                   onActionRef.current(rects, highlightColorRef.current, highlightOpacityRef.current);
+                }
             }
         };
 

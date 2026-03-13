@@ -68,6 +68,10 @@
           "color: str = '#FFFF00'",
           "opacity: float = 0.4"
         ],
+        "class RedactPayload": [
+          "page_id: str",
+          "rects: List[HighlightRect]"
+        ],
         "class PointPayload": [
           "x: float",
           "y: float"
@@ -217,6 +221,13 @@
           "name": "run_ocr",
           "params": [
             "payload: OCRPayload",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
+          "name": "apply_redaction",
+          "params": [
+            "payload: RedactPayload",
             "session: EditorSession = Depends(get_session)"
           ]
         },
@@ -396,6 +407,15 @@
           "handler": "run_ocr",
           "params": [
             "payload: OCRPayload",
+            "session: EditorSession = Depends(get_session)"
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/plugins/redact/apply",
+          "handler": "apply_redaction",
+          "params": [
+            "payload: RedactPayload",
             "session: EditorSession = Depends(get_session)"
           ]
         },
