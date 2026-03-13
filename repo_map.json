@@ -1434,19 +1434,19 @@
           "canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>",
           "pageMatchMap?: PageMatchMap",
           "onZoom?: (delta: number) => void",
-          "onActivePageChange?: (pageIndex: number) => void; // Add this line"
+          "onActivePageChange?: (pageIndex: number) => void"
         ],
         "LazyPageProps": [
           "pdfDocReady:   boolean",
           "estimatedHeight: number",
           "forceVisible:  boolean",
-          "outerRef?:     React.Ref<HTMLDivElement>;   // ref on the sentinel \u2014 used for scroll targeting",
+          "outerRef?:     React.Ref<HTMLDivElement>",
           "children:      (visible: boolean) => React.ReactNode"
         ]
       },
       "functions": [
         "LazyPage({ pdfDocReady, estimatedHeight, forceVisible, outerRef, children }: LazyPageProps)",
-        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n  onZoom,\n  onActivePageChange, \n}, ref)"
+        "Canvas({\n  pdfDoc, documentState, activeTool = 'select', scale = 1.5, sessionId,\n  textProps = DEFAULT_TEXT_PROPS, highlightColor, highlightOpacity, onTextPropsChange,\n  onAnnotationAdded, onDocumentChanged, onTextSelected, pageRefs,\n  canvasScrollRef,\n  pageMatchMap = {},\n  onZoom,\n  onActivePageChange,\n}, ref)"
       ]
     },
     "frontend\\src\\components\\canvas\\CopyToast.tsx": {
@@ -2274,7 +2274,7 @@
         ]
       },
       "functions": [
-        "useSessionState({\n  activeTabId,\n  activeSession,\n  patchSession,\n  pageRefs,\n}: UseSessionStateArgs)"
+        "useSessionState({\n  activeTabId,\n  activeSession,\n  patchSession,\n  // pageRefs is no longer used here but kept in args if needed elsewhere\n}: UseSessionStateArgs)"
       ],
       "returns": [
         "documentState",

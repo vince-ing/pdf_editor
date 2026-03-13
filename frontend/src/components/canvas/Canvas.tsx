@@ -10,9 +10,6 @@ import { useTheme } from '../../theme';
 import type { PageMatchMap } from '../../hooks/useSearchState';
 
 export interface CanvasHandle {
-  // Call this instead of pageRefs.current[i]?.scrollIntoView() when jumping
-  // from the thumbnail sidebar. It force-renders the target page first so
-  // scrollIntoView lands on a real element with correct height.
   jumpToPage: (index: number) => void;
 }
 
@@ -26,22 +23,15 @@ export interface CanvasProps {
   canvasScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
   pageMatchMap?: PageMatchMap;
   onZoom?: (delta: number) => void;
-  onActivePageChange?: (pageIndex: number) => void; // Add this line
+  onActivePageChange?: (pageIndex: number) => void;
 }
 
 // ── LazyPage ──────────────────────────────────────────────────────────────────
-// Each page starts hidden (placeholder div with estimated height).
-// It becomes visible when EITHER:
-//   (a) it scrolls within 1 viewport of the scroll container, OR
-//   (b) forceVisible=true is set externally (thumbnail jump)
-//
-// The two-phase triggered/visible split ensures we never render with pdfDoc=null.
-
 interface LazyPageProps {
   pdfDocReady:   boolean;
   estimatedHeight: number;
   forceVisible:  boolean;
-  outerRef?:     React.Ref<HTMLDivElement>;   // ref on the sentinel — used for scroll targeting
+  outerRef?:     React.Ref<HTMLDivElement>;
   children:      (visible: boolean) => React.ReactNode;
 }
 
@@ -50,7 +40,6 @@ function LazyPage({ pdfDocReady, estimatedHeight, forceVisible, outerRef, childr
   const [triggered, setTriggered] = useState(false);
   const [visible,   setVisible]   = useState(false);
 
-  // Phase 1a: intersection observer — fires when page scrolls near viewport
   useEffect(() => {
     if (visible) return;
     const el = sentinelRef.current;
@@ -63,17 +52,14 @@ function LazyPage({ pdfDocReady, estimatedHeight, forceVisible, outerRef, childr
     return () => observer.disconnect();
   }, [visible]);
 
-  // Phase 1b: forceVisible — thumbnail jump bypasses the scroll requirement
   useEffect(() => {
     if (forceVisible) setTriggered(true);
   }, [forceVisible]);
 
-  // Phase 2: only go visible once triggered AND pdfDoc is ready
   useEffect(() => {
     if (triggered && pdfDocReady) setVisible(true);
   }, [triggered, pdfDocReady]);
 
-  // Merge the internal sentinel ref with the external outerRef
   const setRefs = (el: HTMLDivElement | null) => {
     (sentinelRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
     if (typeof outerRef === 'function') outerRef(el);
@@ -95,24 +81,20 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   canvasScrollRef,
   pageMatchMap = {},
   onZoom,
-  onActivePageChange, 
+  onActivePageChange,
 }, ref) {
   const { theme: t } = useTheme();
   const pdfDocReady      = !!pdfDoc;
   const approxPageHeight = 792 * scale;
 
-  // Tracks which pages have been force-triggered by jumpToPage.
-  // Using a Set in state so we can add indices without re-creating all pages.
   const [forcedPages, setForcedPages] = useState<Set<number>>(new Set());
 
-  // Expose jumpToPage to parent (App.tsx / LeftSidebar handler)
   useImperativeHandle(ref, () => ({
     jumpToPage: (index: number) => {
       if (!pdfDocReady) return;
 
       const alreadyRendered = forcedPages.has(index);
 
-      // Force-render the target page if not yet visible
       setForcedPages(prev => {
         if (prev.has(index)) return prev;
         const next = new Set(prev);
@@ -120,9 +102,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         return next;
       });
 
-      // Wait for React to commit + canvas to paint, then scroll instantly.
-      // Unrendered pages need longer (300ms) since the canvas must paint first.
-      // Already-rendered pages can scroll immediately (0ms / next tick).
       const delay = alreadyRendered ? 0 : 300;
 
       setTimeout(() => {
@@ -130,10 +109,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         const container = canvasScrollRef?.current;
         if (!el || !container) return;
 
-        // getBoundingClientRect gives positions relative to the viewport.
-        // Subtracting container's top and adding current scrollTop converts
-        // that to an offset within the scrollable area — reliable regardless
-        // of offsetParent chain (which does not always lead to the container).
         const elRect        = el.getBoundingClientRect();
         const containerRect = container.getBoundingClientRect();
         const scrollTarget  = container.scrollTop + elRect.top - containerRect.top;
@@ -143,15 +118,81 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     },
   }), [pdfDocReady, pageRefs, canvasScrollRef, forcedPages]);
 
-  // Reset forced pages when document changes (new tab / new file)
   useEffect(() => { setForcedPages(new Set()); }, [sessionId]);
 
-  // Reset forced pages when document changes (new tab / new file)
-  useEffect(() => { setForcedPages(new Set()); }, [sessionId]);
+  // ── Per-Session Semantic Scroll Anchoring ───────────────────────────────
+  type ScrollState = { index: number; offset: number };
+  const scrollPositions   = useRef<Record<string, ScrollState>>({});
+  const lastActiveRef     = useRef<number>(-1);
+  const isRestoringScroll = useRef<boolean>(false); 
 
-  // NEW: Scroll tracking to update the active page
-  const lastActiveRef = useRef<number>(-1);
+  // 1. Restore semantic scroll position when switching tabs
+  useEffect(() => {
+    const container = canvasScrollRef?.current;
+    if (!container || !pageRefs?.current) return;
 
+    isRestoringScroll.current = true;
+    const pos = scrollPositions.current[sessionId];
+
+    if (!pos) {
+      container.scrollTop = 0;
+      const timer = setTimeout(() => { isRestoringScroll.current = false; }, 50);
+      return () => clearTimeout(timer);
+    }
+
+    // Force the target page to bypass LazyPage observer so it gets actual height ASAP
+    setForcedPages(prev => {
+      if (prev.has(pos.index)) return prev;
+      const next = new Set(prev);
+      next.add(pos.index);
+      return next;
+    });
+
+    const anchorScroll = () => {
+      const el = pageRefs.current?.[pos.index];
+      if (!el) return;
+      
+      const elRect = el.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      
+      // Calculate how far the top of the page is from the top of the container
+      const currentOffset = elRect.top - containerRect.top;
+      const diff = currentOffset - pos.offset;
+      
+      // If the page has shifted from its saved relative position, adjust the scroll
+      if (Math.abs(diff) > 1) {
+        container.scrollTop += diff;
+      }
+    };
+
+    anchorScroll();
+    
+    // As LazyPages spin up, the DOM shifts. We use ResizeObserver to re-anchor 
+    // the target page firmly in place until things settle.
+    const resizeObserver = new ResizeObserver(() => {
+      anchorScroll();
+    });
+
+    if (container.firstElementChild) {
+      resizeObserver.observe(container.firstElementChild);
+    }
+
+    const timer = setTimeout(() => {
+      resizeObserver.disconnect();
+      // Give passive scroll events an extra tick to clear out before unlocking
+      setTimeout(() => {
+        isRestoringScroll.current = false;
+      }, 50);
+    }, 400);
+
+    return () => {
+      resizeObserver.disconnect();
+      clearTimeout(timer);
+      isRestoringScroll.current = false;
+    };
+  }, [sessionId, canvasScrollRef, pageRefs]);
+
+  // 2. Track scroll continuously to update active page & save scroll position
   useEffect(() => {
     const container = canvasScrollRef?.current;
     if (!container || !pageRefs?.current || !onActivePageChange) return;
@@ -159,10 +200,17 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     let ticking = false;
 
     const handleScroll = () => {
+      // Ignore transient scroll events generated during tab transitions
+      if (isRestoringScroll.current) return;
+
       if (!ticking) {
         window.requestAnimationFrame(() => {
+          if (isRestoringScroll.current) {
+            ticking = false;
+            return;
+          }
+
           const containerRect = container.getBoundingClientRect();
-          // Target line: 1/3rd down the container's height gives a natural reading feel
           const targetY = containerRect.top + containerRect.height / 3;
 
           let bestIndex = -1;
@@ -174,13 +222,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             
             const rect = el.getBoundingClientRect();
 
-            // If the target line is currently inside this page's boundaries
             if (rect.top <= targetY && rect.bottom >= targetY) {
                bestIndex = i;
                break;
             }
 
-            // Fallback: finding the closest top edge if scrolling fast between large gaps
             const dist = Math.abs(rect.top - targetY);
             if (dist < minDistance) {
               minDistance = dist;
@@ -188,9 +234,20 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             }
           }
 
-          if (bestIndex !== -1 && bestIndex !== lastActiveRef.current) {
-            lastActiveRef.current = bestIndex;
-            onActivePageChange(bestIndex);
+          if (bestIndex !== -1) {
+            // Save semantic offset: exactly where the active page is on screen
+            const activeEl = pageRefs.current[bestIndex];
+            if (activeEl) {
+              const activeRect = activeEl.getBoundingClientRect();
+              const offset = activeRect.top - containerRect.top;
+              scrollPositions.current[sessionId] = { index: bestIndex, offset };
+            }
+
+            // Report the new active page to the app if it changed
+            if (bestIndex !== lastActiveRef.current) {
+              lastActiveRef.current = bestIndex;
+              onActivePageChange(bestIndex);
+            }
           }
           ticking = false;
         });
@@ -199,10 +256,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll(); // Check initially on load/mount
+    
+    if (!isRestoringScroll.current) handleScroll();
 
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [canvasScrollRef, pageRefs, onActivePageChange, documentState?.children?.length]);
+  }, [canvasScrollRef, pageRefs, onActivePageChange, sessionId, documentState?.children?.length]);
 
   return (
     <div

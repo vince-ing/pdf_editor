@@ -15,7 +15,7 @@ export function useSessionState({
   activeTabId,
   activeSession,
   patchSession,
-  pageRefs,
+  // pageRefs is no longer used here but kept in args if needed elsewhere
 }: UseSessionStateArgs) {
 
   // Convenient derived values from the active session
@@ -47,34 +47,8 @@ export function useSessionState({
     }
   }, [activeTabId, patchSession]);
 
-  // IntersectionObserver — update activePage as user scrolls.
-  //
-  // We depend on `documentState?.children` (the page list) rather than just
-  // `pdfDoc` so that the observers are rebuilt whenever pages are added,
-  // removed or reordered. Without this, the observer set would reference
-  // stale DOM nodes (or miss new pages) after any page-level mutation.
-  const pageCount = documentState?.children?.length ?? 0;
-
-  useEffect(() => {
-    if (!documentState || !activeTabId) return;
-    const observers: IntersectionObserver[] = [];
-
-    pageRefs.current.forEach((el, i) => {
-      if (!el) return;
-      const obs = new IntersectionObserver(
-        ([entry]) => { if (entry.isIntersecting) patchSession(activeTabId, { activePage: i }); },
-        { threshold: 0.4 },
-      );
-      obs.observe(el);
-      observers.push(obs);
-    });
-
-    return () => observers.forEach(o => o.disconnect());
-
-  // pageCount drives re-observation after page add/remove/reorder.
-  // pdfDoc still triggers re-observation when a new document loads.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfDoc, activeTabId, pageCount, patchSession]);
+  // REMOVED: The IntersectionObserver that used to fight with Canvas.tsx 
+  // over setting the activePage.
 
   return {
     documentState, pdfDoc, activePage, scale,
