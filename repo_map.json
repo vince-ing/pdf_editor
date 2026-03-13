@@ -2130,11 +2130,14 @@
           "zoomOut:           () => void",
           "setSidebarView:    (v: SidebarView) => void",
           "setShowThumbnails: (fn: (v: boolean) => boolean) => void",
-          "openSearch:        () => void"
+          "openSearch:        () => void",
+          "activeTool:        ToolId",
+          "canvasScrollRef:   React.RefObject<HTMLDivElement | null>"
         ]
       },
       "functions": [
-        "useKeyboardShortcuts({\n  handleUndo,\n  handleRedo,\n  handleExportPdf,\n  openFileDialog,\n  zoomIn,\n  zoomOut,\n  setSidebarView,\n  setShowThumbnails,\n  openSearch,\n}: UseKeyboardShortcutsArgs)"
+        "smoothScroll(container: HTMLElement, delta: number)",
+        "useKeyboardShortcuts({\n  handleUndo,\n  handleRedo,\n  handleExportPdf,\n  openFileDialog,\n  zoomIn,\n  zoomOut,\n  setSidebarView,\n  setShowThumbnails,\n  openSearch,\n  activeTool,\n  canvasScrollRef,\n}: UseKeyboardShortcutsArgs)"
       ]
     },
     "frontend\\src\\hooks\\useOcr.ts": {

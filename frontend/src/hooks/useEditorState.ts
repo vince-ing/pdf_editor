@@ -83,6 +83,8 @@ export function useEditorState() {
     setSidebarView,
     setShowThumbnails,
     openSearch:        search.open,
+    activeTool,
+    canvasScrollRef,
   });
 
   // ── Menus ──────────────────────────────────────────────────────────────────
